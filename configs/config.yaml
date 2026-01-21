@@ -1,0 +1,26 @@
+# NBA Score Prediction - Configuration
+
+# Data paths
+data:
+  raw_db: "data/raw/basketball.sqlite"
+  processed: "data/processed"
+  features: "data/features"
+  models: "data/models"
+
+# Feature engineering
+features:
+  rolling_window: 10  # Games for rolling averages
+  min_games_played: 5  # Minimum games for features
+  
+# Model parameters
+model:
+  random_state: 42
+  test_split_date: "2023-10-01"  # Time-based split
+  
+# News scraping (for later phases)
+news:
+  sources:
+    - "nba.com"
+    - "espn.com"
+    - "reddit.com/r/nba"
+  update_frequency: "daily"

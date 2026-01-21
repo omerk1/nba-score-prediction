@@ -1,0 +1,77 @@
+# Data files (large files should not be in git)
+data/raw/*
+data/processed/*
+*.sqlite
+*.db
+*.csv
+*.parquet
+
+# But keep .gitkeep files
+!**/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model files (too large for git)
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+
+# Logs and outputs
+logs/
+*.log
+outputs/predictions/*
+outputs/visualizations/*
+outputs/reports/*
+
+# API keys and secrets
+.env
+secrets.json
+config.local.yaml
+
+# Temporary files
+tmp/
+temp/
+*.tmp
