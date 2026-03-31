@@ -49,10 +49,6 @@ pip install -r requirements.txt
 1. Download the [Kaggle NBA dataset](https://www.kaggle.com/datasets/wyattowalsh/basketball)
 2. Place `basketball.sqlite` in `data/raw/`
 
-### Run Initial Setup
-```bash
-python src/data_processing/01_explore_data.py
-```
 
 ## 📁 Project Structure
 

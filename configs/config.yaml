@@ -1,21 +1,39 @@
 # NBA Score Prediction - Configuration
 
 # Data paths
-data:
+data_paths:
   raw_db: "data/raw/basketball.sqlite"
   processed: "data/processed"
   features: "data/features"
   models: "data/models"
 
+# Datasets loading
+datasets_loading:
+  train_start_date: "2023-10-10"
+  train_end_date: "2023-10-10"
+  test_start_date: "2023-10-10"
+  test_end_date: "2023-10-10"
+
 # Feature engineering
 features:
   rolling_window: 10  # Games for rolling averages
   min_games_played: 5  # Minimum games for features
+  exclude:
+    - "GAME_ID"
+    - "GAME_DATE"
+    - "SEASON"
+    - "HOME_TEAM_ID"
+    - "VISITOR_TEAM_ID"
+    - "PTS_home"
+    - "PTS_away"
+    - "POINT_DIFF"
+    - "TOTAL_POINTS"
+    - "HOME_TEAM_WINS"
+    - "matchup_key"
   
 # Model parameters
 model:
   random_state: 42
-  test_split_date: "2023-10-01"  # Time-based split
   
 # News scraping (for later phases)
 news:
