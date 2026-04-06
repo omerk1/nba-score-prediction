@@ -4,9 +4,6 @@ NBA Score Prediction Model
 
 Multi-output regression model to predict both home and away scores.
 Focus on point differential accuracy while maintaining realistic scores.
-
-Author: NBA Prediction Project
-Date: 2024
 """
 
 import logging

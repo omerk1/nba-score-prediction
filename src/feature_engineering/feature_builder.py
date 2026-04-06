@@ -4,9 +4,6 @@ Feature Engineering for NBA Score Prediction
 
 Creates statistical and matchup-aware features for predicting game scores.
 Focus on capturing team strength and style mismatches.
-
-Author: NBA Prediction Project
-Date: 2024
 """
 
 import logging

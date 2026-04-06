@@ -6,10 +6,7 @@ Predict the score of an upcoming NBA game using the trained model.
 
 Usage:
     python predict_game.py --home "LAL" --away "GSW"
-    python predict_game.py --game-date "2024-03-15"
-
-Author: NBA Prediction Project
-Date: 2024
+    python predict_game.py --game-date "2026-03-15"
 """
 
 import sys

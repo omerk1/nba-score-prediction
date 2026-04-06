@@ -6,9 +6,6 @@ End-to-end pipeline for training the NBA score prediction model.
 
 Usage:
     python train_model.py
-
-Author: NBA Prediction Project
-Date: 2024
 """
 
 import sys
