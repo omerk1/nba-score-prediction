@@ -16,7 +16,7 @@ Predict exact scores of NBA games, prioritizing accurate point differential over
 
 1. **Statistical Features**: Team performance, rolling averages, rest days, matchups
 2. **News Features**: Injury reports, momentum, team chemistry (LLM-extracted)
-3. **Model**: XGBoost/LightGBM for point differential → Convert to scores
+3. **Model**: CatBoost/LightGBM for point differential → Convert to scores
 
 ## 📊 Data Sources
 
