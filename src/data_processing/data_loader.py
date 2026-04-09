@@ -15,6 +15,7 @@ from typing import Optional
 
 import sqlite3
 import pandas as pd
+from src.utils.config_loader import load_config, get_config_value
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -227,11 +228,14 @@ def load_training_data(
 
 # Example usage
 if __name__ == "__main__":
-    # Example: Load train/test split
-    print("\n" + "=" * 70)
-    print("LOADING TRAIN/TEST SPLIT")
-    print("=" * 70)
-    train_df, test_df = load_training_data()
+    config = load_config()
+    
+    train_df, test_df = load_training_data(
+        db_path=config.data_paths.raw_db,
+        train_start_date=config.datasets_loading.train_start_date,
+        train_end_date=config.datasets_loading.train_end_date,
+        test_start_date=config.datasets_loading.test_start_date
+    )
     print(f"\nTrain set: {len(train_df):,} games")
     print(f"Test set:  {len(test_df):,} games")
 

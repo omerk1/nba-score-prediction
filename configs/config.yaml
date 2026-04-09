@@ -20,6 +20,9 @@ datasets_loading:
 features:
   rolling_window: 10  # Games for rolling averages
   min_games_played: 5  # Minimum games for features
+  targets:
+    - "PTS_home"
+    - "PTS_away"
   exclude:
     - "GAME_ID"
     - "GAME_DATE"

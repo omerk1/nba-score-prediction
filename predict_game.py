@@ -23,6 +23,7 @@ sys.path.append(str(Path(__file__).parent))
 from src.data_processing.data_loader import NBADataLoader
 from src.feature_engineering.feature_builder import FeatureBuilder
 from src.models.score_predictor import ScorePredictor
+from src.utils.config_loader import load_config, get_config_value
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
@@ -51,14 +52,18 @@ def predict_game(home_team_id: int, away_team_id: int, game_date: str = None):
     logger.info("NBA SCORE PREDICTION")
     logger.info("=" * 80)
 
+    # Load configuration
+    config = load_config()
+    model_path = Path(config.data_paths.models) / "score_predictor.pkl"
+
     # Load model
-    logger.info("\nLoading model...")
-    predictor = load_model()
+    logger.info(f"\nLoading model from {model_path}...")
+    predictor = ScorePredictor.load(str(model_path))
     logger.info("✓ Model loaded")
 
     # Load recent game data to compute features
     logger.info("\nLoading recent game data...")
-    loader = NBADataLoader()
+    loader = NBADataLoader(db_path=config.data_paths.raw_db)
 
     try:
         # Get last 30 days of games for computing rolling features
@@ -69,7 +74,7 @@ def predict_game(home_team_id: int, away_team_id: int, game_date: str = None):
         logger.info(f"✓ Loaded {len(recent_games)} recent games")
 
         # Build features for all recent games
-        feature_builder = FeatureBuilder(rolling_window=10)
+        feature_builder = FeatureBuilder(rolling_window=config.features.rolling_window)
         features_df = feature_builder.create_all_features(recent_games)
 
         # Find the most recent game for each team to get current features

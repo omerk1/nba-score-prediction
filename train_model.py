@@ -20,6 +20,7 @@ sys.path.append(str(Path(__file__).parent))
 from src.data_processing.data_loader import NBADataLoader, load_training_data
 from src.feature_engineering.feature_builder import FeatureBuilder
 from src.models.score_predictor import ScorePredictor
+from src.utils.config_loader import load_config, get_config_value
 
 # Setup logging
 logging.basicConfig(
@@ -37,20 +38,16 @@ def main():
     print("="*80)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # =========================================================================
-    # STEP 1: LOAD DATA
-    # =========================================================================
-    print("\n" + "="*80)
-    print("STEP 1: LOADING DATA")
-    print("="*80)
-
+    # Load configuration
+    config = load_config()
+    
     try:
         train_df, test_df = load_training_data(
-            db_path="",
-            train_start_date="2018-10-01",
-            train_end_date="2023-06-30",
-            test_start_date="2023-10-01",
-            test_end_date=None
+            db_path=config.data_paths.raw_db,
+            train_start_date=config.datasets_loading.train_start_date,
+            train_end_date=config.datasets_loading.train_end_date,
+            test_start_date=config.datasets_loading.test_start_date,
+            test_end_date=config.datasets_loading.test_end_date
         )
     except FileNotFoundError as e:
         logger.error(f"\n❌ {str(e)}")
@@ -64,7 +61,7 @@ def main():
     print("STEP 2: FEATURE ENGINEERING")
     print("="*80)
 
-    feature_builder = FeatureBuilder(rolling_window=10)
+    feature_builder = FeatureBuilder(rolling_window=config.features.rolling_window)
 
     print("\nBuilding training features...")
     train_features = feature_builder.create_all_features(train_df)
@@ -88,14 +85,8 @@ def main():
     print("="*80)
 
     # Define targets and features
-    target_cols = ['PTS_home', 'PTS_away']
-    exclude_cols = [
-        'GAME_ID', 'GAME_DATE', 'SEASON', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID',
-        'PTS_home', 'PTS_away', 'POINT_DIFF', 'TOTAL_POINTS', 'HOME_TEAM_WINS',
-        'matchup_key', 'FG_PCT_home', 'FT_PCT_home', 'FG3_PCT_home',
-        'AST_home', 'REB_home', 'FG_PCT_away', 'FT_PCT_away',
-        'FG3_PCT_away', 'AST_away', 'REB_away'
-    ]
+    target_cols = config.features.targets
+    exclude_cols = config.features.exclude
 
     feature_cols = [col for col in train_features.columns if col not in exclude_cols]
 
@@ -132,7 +123,7 @@ def main():
         learning_rate=0.1,
         subsample=0.8,
         colsample_bylevel=0.8,
-        random_state=42,
+        random_state=config.model.random_state,
         verbose=False
     )
 
@@ -201,7 +192,9 @@ def main():
         'train_metrics': train_metrics,
         'test_metrics': test_metrics,
         'model_type': 'catboost',
-        'rolling_window': 10,
+        'rolling_window': config.features.rolling_window,
+        'random_state': config.model.random_state,
+        'config': vars(config)  # Convert to dict for JSON
     }
 
     import json
