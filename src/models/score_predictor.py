@@ -5,19 +5,17 @@ NBA Score Prediction Model
 Multi-output regression model to predict both home and away scores.
 Focus on point differential accuracy while maintaining realistic scores.
 """
-
 import logging
-from typing import Optional
 import joblib
+from typing import Optional
 
 import pandas as pd
 import numpy as np
 
-import xgboost as xgb
-import lightgbm as lgb
-
 from sklearn.multioutput import MultiOutputRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import lightgbm as lgb
+from catboost import CatBoostRegressor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,16 +30,16 @@ class ScorePredictor:
     """
 
     def __init__(
-            self,
-            model_type: str = 'xgboost',
-            random_state: int = 42,
-            **model_params
+        self,
+        model_type: str = 'catboost',
+        random_state: int = 42,
+        **model_params
     ):
         """
         Initialize the score predictor.
 
         Args:
-            model_type: 'xgboost' or 'lightgbm'
+            model_type: 'xgboost', 'lightgbm', or 'catboost'
             random_state: Random seed for reproducibility
             **model_params: Additional parameters for the model
         """
@@ -55,15 +53,16 @@ class ScorePredictor:
 
     def _create_model(self):
         """Create the base model"""
-        if self.model_type == 'xgboost':
-            base_model = xgb.XGBRegressor(
+        if self.model_type == 'catboost':
+            base_model = CatBoostRegressor(
                 random_state=self.random_state,
-                n_estimators=self.model_params.get('n_estimators', 200),
-                max_depth=self.model_params.get('max_depth', 6),
+                iterations=self.model_params.get('iterations', 200),
+                depth=self.model_params.get('depth', 6),
                 learning_rate=self.model_params.get('learning_rate', 0.1),
                 subsample=self.model_params.get('subsample', 0.8),
-                colsample_bytree=self.model_params.get('colsample_bytree', 0.8),
-                objective='reg:squarederror'
+                colsample_bylevel=self.model_params.get('colsample_bylevel', 0.8),
+                verbose=self.model_params.get('verbose', False),
+                loss_function='RMSE'
             )
         elif self.model_type == 'lightgbm':
             base_model = lgb.LGBMRegressor(
@@ -75,17 +74,17 @@ class ScorePredictor:
                 colsample_bytree=self.model_params.get('colsample_bytree', 0.8),
             )
         else:
-            raise ValueError(f"Unknown model_type: {self.model_type}")
+            raise ValueError(f"Unknown model_type: {self.model_type}. Use 'xgboost', 'lightgbm', or 'catboost'")
 
         # Wrap in MultiOutputRegressor for simultaneous prediction
         return MultiOutputRegressor(base_model)
 
     def train(
-            self,
-            X_train: pd.DataFrame,
-            y_train: pd.DataFrame,
-            X_val: Optional[pd.DataFrame] = None,
-            y_val: Optional[pd.DataFrame] = None
+        self,
+        X_train: pd.DataFrame,
+        y_train: pd.DataFrame,
+        X_val: Optional[pd.DataFrame] = None,
+        y_val: Optional[pd.DataFrame] = None
     ):
         """
         Train the model.
@@ -96,9 +95,9 @@ class ScorePredictor:
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
         """
-        logger.info("\n" + "=" * 70)
+        logger.info("\n" + "="*70)
         logger.info("TRAINING MODEL")
-        logger.info("=" * 70)
+        logger.info("="*70)
 
         # Store feature names
         self.feature_names = X_train.columns.tolist()
@@ -140,10 +139,10 @@ class ScorePredictor:
         return self.model.predict(X)
 
     def evaluate(
-            self,
-            X: pd.DataFrame,
-            y_true: pd.DataFrame,
-            dataset_name: str = "Dataset"
+        self,
+        X: pd.DataFrame,
+        y_true: pd.DataFrame,
+        dataset_name: str = "Dataset"
     ) -> dict[str, float]:
         """
         Evaluate model with focus on point differential accuracy.
@@ -200,9 +199,9 @@ class ScorePredictor:
         }
 
         # Log results
-        logger.info(f"\n{'=' * 70}")
+        logger.info(f"\n{'='*70}")
         logger.info(f"{dataset_name.upper()} EVALUATION")
-        logger.info('=' * 70)
+        logger.info('='*70)
         logger.info(f"\n🎯 POINT DIFFERENTIAL (Primary Metric):")
         logger.info(f"  MAE:             {metrics['diff_mae']:.2f} points")
         logger.info(f"  RMSE:            {metrics['diff_rmse']:.2f} points")
@@ -318,18 +317,18 @@ if __name__ == "__main__":
 
     # Train model
     predictor = ScorePredictor(
-        model_type='xgboost',
-        n_estimators=200,
-        max_depth=6,
+        model_type='catboost',
+        iterations=200,
+        depth=6,
         learning_rate=0.1
     )
 
     train_metrics, test_metrics = predictor.train(X_train, y_train, X_test, y_test)
 
     # Show feature importance
-    print("\n" + "=" * 70)
+    print("\n" + "="*70)
     print("TOP 20 MOST IMPORTANT FEATURES")
-    print("=" * 70)
+    print("="*70)
     importance_df = predictor.get_feature_importance(top_n=20)
     print(importance_df.to_string(index=False))
 
@@ -338,6 +337,6 @@ if __name__ == "__main__":
     models_dir.mkdir(exist_ok=True, parents=True)
     predictor.save(models_dir / "score_predictor.pkl")
 
-    print("\n" + "=" * 70)
+    print("\n" + "="*70)
     print("✓ MODEL TRAINING COMPLETE")
-    print("=" * 70)
+    print("="*70)

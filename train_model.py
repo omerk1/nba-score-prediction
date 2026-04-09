@@ -32,20 +32,21 @@ logger = logging.getLogger(__name__)
 def main():
     """Main training pipeline"""
 
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("NBA SCORE PREDICTION - TRAINING PIPELINE")
-    print("=" * 80)
+    print("="*80)
     print(f"Started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     # =========================================================================
     # STEP 1: LOAD DATA
     # =========================================================================
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("STEP 1: LOADING DATA")
-    print("=" * 80)
+    print("="*80)
 
     try:
         train_df, test_df = load_training_data(
+            db_path="",
             train_start_date="2018-10-01",
             train_end_date="2023-06-30",
             test_start_date="2023-10-01",
@@ -59,9 +60,9 @@ def main():
     # =========================================================================
     # STEP 2: FEATURE ENGINEERING
     # =========================================================================
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("STEP 2: FEATURE ENGINEERING")
-    print("=" * 80)
+    print("="*80)
 
     feature_builder = FeatureBuilder(rolling_window=10)
 
@@ -82,9 +83,9 @@ def main():
     # =========================================================================
     # STEP 3: PREPARE TRAINING DATA
     # =========================================================================
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("STEP 3: PREPARING TRAINING DATA")
-    print("=" * 80)
+    print("="*80)
 
     # Define targets and features
     target_cols = ['PTS_home', 'PTS_away']
@@ -119,19 +120,20 @@ def main():
     # =========================================================================
     # STEP 4: TRAIN MODEL
     # =========================================================================
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("STEP 4: TRAINING MODEL")
-    print("=" * 80)
+    print("="*80)
 
-    # Train XGBoost model
+    # Train CatBoost model
     predictor = ScorePredictor(
-        model_type='xgboost',
-        n_estimators=200,
-        max_depth=6,
+        model_type='catboost',
+        iterations=200,
+        depth=6,
         learning_rate=0.1,
         subsample=0.8,
-        colsample_bytree=0.8,
-        random_state=42
+        colsample_bylevel=0.8,
+        random_state=42,
+        verbose=False
     )
 
     train_metrics, test_metrics = predictor.train(
@@ -142,9 +144,9 @@ def main():
     # =========================================================================
     # STEP 5: ANALYZE RESULTS
     # =========================================================================
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("STEP 5: ANALYZING RESULTS")
-    print("=" * 80)
+    print("="*80)
 
     # Feature importance
     print("\n📊 TOP 20 MOST IMPORTANT FEATURES:")
@@ -158,9 +160,9 @@ def main():
     importance_df.to_csv(reports_dir / "feature_importance.csv", index=False)
 
     # Example predictions
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("EXAMPLE PREDICTIONS (First 10 test games)")
-    print("=" * 80)
+    print("="*80)
 
     predictions = predictor.predict(X_test.head(10))
     examples_df = pd.DataFrame({
@@ -180,9 +182,9 @@ def main():
     # =========================================================================
     # STEP 6: SAVE MODEL
     # =========================================================================
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("STEP 6: SAVING MODEL")
-    print("=" * 80)
+    print("="*80)
 
     models_dir = Path("data/models")
     models_dir.mkdir(exist_ok=True, parents=True)
@@ -198,7 +200,7 @@ def main():
         'features': len(feature_cols),
         'train_metrics': train_metrics,
         'test_metrics': test_metrics,
-        'model_type': 'xgboost',
+        'model_type': 'catboost',
         'rolling_window': 10,
     }
 
@@ -217,9 +219,9 @@ def main():
     # =========================================================================
     # FINAL SUMMARY
     # =========================================================================
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print("TRAINING COMPLETE - FINAL SUMMARY")
-    print("=" * 80)
+    print("="*80)
 
     print(f"\n🎯 TEST SET PERFORMANCE:")
     print(f"  Point Differential MAE:  {test_metrics['diff_mae']:.2f} points")
@@ -238,12 +240,11 @@ def main():
     print(f"\n✅ SUCCESS! Model ready for predictions.")
     print(f"   Use: python predict_game.py --home TEAM1 --away TEAM2")
 
-    print("\n" + "=" * 80)
+    print("\n" + "="*80)
     print(f"Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print("=" * 80 + "\n")
+    print("="*80 + "\n")
 
 
 if __name__ == "__main__":
     import numpy as np  # Needed for metadata serialization
-
     main()
