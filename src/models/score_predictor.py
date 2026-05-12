@@ -95,23 +95,12 @@ class ScorePredictor:
             X_val: Validation features (optional)
             y_val: Validation targets (optional)
         """
-        logger.info("\n" + "="*70)
-        logger.info("TRAINING MODEL")
-        logger.info("="*70)
-
-        # Store feature names
         self.feature_names = X_train.columns.tolist()
-
-        # Create and train model
         self.model = self._create_model()
 
-        logger.info(f"Training {self.model_type} on {len(X_train):,} games...")
-        logger.info(f"Features: {len(self.feature_names)}")
-        logger.info(f"Targets: home_score, away_score")
-
+        logger.info(f"Training {self.model_type} on {len(X_train):,} games with {len(self.feature_names)} features...")
         self.model.fit(X_train, y_train)
-
-        logger.info("✓ Training complete!")
+        logger.info("Training complete")
 
         # Evaluate on training set
         train_metrics = self.evaluate(X_train, y_train, dataset_name="Training")
@@ -198,30 +187,12 @@ class ScorePredictor:
             'diff_correlation': np.corrcoef(diff_true, diff_pred)[0, 1],
         }
 
-        # Log results
-        logger.info(f"\n{'='*70}")
-        logger.info(f"{dataset_name.upper()} EVALUATION")
-        logger.info('='*70)
-        logger.info(f"\n🎯 POINT DIFFERENTIAL (Primary Metric):")
-        logger.info(f"  MAE:             {metrics['diff_mae']:.2f} points")
-        logger.info(f"  RMSE:            {metrics['diff_rmse']:.2f} points")
-        logger.info(f"  Within ±3:       {metrics['diff_within_3']:.1%}")
-        logger.info(f"  Within ±5:       {metrics['diff_within_5']:.1%}")
-        logger.info(f"  Within ±10:      {metrics['diff_within_10']:.1%}")
-        logger.info(f"  Correlation:     {metrics['diff_correlation']:.3f}")
-
-        logger.info(f"\n📊 INDIVIDUAL SCORES:")
-        logger.info(f"  Home MAE:        {metrics['home_mae']:.2f} points")
-        logger.info(f"  Away MAE:        {metrics['away_mae']:.2f} points")
-        logger.info(f"  Home RMSE:       {metrics['home_rmse']:.2f} points")
-        logger.info(f"  Away RMSE:       {metrics['away_rmse']:.2f} points")
-
-        logger.info(f"\n📈 TOTAL POINTS:")
-        logger.info(f"  MAE:             {metrics['total_mae']:.2f} points")
-        logger.info(f"  RMSE:            {metrics['total_rmse']:.2f} points")
-
-        logger.info(f"\n🏆 WIN/LOSS PREDICTION:")
-        logger.info(f"  Accuracy:        {metrics['win_accuracy']:.1%}")
+        logger.info(
+            f"{dataset_name} — diff_mae: {metrics['diff_mae']:.2f} | "
+            f"within±5: {metrics['diff_within_5']:.1%} | "
+            f"win_acc: {metrics['win_accuracy']:.1%} | "
+            f"home_mae: {metrics['home_mae']:.2f} | away_mae: {metrics['away_mae']:.2f}"
+        )
 
         return metrics
 
@@ -299,7 +270,7 @@ if __name__ == "__main__":
     # Prepare features and targets
     target_cols = ['PTS_home', 'PTS_away']
     exclude_cols = [
-        'GAME_ID', 'GAME_DATE', 'SEASON', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID',
+        'GAME_ID', 'GAME_DATE', 'SEASON_ID', 'HOME_TEAM_ID', 'AWAY_TEAM_ID',
         'PTS_home', 'PTS_away', 'POINT_DIFF', 'TOTAL_POINTS', 'HOME_TEAM_WINS',
         'matchup_key'
     ]
