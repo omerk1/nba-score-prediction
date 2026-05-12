@@ -1,8 +1,8 @@
 import yaml
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict
 
 
 # --- Schema Definitions ---
@@ -26,7 +26,10 @@ class DatasetsLoadingConfig(BaseModel):
 class FeaturesConfig(BaseModel):
     rolling_window: int
     min_games_played: int
-    exclude: list[str] = Field(default_factory=list)
+    h2h_margin_window: int = 3
+    h2h_win_rate_window: int = 5
+    targets: list[str]
+    exclude: list[str]
 
 
 class ModelConfig(BaseModel):
@@ -61,7 +64,7 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
     """
     if config_path is None:
         # PROJECT_ROOT/configs/config.yaml
-        config_path = Path(__file__).resolve().parents[3] / "configs" / "config.yaml"
+        config_path = Path(__file__).resolve().parents[2] / "configs" / "config.yaml"
     else:
         config_path = Path(config_path)
 
