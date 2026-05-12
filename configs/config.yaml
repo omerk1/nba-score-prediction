@@ -18,17 +18,19 @@ datasets_loading:
 
 # Feature engineering
 features:
-  rolling_window: 10  # Games for rolling averages
-  min_games_played: 5  # Minimum games for features
+  rolling_window: 10      # Games for rolling averages
+  min_games_played: 5     # Minimum games for features
+  h2h_margin_window: 3    # Meetings for H2H margin average
+  h2h_win_rate_window: 5  # Meetings for H2H win rate
   targets:
     - "PTS_home"
     - "PTS_away"
   exclude:
     - "GAME_ID"
     - "GAME_DATE"
-    - "SEASON"
+    - "SEASON_ID"
     - "HOME_TEAM_ID"
-    - "VISITOR_TEAM_ID"
+    - "AWAY_TEAM_ID"
     - "PTS_home"
     - "PTS_away"
     - "POINT_DIFF"
