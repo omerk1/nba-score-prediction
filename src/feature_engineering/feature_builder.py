@@ -78,8 +78,8 @@ class FeatureBuilder:
         window = self.rolling_window
 
         for team_col, pts_col, prefix in [
-            ('HOME_TEAM_ID', 'PTS_home', 'home'),
-            ('AWAY_TEAM_ID', 'PTS_away', 'away')
+            ('HOME_TEAM_ID', 'PTS_home', 'home_team'),
+            ('AWAY_TEAM_ID', 'PTS_away', 'away_team')
         ]:
             # Rolling average points scored
             df[f'{prefix}_pts_avg_L{window}'] = df.groupby(team_col)[pts_col].transform(
