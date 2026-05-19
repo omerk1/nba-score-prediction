@@ -9,12 +9,14 @@ data_paths:
 
 # Datasets loading
 datasets_loading:
-  train_start_date: "2021-10-18"
-  train_end_date: "2024-10-21"
-  validation_start_date: "2024-10-22"
-  validation_end_date: "2025-10-20"
-  test_start_date: "2025-10-21"
-  test_end_date: "2026-10-10"
+  season_types:
+    - "Regular Season"
+  train_start_date: "2016-10-25"
+  train_end_date: "2022-04-10"
+  validation_start_date: "2022-10-18"
+  validation_end_date: "2023-01-15"
+  test_start_date: "2023-01-16"
+  test_end_date: "2023-04-09"
 
 # Feature engineering
 features:
@@ -29,6 +31,7 @@ features:
     - "GAME_ID"
     - "GAME_DATE"
     - "SEASON_ID"
+    - "SEASON_TYPE"
     - "HOME_TEAM_ID"
     - "AWAY_TEAM_ID"
     - "PTS_home"
