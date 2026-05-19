@@ -48,7 +48,7 @@ def main():
             val_end_date=config.datasets_loading.validation_end_date,
             test_start_date=config.datasets_loading.test_start_date,
             test_end_date=config.datasets_loading.test_end_date,
-            season_types=config.datasets_loading.season_types,
+            allowed_season_types=config.datasets_loading.allowed_season_types,
         )
     except FileNotFoundError as e:
         logger.error(str(e))

@@ -80,17 +80,17 @@ class NBADataLoader:
             self,
             start_date: Optional[str] = None,
             end_date: Optional[str] = None,
-            season_types: Optional[list[str]] = None,
+            allowed_season_types: Optional[list[str]] = None,
     ) -> pd.DataFrame:
         """Load games filtered by date range and/or season type."""
         self.connect()
 
         conditions = ["WHERE 1=1"]
         params: list = []
-        if season_types:
-            placeholders = ",".join("?" * len(season_types))
+        if allowed_season_types:
+            placeholders = ",".join("?" * len(allowed_season_types))
             conditions.append(f"AND season_type IN ({placeholders})")
-            params.extend(season_types)
+            params.extend(allowed_season_types)
         if start_date:
             conditions.append("AND game_date >= ?")
             params.append(start_date)
@@ -108,16 +108,16 @@ class NBADataLoader:
             self,
             team_id: int,
             n_games: int,
-            season_types: Optional[list[str]] = None,
+            allowed_season_types: Optional[list[str]] = None,
     ) -> pd.DataFrame:
         """Load the last n_games for a team (regardless of home/away role)."""
         self.connect()
         conditions = ["WHERE (team_id_home = ? OR team_id_away = ?)"]
         params: list = [team_id, team_id]
-        if season_types:
-            placeholders = ",".join("?" * len(season_types))
+        if allowed_season_types:
+            placeholders = ",".join("?" * len(allowed_season_types))
             conditions.append(f"AND season_type IN ({placeholders})")
-            params.extend(season_types)
+            params.extend(allowed_season_types)
         query = (
             self._GAME_SELECT
             + " ".join(conditions)
@@ -174,14 +174,14 @@ def load_training_data(
         val_end_date: str,
         test_start_date: str,
         test_end_date: Optional[str] = None,
-        season_types: Optional[list[str]] = None,
+        allowed_season_types: Optional[list[str]] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Load train, validation, and test splits using time-based boundaries."""
     loader = NBADataLoader(db_path=db_path)
     try:
-        train_df = loader.load_games(start_date=train_start_date, end_date=train_end_date, season_types=season_types)
-        val_df = loader.load_games(start_date=val_start_date, end_date=val_end_date, season_types=season_types)
-        test_df = loader.load_games(start_date=test_start_date, end_date=test_end_date, season_types=season_types)
+        train_df = loader.load_games(start_date=train_start_date, end_date=train_end_date, allowed_season_types=allowed_season_types)
+        val_df = loader.load_games(start_date=val_start_date, end_date=val_end_date, allowed_season_types=allowed_season_types)
+        test_df = loader.load_games(start_date=test_start_date, end_date=test_end_date, allowed_season_types=allowed_season_types)
         return train_df, val_df, test_df
     finally:
         loader.close()

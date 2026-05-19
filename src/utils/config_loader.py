@@ -21,6 +21,7 @@ class DatasetsLoadingConfig(BaseModel):
     validation_end_date: str
     test_start_date: str
     test_end_date: Optional[str] = None
+    allowed_season_types: Optional[list[str]] = None
 
 
 class FeaturesConfig(BaseModel):
