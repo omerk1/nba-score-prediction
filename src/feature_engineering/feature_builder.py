@@ -119,8 +119,8 @@ class FeatureBuilder:
         Captures fatigue and travel effects.
         """
         for team_col, prefix in [
-            ('HOME_TEAM_ID', 'home'),
-            ('AWAY_TEAM_ID', 'away')
+            ('HOME_TEAM_ID', 'home_team'),
+            ('AWAY_TEAM_ID', 'away_team')
         ]:
             # Days of rest since last game
             df[f'{prefix}_rest_days'] = df.groupby(team_col)['GAME_DATE'].diff().dt.days.fillna(3)
@@ -145,8 +145,8 @@ class FeatureBuilder:
         window = self.rolling_window
 
         for team_col, prefix in [
-            ('HOME_TEAM_ID', 'home'),
-            ('AWAY_TEAM_ID', 'away')
+            ('HOME_TEAM_ID', 'home_team'),
+            ('AWAY_TEAM_ID', 'away_team')
         ]:
             grouped = df.groupby(team_col)
 
