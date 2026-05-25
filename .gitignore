@@ -53,6 +53,7 @@ ENV/
 Thumbs.db
 
 # Model files (too large for git)
+catboost_info/
 *.pkl
 *.joblib
 *.h5
