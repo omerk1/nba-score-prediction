@@ -2,14 +2,15 @@
 
 # Data paths
 data_paths:
-  raw_db: "data/raw/basketball.sqlite"
+  raw_db: "data/raw/nba_api.sqlite"
   processed: "data/processed"
   features: "data/features"
   models: "data/models"
 
 # Datasets loading
 datasets_loading:
-  train_start_date: "2016-10-25"
+  data_start_date: "2016-10-01"    # Earliest data loaded for rolling-feature context
+  train_start_date: "2018-10-16"   # First game actually used as a training sample
   train_end_date: "2022-04-10"
   validation_start_date: "2022-10-18"
   validation_end_date: "2023-01-15"

@@ -15,6 +15,7 @@ class DataPathsConfig(BaseModel):
 
 
 class DatasetsLoadingConfig(BaseModel):
+    data_start_date: str
     train_start_date: str
     train_end_date: str
     validation_start_date: str
