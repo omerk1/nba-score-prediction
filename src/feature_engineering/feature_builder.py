@@ -328,13 +328,7 @@ if __name__ == "__main__":
 
     fb = FeatureBuilder(rolling_window=cfg.features.rolling_window)
 
-    # Build features on the full context window (from data_start_date), then trim to
-    # train_start_date so the model only trains on intended samples.
     train_features = fb.create_all_features(train_df)
-    train_features = train_features[
-        train_features['GAME_DATE'] >= pd.Timestamp(cfg.datasets_loading.train_start_date)
-    ].reset_index(drop=True)
-
     test_features = fb.create_all_features(test_df)
 
     cols = fb.get_feature_names(train_features)
