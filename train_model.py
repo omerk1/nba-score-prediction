@@ -49,6 +49,7 @@ def main():
             test_start_date=config.datasets_loading.test_start_date,
             test_end_date=config.datasets_loading.test_end_date,
             allowed_season_types=config.datasets_loading.allowed_season_types,
+            data_start_date=config.datasets_loading.data_start_date,
         )
     except FileNotFoundError as e:
         logger.error(str(e))
@@ -60,6 +61,9 @@ def main():
         h2h_win_rate_window=config.features.h2h_win_rate_window,
     )
     train_features = feature_builder.create_all_features(train_df)
+    train_features = train_features[
+        train_features['GAME_DATE'] >= pd.Timestamp(config.datasets_loading.train_start_date)
+    ].reset_index(drop=True)
     val_features = feature_builder.create_all_features(val_df)
     test_features = feature_builder.create_all_features(test_df)
 
