@@ -55,8 +55,8 @@ class NBADataLoader:
         self.conn = None
         if not self.db_path.exists():
             raise FileNotFoundError(
-                f"Database not found at {self.db_path}\n"
-                f"Please download from: https://www.kaggle.com/datasets/wyattowalsh/basketball"
+                f"Database not found at {self.db_path}. "
+                f"Run: python -m src.data_processing.fetch_data"
             )
 
     def connect(self):
@@ -175,11 +175,19 @@ def load_training_data(
         test_start_date: str,
         test_end_date: Optional[str] = None,
         allowed_season_types: Optional[list[str]] = None,
+        data_start_date: Optional[str] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load train, validation, and test splits using time-based boundaries."""
+    """
+    Load train, validation, and test splits using time-based boundaries.
+
+    data_start_date: if provided, the train DataFrame starts from this earlier date so
+    that rolling features computed on it have proper historical context. The caller is
+    responsible for filtering to train_start_date after feature engineering.
+    """
     loader = NBADataLoader(db_path=db_path)
     try:
-        train_df = loader.load_games(start_date=train_start_date, end_date=train_end_date, allowed_season_types=allowed_season_types)
+        context_start = data_start_date or train_start_date
+        train_df = loader.load_games(start_date=context_start, end_date=train_end_date, allowed_season_types=allowed_season_types)
         val_df = loader.load_games(start_date=val_start_date, end_date=val_end_date, allowed_season_types=allowed_season_types)
         test_df = loader.load_games(start_date=test_start_date, end_date=test_end_date, allowed_season_types=allowed_season_types)
         return train_df, val_df, test_df
@@ -198,6 +206,7 @@ if __name__ == "__main__":
         val_end_date=config.datasets_loading.validation_end_date,
         test_start_date=config.datasets_loading.test_start_date,
         test_end_date=config.datasets_loading.test_end_date,
+        data_start_date=config.datasets_loading.data_start_date,
     )
     print(f"Train: {len(train_df):,} | Val: {len(val_df):,} | Test: {len(test_df):,} games")
     print(train_df[['GAME_DATE', 'HOME_TEAM_ID', 'AWAY_TEAM_ID', 'PTS_home', 'PTS_away', 'POINT_DIFF']].head())

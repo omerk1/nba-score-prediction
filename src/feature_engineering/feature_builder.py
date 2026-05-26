@@ -323,9 +323,11 @@ if __name__ == "__main__":
         val_end_date=cfg.datasets_loading.validation_end_date,
         test_start_date=cfg.datasets_loading.test_start_date,
         test_end_date=cfg.datasets_loading.test_end_date,
+        data_start_date=cfg.datasets_loading.data_start_date,
     )
 
     fb = FeatureBuilder(rolling_window=cfg.features.rolling_window)
+
     train_features = fb.create_all_features(train_df)
     test_features = fb.create_all_features(test_df)
 
