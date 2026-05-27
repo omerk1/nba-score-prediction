@@ -14,6 +14,7 @@ import numpy as np
 
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from scipy.stats import norm
 import lightgbm as lgb
 from catboost import CatBoostRegressor
 
@@ -183,15 +184,24 @@ class ScorePredictor:
             # Win/Loss Prediction
             'win_accuracy': np.mean((diff_true > 0) == (diff_pred > 0)),
 
+            # Brier score: calibration of win probability for moneyline markets.
+            # Win prob derived via normal CDF: P(home wins) = Φ(pred_diff / residual_std).
+            # Residual std captures model uncertainty; lower Brier = better calibration.
+            # Baseline (always predict 50%) = 0.25; good models reach ~0.22-0.23.
+            'brier_score': float(np.mean(
+                (norm.cdf(diff_pred / np.std(diff_true - diff_pred)) - (diff_true > 0).astype(float)) ** 2
+            )),
+
             # Correlation
             'diff_correlation': np.corrcoef(diff_true, diff_pred)[0, 1],
         }
 
         logger.info(
             f"{dataset_name} — diff_mae: {metrics['diff_mae']:.2f} | "
+            f"total_mae: {metrics['total_mae']:.2f} | "
             f"within±5: {metrics['diff_within_5']:.1%} | "
             f"win_acc: {metrics['win_accuracy']:.1%} | "
-            f"home_mae: {metrics['home_mae']:.2f} | away_mae: {metrics['away_mae']:.2f}"
+            f"brier: {metrics['brier_score']:.4f}"
         )
 
         return metrics
