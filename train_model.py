@@ -38,6 +38,32 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _naive_baseline_metrics(features_df: pd.DataFrame, y_true: pd.DataFrame, window: int) -> dict:
+    """Compute metrics for a naive predictor that uses each team's rolling avg score."""
+    from scipy.stats import norm
+    home_pred = features_df[f'home_pts_avg_L{window}'].values
+    away_pred = features_df[f'away_pts_avg_L{window}'].values
+    home_true = y_true.iloc[:, 0].values
+    away_true = y_true.iloc[:, 1].values
+
+    diff_true = home_true - away_true
+    diff_pred = home_pred - away_pred
+    total_true = home_true + away_true
+    total_pred = home_pred + away_pred
+
+    abs_diff_err = np.abs(diff_true - diff_pred)
+    residual_std = np.std(diff_true - diff_pred) or 1.0
+    return {
+        'diff_mae':      float(np.mean(abs_diff_err)),
+        'diff_within_5': float(np.mean(abs_diff_err <= 5)),
+        'total_mae':     float(np.mean(np.abs(total_true - total_pred))),
+        'win_accuracy':  float(np.mean((diff_true > 0) == (diff_pred > 0))),
+        'brier_score':   float(np.mean(
+            (norm.cdf(diff_pred / residual_std) - (diff_true > 0).astype(float)) ** 2
+        )),
+    }
+
+
 def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_metrics: dict, n_features: int) -> None:
     """Append one row to outputs/experiments.csv. Creates the file with headers if absent."""
     out = Path("outputs/experiments.csv")
@@ -145,6 +171,28 @@ def main():
 
     train_metrics, val_metrics = predictor.train(X_train, y_train, X_val, y_val)
     test_metrics = predictor.evaluate(X_test, y_test, dataset_name="Test")
+
+    window = config.features.rolling_window
+    baseline_val  = _naive_baseline_metrics(val_features,  y_val,  window)
+    baseline_test = _naive_baseline_metrics(test_features, y_test, window)
+    logger.info(
+        f"Naive baseline (rolling-{window}) — "
+        f"val diff_mae: {baseline_val['diff_mae']:.2f} | "
+        f"test diff_mae: {baseline_test['diff_mae']:.2f} | "
+        f"val win_acc: {baseline_val['win_accuracy']:.1%} | "
+        f"test win_acc: {baseline_test['win_accuracy']:.1%}"
+    )
+    baseline_run_name = f"naive_rolling_{window}"
+    experiments_path = Path("outputs/experiments.csv")
+    already_logged = (
+        experiments_path.exists()
+        and baseline_run_name in experiments_path.read_text()
+    )
+    if not already_logged:
+        _save_experiment(
+            baseline_run_name, f"auto-generated baseline (rolling {window}-game avg)",
+            config, baseline_val, baseline_test, 2
+        )
 
     importance_df = predictor.get_feature_importance(top_n=20)
     print("\nTop 20 features:\n" + importance_df.to_string(index=False))
