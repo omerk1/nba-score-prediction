@@ -5,9 +5,14 @@ NBA Score Prediction - Main Training Pipeline
 End-to-end pipeline for training the NBA score prediction model.
 
 Usage:
-    python train_model.py
+    python train_model.py --run-name baseline_stats_only
+    python train_model.py --run-name injury_features_v1 --notes "first run with injury impact"
+
+Every run appends one row to outputs/experiments.csv for ablation comparison.
 """
 
+import argparse
+import csv
 import json
 import sys
 import logging
@@ -33,8 +38,76 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _naive_baseline_metrics(features_df: pd.DataFrame, y_true: pd.DataFrame, window: int) -> dict:
+    """Compute metrics for a naive predictor that uses each team's rolling avg score."""
+    from scipy.stats import norm
+    home_pred = features_df[f'home_pts_avg_L{window}'].values
+    away_pred = features_df[f'away_pts_avg_L{window}'].values
+    home_true = y_true.iloc[:, 0].values
+    away_true = y_true.iloc[:, 1].values
+
+    diff_true = home_true - away_true
+    diff_pred = home_pred - away_pred
+    total_true = home_true + away_true
+    total_pred = home_pred + away_pred
+
+    abs_diff_err = np.abs(diff_true - diff_pred)
+    residual_std = np.std(diff_true - diff_pred) or 1.0
+    return {
+        'diff_mae':      float(np.mean(abs_diff_err)),
+        'diff_within_5': float(np.mean(abs_diff_err <= 5)),
+        'total_mae':     float(np.mean(np.abs(total_true - total_pred))),
+        'win_accuracy':  float(np.mean((diff_true > 0) == (diff_pred > 0))),
+        'brier_score':   float(np.mean(
+            (norm.cdf(diff_pred / residual_std) - (diff_true > 0).astype(float)) ** 2
+        )),
+    }
+
+
+def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_metrics: dict, n_features: int) -> None:
+    """Append one row to outputs/experiments.csv. Creates the file with headers if absent."""
+    out = Path("outputs/experiments.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    row = {
+        "timestamp":          datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "run_name":           run_name,
+        # Spread market
+        "val_diff_mae":       round(val_metrics["diff_mae"], 3),
+        "test_diff_mae":      round(test_metrics["diff_mae"], 3),
+        "val_diff_within_5":  round(val_metrics["diff_within_5"], 4),
+        "test_diff_within_5": round(test_metrics["diff_within_5"], 4),
+        # Over/under market
+        "val_total_mae":      round(val_metrics["total_mae"], 3),
+        "test_total_mae":     round(test_metrics["total_mae"], 3),
+        # Moneyline market
+        "val_win_acc":        round(val_metrics["win_accuracy"], 4),
+        "test_win_acc":       round(test_metrics["win_accuracy"], 4),
+        "val_brier":          round(val_metrics["brier_score"], 4),
+        "test_brier":         round(test_metrics["brier_score"], 4),
+        # Run metadata
+        "n_features":         n_features,
+        "injury_enabled":     bool(config.injury_features and config.injury_features.enabled),
+        "rolling_window":     config.features.rolling_window,
+        "notes":              notes,
+    }
+
+    write_header = not out.exists()
+    with open(out, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=row.keys())
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+
+    logger.info(f"Experiment saved → {out}  (run: {run_name})")
+
+
 def main():
     """Main training pipeline"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-name", required=True, help="Short name for this ablation run, e.g. 'baseline' or 'injury_v1'")
+    parser.add_argument("--notes", default="", help="Optional free-text notes saved to experiments.csv")
+    args = parser.parse_args()
 
     logger.info(f"Training pipeline started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     config = load_config()
@@ -99,6 +172,28 @@ def main():
     train_metrics, val_metrics = predictor.train(X_train, y_train, X_val, y_val)
     test_metrics = predictor.evaluate(X_test, y_test, dataset_name="Test")
 
+    window = config.features.rolling_window
+    baseline_val  = _naive_baseline_metrics(val_features,  y_val,  window)
+    baseline_test = _naive_baseline_metrics(test_features, y_test, window)
+    logger.info(
+        f"Naive baseline (rolling-{window}) — "
+        f"val diff_mae: {baseline_val['diff_mae']:.2f} | "
+        f"test diff_mae: {baseline_test['diff_mae']:.2f} | "
+        f"val win_acc: {baseline_val['win_accuracy']:.1%} | "
+        f"test win_acc: {baseline_test['win_accuracy']:.1%}"
+    )
+    baseline_run_name = f"naive_rolling_{window}"
+    experiments_path = Path("outputs/experiments.csv")
+    already_logged = (
+        experiments_path.exists()
+        and baseline_run_name in experiments_path.read_text()
+    )
+    if not already_logged:
+        _save_experiment(
+            baseline_run_name, f"auto-generated baseline (rolling {window}-game avg)",
+            config, baseline_val, baseline_test, 2
+        )
+
     importance_df = predictor.get_feature_importance(top_n=20)
     print("\nTop 20 features:\n" + importance_df.to_string(index=False))
 
@@ -141,6 +236,7 @@ def main():
     with open(models_dir / "training_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2, default=str)
 
+    _save_experiment(args.run_name, args.notes, config, val_metrics, test_metrics, len(feature_cols))
     logger.info(f"Test — diff_mae: {test_metrics['diff_mae']:.2f} | win_acc: {test_metrics['win_accuracy']:.1%}")
     logger.info(f"Model saved to {model_path}")
 

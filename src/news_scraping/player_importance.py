@@ -3,6 +3,11 @@ Player importance scores for injury impact estimation.
 
 importance = (minutes_share × w1) + (usage_rate_norm × w2) + (pts_share × w3)
 
+# TODO (ablation candidate): replace with on/off point differential from nba_api
+# (leaguedashlineups). Current formula measures volume of activity, not net marginal
+# value — a 30 PPG player may only add ~8 net pts if teammates fill in.
+# After implementing: retrain and compare val_diff_mae in outputs/experiments.csv.
+
 All inputs are normalized per-team to 0–1 so players on different teams are comparable.
 Raw per-game numbers don't capture relative value — a 15 PPG player on a 90-pt team
 matters more than the same on a 120-pt team.
