@@ -11,7 +11,7 @@ scores are available for the LLM context.
 
 import logging
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from src.news_scraping.db import get_conn, init_db
 from src.news_scraping.extractors.llm_extractor import extract_impact
@@ -55,7 +55,7 @@ def _upsert_injury_feature(
                 game_date, team_id,
                 impact["impact_score"], impact["n_out"], impact["n_questionable"],
                 int(impact["star_out"]), raw,
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
 
