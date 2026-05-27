@@ -9,13 +9,13 @@ data_paths:
 
 # Datasets loading
 datasets_loading:
-  data_start_date: "2016-10-01"    # Earliest data loaded for rolling-feature context
-  train_start_date: "2018-10-16"   # First game actually used as a training sample
-  train_end_date: "2022-04-10"
-  validation_start_date: "2022-10-18"
-  validation_end_date: "2023-01-15"
-  test_start_date: "2023-01-16"
-  test_end_date: "2023-04-09"
+  data_start_date: "2016-10-01"        # Earliest data loaded for rolling-feature context
+  train_start_date: "2018-10-16"       # First game actually used as a training sample
+  train_end_date: "2024-04-14"         # End of 2023-24 regular season
+  validation_start_date: "2024-10-22"  # Start of 2024-25 season
+  validation_end_date: "2025-04-13"    # End of 2024-25 regular season
+  test_start_date: "2025-10-21"        # Start of 2025-26 season
+  test_end_date: "2026-04-12"          # End of 2025-26 regular season
   allowed_season_types:
     - "Regular Season"
 
@@ -46,10 +46,12 @@ features:
 model:
   random_state: 42
   
-# News scraping (for later phases)
-news:
-  sources:
-    - "nba.com"
-    - "espn.com"
-    - "reddit.com/r/nba"
-  update_frequency: "daily"
+injury_features:
+  enabled: false                    # set true once injury DB is populated
+  db_path: "data/raw/injury_features.sqlite"
+  llm_model: "gemini-1.5-flash"
+  api_calls_per_minute: 14          # Gemini free tier is 15 RPM; stay just under
+  importance_weights:
+    minutes_share: 0.4
+    usage_rate: 0.4
+    pts_share: 0.2
