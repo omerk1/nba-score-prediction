@@ -7,6 +7,7 @@ Focus on capturing team strength and style mismatches.
 """
 
 import logging
+import sqlite3
 from pathlib import Path
 
 import pandas as pd
@@ -54,6 +55,7 @@ class FeatureBuilder:
         df = self._add_home_advantage_features(df)
         df = self._add_matchup_features(df)
         df = self._add_h2h_features(df)
+        df = self._add_injury_features(df)
 
         initial_rows = len(df)
         df = df.dropna(subset=self._get_feature_columns(df))
@@ -298,6 +300,37 @@ class FeatureBuilder:
         df[f'h2h_home_win_rate_L{ww}'] = df['_h2h_win_canon'].where(is_canon_home, 1 - df['_h2h_win_canon'])
 
         df.drop(columns=['_canonical_team', '_canonical_margin', '_h2h_margin_canon', '_h2h_win_canon'], inplace=True)
+
+        return df
+
+    def _add_injury_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        cfg = load_config()
+        if not cfg.injury_features or not cfg.injury_features.enabled:
+            return df
+
+        db_path = cfg.injury_features.db_path
+        if not Path(db_path).exists():
+            logger.warning(f"Injury DB not found at {db_path} — skipping injury features")
+            return df
+
+        with sqlite3.connect(db_path) as conn:
+            injury_df = pd.read_sql_query(
+                "SELECT game_date, team_id, impact_score, n_out, n_questionable, star_out "
+                "FROM injury_features",
+                conn,
+            )
+
+        injury_df["game_date"] = pd.to_datetime(injury_df["game_date"]).dt.normalize()
+        game_dates = pd.to_datetime(df["GAME_DATE"]).dt.normalize()
+
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            lookup = pd.DataFrame({
+                "game_date": game_dates.values,
+                "team_id": df[team_col].values,
+            })
+            merged = lookup.merge(injury_df, on=["game_date", "team_id"], how="left")
+            df[f"{prefix}_injury_impact"] = merged["impact_score"].fillna(0).values
+            df[f"{prefix}_star_out"] = merged["star_out"].fillna(0).astype(int).values
 
         return df
 

@@ -38,9 +38,18 @@ class ModelConfig(BaseModel):
     random_state: int = 42
 
 
-class NewsConfig(BaseModel):
-    sources: list[str]
-    update_frequency: str
+class ImportanceWeightsConfig(BaseModel):
+    minutes_share: float = 0.4
+    usage_rate: float = 0.4
+    pts_share: float = 0.2
+
+
+class InjuryFeaturesConfig(BaseModel):
+    enabled: bool = False
+    db_path: str = "data/raw/injury_features.sqlite"
+    llm_model: str = "gemini-1.5-flash"
+    api_calls_per_minute: int = 14  # Gemini free tier is 15 RPM; stay just under
+    importance_weights: ImportanceWeightsConfig = ImportanceWeightsConfig()
 
 
 class Config(BaseModel):
@@ -54,7 +63,7 @@ class Config(BaseModel):
     datasets_loading: DatasetsLoadingConfig
     features: FeaturesConfig
     model: ModelConfig
-    news: NewsConfig
+    injury_features: Optional[InjuryFeaturesConfig] = None
 
 
 # --- Loader Functions ---
