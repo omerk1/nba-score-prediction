@@ -5,9 +5,14 @@ NBA Score Prediction - Main Training Pipeline
 End-to-end pipeline for training the NBA score prediction model.
 
 Usage:
-    python train_model.py
+    python train_model.py --run-name baseline_stats_only
+    python train_model.py --run-name injury_features_v1 --notes "first run with injury impact"
+
+Every run appends one row to outputs/experiments.csv for ablation comparison.
 """
 
+import argparse
+import csv
 import json
 import sys
 import logging
@@ -33,8 +38,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_metrics: dict, n_features: int) -> None:
+    """Append one row to outputs/experiments.csv. Creates the file with headers if absent."""
+    out = Path("outputs/experiments.csv")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    row = {
+        "timestamp":          datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "run_name":           run_name,
+        # Spread market
+        "val_diff_mae":       round(val_metrics["diff_mae"], 3),
+        "test_diff_mae":      round(test_metrics["diff_mae"], 3),
+        "val_diff_within_5":  round(val_metrics["diff_within_5"], 4),
+        "test_diff_within_5": round(test_metrics["diff_within_5"], 4),
+        # Over/under market
+        "val_total_mae":      round(val_metrics["total_mae"], 3),
+        "test_total_mae":     round(test_metrics["total_mae"], 3),
+        # Moneyline market
+        "val_win_acc":        round(val_metrics["win_accuracy"], 4),
+        "test_win_acc":       round(test_metrics["win_accuracy"], 4),
+        "val_brier":          round(val_metrics["brier_score"], 4),
+        "test_brier":         round(test_metrics["brier_score"], 4),
+        # Run metadata
+        "n_features":         n_features,
+        "injury_enabled":     bool(config.injury_features and config.injury_features.enabled),
+        "rolling_window":     config.features.rolling_window,
+        "notes":              notes,
+    }
+
+    write_header = not out.exists()
+    with open(out, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=row.keys())
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+
+    logger.info(f"Experiment saved → {out}  (run: {run_name})")
+
+
 def main():
     """Main training pipeline"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-name", required=True, help="Short name for this ablation run, e.g. 'baseline' or 'injury_v1'")
+    parser.add_argument("--notes", default="", help="Optional free-text notes saved to experiments.csv")
+    args = parser.parse_args()
 
     logger.info(f"Training pipeline started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     config = load_config()
@@ -141,6 +188,7 @@ def main():
     with open(models_dir / "training_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2, default=str)
 
+    _save_experiment(args.run_name, args.notes, config, val_metrics, test_metrics, len(feature_cols))
     logger.info(f"Test — diff_mae: {test_metrics['diff_mae']:.2f} | win_acc: {test_metrics['win_accuracy']:.1%}")
     logger.info(f"Model saved to {model_path}")
 
