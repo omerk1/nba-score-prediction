@@ -1,4 +1,5 @@
 import yaml
+from enum import Enum
 from pathlib import Path
 from typing import Optional, Any
 
@@ -44,12 +45,24 @@ class ImportanceWeightsConfig(BaseModel):
     pts_share: float = 0.2
 
 
+class FormulaWeightsConfig(BaseModel):
+    out_weight: float = -1.0
+    questionable_weight: float = -0.5
+
+
+class InjuryScorer(str, Enum):
+    formula = "formula"
+    llm = "llm"
+
+
 class InjuryFeaturesConfig(BaseModel):
     enabled: bool = False
+    scorer: InjuryScorer = InjuryScorer.formula
     db_path: str = "data/raw/injury_features.sqlite"
     llm_model: str = "gemini-1.5-flash"
     api_calls_per_minute: int = 14  # Gemini free tier is 15 RPM; stay just under
     importance_weights: ImportanceWeightsConfig = ImportanceWeightsConfig()
+    formula_weights: FormulaWeightsConfig = FormulaWeightsConfig()
 
 
 class Config(BaseModel):
