@@ -44,15 +44,15 @@ def _fetch_stats(season: str, date_from: date, date_to: date) -> pd.DataFrame:
         season=season,
         date_from_nullable=date_from.strftime("%m/%d/%Y"),
         date_to_nullable=date_to.strftime("%m/%d/%Y"),
-        per_mode_simple="PerGame",
+        per_mode_detailed="PerGame",
     )
     base = leaguedashplayerstats.LeagueDashPlayerStats(
-        **kwargs, measure_type_simple_ranking_nullable="Base"
+        **kwargs, measure_type_detailed_defense="Base"
     ).get_data_frames()[0]
     time.sleep(1)  # nba_api rate limit
 
     advanced = leaguedashplayerstats.LeagueDashPlayerStats(
-        **kwargs, measure_type_simple_ranking_nullable="Advanced"
+        **kwargs, measure_type_detailed_defense="Advanced"
     ).get_data_frames()[0]
     time.sleep(1)
 
