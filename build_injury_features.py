@@ -20,9 +20,9 @@ Usage:
     # Resume a partial backfill (just move --start forward to where you left off)
     python build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
 
-Rate limits (Gemini free tier):
-    15 requests/minute → ~4.3s sleep per LLM call (configurable via injury_features.api_calls_per_minute)
-    1,500 requests/day → full backfill takes ~14 days; run daily and it resumes automatically
+Scoring (controlled by injury_features.scorer in config.yaml):
+    formula — deterministic weighted sum, no API calls, full backfill completes in minutes
+    llm     — Gemini call per team per date; free tier: ~14 days for full backfill ($1-2 on paid tier)
 """
 
 import argparse
@@ -78,17 +78,17 @@ def build_player_importance():
 
 def backfill_historical_injuries(start: date | None = None, end: date | None = None):
     """
-    Scrape injury reports for each game date and extract impact scores via Gemini.
+    Scrape injury reports for each game date and compute impact scores.
 
+    Scoring method is set by injury_features.scorer in config.yaml.
     Resumable: already-processed dates are overwritten safely (INSERT OR REPLACE).
-    To resume after hitting the daily API limit, re-run with --start set to where
-    you left off. Progress is visible in the logs (one line per team per date).
+    Progress is visible in the logs (one line per team per date).
 
     Segmented by season internally: transactions are fetched once per season
     (~8 HTTP requests), then replayed in memory for each date — not re-fetched per date.
 
-    Full backfill (8 seasons): ~14 days at Gemini free tier (1,500 req/day cap).
-    Test run (2 weeks): ~15 min.
+    Full backfill with formula scorer: minutes (no API calls beyond scraping).
+    Full backfill with llm scorer: ~14 days free tier, ~30 min on paid tier.
     """
     from src.news_scraping.pipeline import run_historical
 
