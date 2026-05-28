@@ -313,11 +313,13 @@ class FeatureBuilder:
             logger.warning(f"Injury DB not found at {db_path} — skipping injury features")
             return df
 
+        scorer = cfg.injury_features.scorer
         with sqlite3.connect(db_path) as conn:
             injury_df = pd.read_sql_query(
                 "SELECT game_date, team_id, impact_score, n_out, n_questionable, star_out "
-                "FROM injury_features",
+                "FROM injury_features WHERE scorer = ?",
                 conn,
+                params=(scorer,),
             )
 
         injury_df["game_date"] = pd.to_datetime(injury_df["game_date"]).dt.normalize()

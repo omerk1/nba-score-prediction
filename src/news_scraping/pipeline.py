@@ -5,16 +5,21 @@ Two entry points:
   run_nightly()    — fetch ESPN injury data for today, extract impact, store
   run_historical() — backfill from prosports-transactions.com for a date range
 
+Scoring is controlled by injury_features.scorer in config:
+  formula — deterministic weighted sum, fast, fully reproducible
+  llm     — Gemini call, richer reasoning, requires GOOGLE_API_KEY
+
+Raw player injury records are always stored in player_injuries regardless of scorer,
+so switching scorer and re-running only recomputes injury_features — no re-scraping needed.
 Run player_importance.backfill_season() before run_historical() so importance
-scores are available for the LLM context.
+scores are available for scoring.
 """
 
 import logging
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from src.news_scraping.db import get_conn, init_db
-from src.news_scraping.extractors.llm_extractor import extract_impact
 from src.news_scraping.scrapers.espn_injuries import fetch_current_injuries
 from src.news_scraping.scrapers.prosports_transactions import fetch_season_transactions, snapshot_at_date
 from src.utils.config_loader import load_config
@@ -43,19 +48,34 @@ def _get_importance_map(db_path: str, team_id: int, game_date: str) -> dict[str,
     return {r["player_name"]: r["importance_score"] for r in rows}
 
 
+def _store_player_injuries(db_path: str, game_date: str, team_id: int, players: list[dict]) -> None:
+    """Persist raw injury records — always called regardless of scorer."""
+    rows = [
+        (game_date, team_id, p["player_name"], p.get("status", ""), p.get("reason", ""), p.get("days_out", 0))
+        for p in players
+    ]
+    with get_conn(db_path) as conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO player_injuries
+               (game_date, team_id, player_name, status, reason, days_out)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+
+
 def _upsert_injury_feature(
-    db_path: str, game_date: str, team_id: int, impact: dict, raw: str
+    db_path: str, game_date: str, team_id: int, scorer: str, impact: dict
 ) -> None:
     with get_conn(db_path) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO injury_features
-               (game_date, team_id, impact_score, n_out, n_questionable, star_out, raw_report, updated_at)
+               (game_date, team_id, scorer, impact_score, n_out, n_questionable, star_out, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                game_date, team_id,
+                game_date, team_id, scorer,
                 impact["impact_score"], impact["n_out"], impact["n_questionable"],
-                int(impact["star_out"]), raw,
-                datetime.utcnow().isoformat(),
+                int(impact["star_out"]),
+                datetime.now(timezone.utc).isoformat(),
             ),
         )
 
@@ -88,26 +108,38 @@ def _absence_decay(players: list[dict], importance_map: dict[str, float], rollin
     return sum(w * f for w, f in zip(weights, factors)) / sum(weights)
 
 
+def _score_team(scorer: str, team_name: str, game_date: str, players: list[dict], importance_map: dict, cfg) -> dict:
+    """Dispatch to formula or LLM scorer based on config."""
+    if scorer == "llm":
+        from src.news_scraping.extractors.llm_extractor import extract_impact
+        return extract_impact(team_name, game_date, players, importance_map)
+    from src.news_scraping.extractors.formula_scorer import score_team
+    return score_team(players, importance_map, cfg.injury_features.formula_weights)
+
+
 def _process_team(
     db_path: str, team_id: int, team_name: str, game_date: str, players: list[dict]
 ) -> None:
     cfg = load_config()
+    scorer = cfg.injury_features.scorer
     importance_map = _get_importance_map(db_path, team_id, game_date)
-    impact = extract_impact(team_name, game_date, players, importance_map)
 
+    _store_player_injuries(db_path, game_date, team_id, players)
+
+    impact = _score_team(scorer, team_name, game_date, players, importance_map, cfg)
     decay = _absence_decay(players, importance_map, cfg.features.rolling_window)
     impact = dict(impact)
     impact["impact_score"] = round(impact["impact_score"] * decay, 2)
 
-    _upsert_injury_feature(db_path, game_date, team_id, impact, str(players))
+    _upsert_injury_feature(db_path, game_date, team_id, scorer, impact)
     logger.info(
-        f"  {team_name}: impact={impact['impact_score']:.1f} | "
+        f"  {team_name} [{scorer}]: impact={impact['impact_score']:.2f} | "
         f"out={impact['n_out']} | star={impact['star_out']}"
     )
 
 
 def _iter_seasons(start_date: date, end_date: date):
-    """Yield (season_start, season_end) pairs that overlap with the given range."""
+    """Yield (season_start, season_end, overlap_start, overlap_end) for each season overlapping the range."""
     year = start_date.year if start_date.month >= 10 else start_date.year - 1
     while True:
         season_start = date(year, 10, 1)
