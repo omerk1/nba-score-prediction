@@ -12,20 +12,30 @@ CREATE TABLE IF NOT EXISTS player_importance (
     minutes_per_game REAL,
     pts_per_game     REAL,
     usage_rate       REAL,
-    updated_at       TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TEXT NOT NULL,
     PRIMARY KEY (player_id, team_id, as_of_date)
 );
 
+CREATE TABLE IF NOT EXISTS player_injuries (
+    game_date   TEXT NOT NULL,
+    team_id     INTEGER NOT NULL,
+    player_name TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    reason      TEXT,
+    days_out    INTEGER DEFAULT 0,
+    PRIMARY KEY (game_date, team_id, player_name)
+);
+
 CREATE TABLE IF NOT EXISTS injury_features (
-    game_date      TEXT,
-    team_id        INTEGER,
-    impact_score   REAL,
-    n_out          INTEGER,
-    n_questionable INTEGER,
-    star_out       INTEGER,
-    raw_report     TEXT,
-    updated_at     TEXT DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (game_date, team_id)
+    game_date      TEXT NOT NULL,
+    team_id        INTEGER NOT NULL,
+    scorer         TEXT NOT NULL DEFAULT 'formula',
+    impact_score   REAL NOT NULL,
+    n_out          INTEGER NOT NULL,
+    n_questionable INTEGER NOT NULL,
+    star_out       INTEGER NOT NULL,
+    updated_at     TEXT NOT NULL,
+    PRIMARY KEY (game_date, team_id, scorer)
 );
 """
 
