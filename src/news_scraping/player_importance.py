@@ -21,7 +21,7 @@ because losing a star has disproportionate impact beyond the linear score.
 
 import logging
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 from nba_api.stats.endpoints import leaguedashplayerstats
@@ -95,9 +95,10 @@ def compute_and_store(season: str, as_of_date: date) -> int:
     df = _compute_importance(df, cfg.injury_features.importance_weights.model_dump())
     df["as_of_date"] = str(as_of_date)
 
+    df["updated_at"] = datetime.now(timezone.utc).isoformat()
     rows = df[
         ["player_id", "player_name", "team_id", "as_of_date",
-         "importance_score", "minutes_per_game", "pts_per_game", "usage_rate"]
+         "importance_score", "minutes_per_game", "pts_per_game", "usage_rate", "updated_at"]
     ].to_dict("records")
 
     init_db(cfg.injury_features.db_path)
@@ -105,9 +106,9 @@ def compute_and_store(season: str, as_of_date: date) -> int:
         conn.executemany(
             """INSERT OR REPLACE INTO player_importance
                (player_id, player_name, team_id, as_of_date, importance_score,
-                minutes_per_game, pts_per_game, usage_rate)
+                minutes_per_game, pts_per_game, usage_rate, updated_at)
                VALUES (:player_id, :player_name, :team_id, :as_of_date, :importance_score,
-                       :minutes_per_game, :pts_per_game, :usage_rate)""",
+                       :minutes_per_game, :pts_per_game, :usage_rate, :updated_at)""",
             rows,
         )
 
