@@ -159,7 +159,7 @@ Examples:
             game_date=args.date
         )
     except Exception as e:
-        logger.error(f"\n❌ Error: {str(e)}")
+        logger.error(f"\nError: {str(e)}")
         import traceback
         logger.error(traceback.format_exc())
         sys.exit(1)

@@ -65,29 +65,37 @@ def _get_season_bounds(season_year: int) -> tuple[date, date]:
     return _season_start(season_year), _season_end(season_year)
 
 
-def _fetch_stats(season: str, date_from: date, date_to: date) -> pd.DataFrame:
-    """Fetch cumulative per-game base + advanced stats between two dates."""
+def _fetch_stats(season: str, date_from: date, date_to: date, max_retries: int = 3) -> pd.DataFrame:
+    """Fetch cumulative per-game base + advanced stats between two dates. Retries on transient errors."""
     kwargs = dict(
         season=season,
         date_from_nullable=date_from.strftime("%m/%d/%Y"),
         date_to_nullable=date_to.strftime("%m/%d/%Y"),
         per_mode_detailed="PerGame",
     )
-    base = leaguedashplayerstats.LeagueDashPlayerStats(
-        **kwargs, measure_type_detailed_defense="Base"
-    ).get_data_frames()[0]
-    time.sleep(1)  # nba_api rate limit
+    for attempt in range(max_retries):
+        try:
+            base = leaguedashplayerstats.LeagueDashPlayerStats(
+                **kwargs, measure_type_detailed_defense="Base"
+            ).get_data_frames()[0]
+            time.sleep(1)
 
-    advanced = leaguedashplayerstats.LeagueDashPlayerStats(
-        **kwargs, measure_type_detailed_defense="Advanced"
-    ).get_data_frames()[0]
-    time.sleep(1)
+            advanced = leaguedashplayerstats.LeagueDashPlayerStats(
+                **kwargs, measure_type_detailed_defense="Advanced"
+            ).get_data_frames()[0]
+            time.sleep(1)
 
-    merged = base[["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "MIN", "PTS"]].merge(
-        advanced[["PLAYER_ID", "TEAM_ID", "USG_PCT"]], on=["PLAYER_ID", "TEAM_ID"]
-    )
-    merged.columns = ["player_id", "player_name", "team_id", "minutes_per_game", "pts_per_game", "usage_rate"]
-    return merged
+            merged = base[["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "MIN", "PTS"]].merge(
+                advanced[["PLAYER_ID", "TEAM_ID", "USG_PCT"]], on=["PLAYER_ID", "TEAM_ID"]
+            )
+            merged.columns = ["player_id", "player_name", "team_id", "minutes_per_game", "pts_per_game", "usage_rate"]
+            return merged
+        except Exception as e:
+            wait = 5 * 2 ** attempt
+            logger.warning(f"NBA API error (attempt {attempt + 1}/{max_retries}), retrying in {wait}s: {e}")
+            time.sleep(wait)
+
+    raise Exception(f"NBA API failed after {max_retries} attempts for {season} up to {date_to}")
 
 
 def _compute_importance(df: pd.DataFrame, weights: dict) -> pd.DataFrame:
@@ -174,5 +182,6 @@ def backfill_season(season: str, interval_days: int = 7) -> None:
         else:
             logger.info(f"Computing importance for {season} as of {cursor}")
             compute_and_store(season, cursor)
+            time.sleep(3)  # space out bursts between snapshots
 
         cursor += timedelta(days=interval_days)
