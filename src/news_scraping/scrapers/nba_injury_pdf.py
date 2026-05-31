@@ -3,7 +3,7 @@ NBA official pre-game injury report PDFs (available from the 2021-22 season).
 
 Reports are published to the NBA's CDN throughout game days at:
   Before ~Dec 23 2025: Injury-Report_{YYYY-MM-DD}_{HH}{AM|PM}.pdf
-  After  ~Dec 23 2025: Injury-Report_{YYYY-MM-DD}_{HH}_{MM}{AM|PM}.pdf  (minutes added)
+  After  ~Dec 22 2025: Injury-Report_{YYYY-MM-DD}_{HH}_{MM}{AM|PM}.pdf  (minutes added)
 
 Multiple versions are released throughout the day as teams submit updates.
 We scan from latest to earliest and stop at the first hit.
@@ -34,7 +34,7 @@ _HEADERS = {
 }
 
 # Around Dec 23 2025 the NBA added minutes to the filename.
-_NEW_FORMAT_CUTOVER = date(2025, 12, 23)
+_NEW_FORMAT_CUTOVER = date(2025, 12, 22)
 
 # Old format: HH{AM|PM} — ordered latest → earliest
 _REPORT_HOURS_OLD = [
