@@ -91,7 +91,16 @@ def compute_and_store(season: str, as_of_date: date) -> int:
     if as_of_date < date_from:
         return 0
 
-    df = _fetch_stats(season, date_from, as_of_date)
+    try:
+        df = _fetch_stats(season, date_from, as_of_date)
+    except Exception as e:
+        logger.warning(f"Skipping {season} as of {as_of_date} — API error: {e}")
+        return 0
+
+    if df.empty:
+        logger.debug(f"Skipping {season} as of {as_of_date} — no games yet")
+        return 0
+
     df = _compute_importance(df, cfg.injury_features.importance_weights.model_dump())
     df["as_of_date"] = str(as_of_date)
 
@@ -117,12 +126,25 @@ def compute_and_store(season: str, as_of_date: date) -> int:
 
 
 def backfill_season(season: str, interval_days: int = 7) -> None:
-    """Compute weekly importance snapshots across a full season."""
+    """Compute weekly importance snapshots across a full season. Skips dates already in DB."""
+    cfg = load_config()
+    init_db(cfg.injury_features.db_path)
+
     season_year = int(season[:4])
     cursor = _season_start(season_year) + timedelta(days=interval_days)
     today = date.today()
 
     while cursor <= today:
-        logger.info(f"Computing importance for {season} as of {cursor}")
-        compute_and_store(season, cursor)
+        with get_conn(cfg.injury_features.db_path) as conn:
+            already_stored = conn.execute(
+                "SELECT 1 FROM player_importance WHERE as_of_date = ? LIMIT 1",
+                (str(cursor),),
+            ).fetchone()
+
+        if already_stored:
+            logger.debug(f"Skipping {season} as of {cursor} — already in DB")
+        else:
+            logger.info(f"Computing importance for {season} as of {cursor}")
+            compute_and_store(season, cursor)
+
         cursor += timedelta(days=interval_days)
