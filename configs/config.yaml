@@ -47,7 +47,7 @@ model:
   random_state: 42
   
 injury_features:
-  enabled: false                    # set true once injury DB is populated
+  enabled: true
   scorer: formula                   # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
   db_path: "data/raw/injury_features.sqlite"
   llm_model: "gemini-1.5-flash"
