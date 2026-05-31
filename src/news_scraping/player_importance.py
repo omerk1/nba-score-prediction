@@ -20,6 +20,7 @@ because losing a star has disproportionate impact beyond the linear score.
 """
 
 import logging
+import sqlite3
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -31,11 +32,37 @@ from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
 
-_SEASON_START_MONTH = 10  # NBA regular season starts in October
+# Safe bounds for fetching — no NBA game has ever fallen outside these months.
+# Not exact season dates; used only to bound the backfill loop.
+_SEASON_DATA_START_MONTH = 10  # October: earliest possible first game
+_SEASON_DATA_END_MONTH = 7     # July: latest possible last game (e.g. 2020 bubble ended Oct, but July is safe for normal seasons)
 
 
 def _season_start(season_year: int) -> date:
-    return date(season_year, _SEASON_START_MONTH, 1)
+    return date(season_year, _SEASON_DATA_START_MONTH, 1)
+
+
+def _season_end(season_year: int) -> date:
+    return date(season_year + 1, _SEASON_DATA_END_MONTH, 1)
+
+
+def _get_season_bounds(season_year: int) -> tuple[date, date]:
+    """Return actual first and last game dates for a season from the raw games DB.
+    Falls back to month-based bounds if no data exists for the season."""
+    cfg = load_config()
+    start_bound = f"{season_year}-{_SEASON_DATA_START_MONTH:02d}-01"
+    end_bound = f"{season_year + 1}-{_SEASON_DATA_END_MONTH:02d}-01"
+    try:
+        with sqlite3.connect(cfg.data_paths.raw_db) as conn:
+            row = conn.execute(
+                "SELECT MIN(GAME_DATE), MAX(GAME_DATE) FROM games WHERE GAME_DATE >= ? AND GAME_DATE < ?",
+                (start_bound, end_bound),
+            ).fetchone()
+        if row and row[0] and row[1]:
+            return date.fromisoformat(row[0][:10]), date.fromisoformat(row[1][:10])
+    except Exception:
+        pass
+    return _season_start(season_year), _season_end(season_year)
 
 
 def _fetch_stats(season: str, date_from: date, date_to: date) -> pd.DataFrame:
@@ -131,10 +158,11 @@ def backfill_season(season: str, interval_days: int = 7) -> None:
     init_db(cfg.injury_features.db_path)
 
     season_year = int(season[:4])
-    cursor = _season_start(season_year) + timedelta(days=interval_days)
-    today = date.today()
+    season_start, season_end = _get_season_bounds(season_year)
+    cursor = season_start + timedelta(days=interval_days)
+    end = min(season_end, date.today())
 
-    while cursor <= today:
+    while cursor <= end:
         with get_conn(cfg.injury_features.db_path) as conn:
             already_stored = conn.execute(
                 "SELECT 1 FROM player_importance WHERE as_of_date = ? LIMIT 1",
