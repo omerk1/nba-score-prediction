@@ -3,7 +3,7 @@ Injury features pipeline: scrape → extract → store.
 
 Two entry points:
   run_nightly()    — fetch ESPN injury data for today, extract impact, store
-  run_historical() — backfill from prosports-transactions.com for a date range
+  run_historical() — backfill from NBA official injury report PDFs for a date range
 
 Scoring is controlled by injury_features.scorer in config:
   formula — deterministic weighted sum, fast, fully reproducible
@@ -17,11 +17,12 @@ scores are available for scoring.
 
 import logging
 import math
+import time
 from datetime import date, datetime, timedelta, timezone
 
 from src.news_scraping.db import get_conn, init_db
 from src.news_scraping.scrapers.espn_injuries import fetch_current_injuries
-from src.news_scraping.scrapers.prosports_transactions import fetch_season_transactions, snapshot_at_date
+from src.news_scraping.scrapers.nba_injury_pdf import fetch_injuries_for_date
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
@@ -161,20 +162,6 @@ def _process_team(
     )
 
 
-def _iter_seasons(start_date: date, end_date: date):
-    """Yield (season_start, season_end, overlap_start, overlap_end) for each season overlapping the range."""
-    year = start_date.year if start_date.month >= 10 else start_date.year - 1
-    while True:
-        season_start = date(year, 10, 1)
-        season_end = date(year + 1, 6, 30)
-        overlap_start = max(season_start, start_date)
-        overlap_end = min(season_end, end_date)
-        if overlap_start > end_date:
-            break
-        yield season_start, season_end, overlap_start, overlap_end
-        year += 1
-
-
 def run_nightly(game_date: date | None = None) -> None:
     """Fetch ESPN injury data for game_date (default: today) and store impact scores."""
     cfg = load_config()
@@ -204,8 +191,8 @@ def run_historical(start_date: date, end_date: date) -> None:
     """
     Backfill injury_features for every day in [start_date, end_date].
 
-    Fetches prosports transactions once per season (not once per date),
-    then replays in memory for each game date — much faster than per-date fetching.
+    Downloads NBA official injury report PDFs (available from the 2021-22 season).
+    Dates with no report (pre-2021, off-season, no games) are silently skipped.
     Requires player_importance table to be populated first.
     """
     cfg = load_config()
@@ -216,19 +203,22 @@ def run_historical(start_date: date, end_date: date) -> None:
     db_path = cfg.injury_features.db_path
     init_db(db_path)
 
-    for season_start, season_end, overlap_start, overlap_end in _iter_seasons(start_date, end_date):
-        logger.info(f"Season starting {season_start.year}: fetching transactions once")
-        transactions = fetch_season_transactions(season_start, season_end)
+    cursor = start_date
+    while cursor <= end_date:
+        entries = fetch_injuries_for_date(cursor)
+        if entries:
+            date_str = str(cursor)
+            by_team: dict[str, list] = {}
+            for e in entries:
+                by_team.setdefault(e["team_abbreviation"], []).append(e)
 
-        cursor = overlap_start
-        while cursor <= overlap_end:
-            snapshot = snapshot_at_date(transactions, cursor)
-            if snapshot:
-                date_str = str(cursor)
-                logger.info(f"Processing {date_str} ({len(snapshot)} teams with injuries)")
-                for abbr, players in snapshot.items():
-                    team_id = _resolve_team_id(abbr)
-                    if not team_id:
-                        continue
-                    _process_team(db_path, team_id, abbr, date_str, players)
-            cursor += timedelta(days=1)
+            logger.info(f"Processing {date_str} ({len(by_team)} teams with injuries)")
+            for abbr, players in by_team.items():
+                team_id = _resolve_team_id(abbr)
+                if not team_id:
+                    logger.warning(f"Unknown team abbreviation: {abbr}")
+                    continue
+                _process_team(db_path, team_id, abbr, date_str, players)
+
+        cursor += timedelta(days=1)
+        time.sleep(0.5)
