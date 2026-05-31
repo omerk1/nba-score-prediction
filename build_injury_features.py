@@ -18,10 +18,13 @@ Usage:
     python build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
 
     # Resume a partial backfill (just move --start forward to where you left off)
-    python build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
+    python build_injury_features.py --run backfill_historical_injuries --start 2021-10-01
+
+Historical data source: NBA official injury report PDFs (available from 2021-22 season).
+Dates before 2021-10-01 will have no injury data (PDF reports did not exist yet).
 
 Scoring (controlled by injury_features.scorer in config.yaml):
-    formula — deterministic weighted sum, no API calls, full backfill completes in minutes
+    formula — deterministic weighted sum, no API calls, full backfill completes in ~20 min
     llm     — Gemini call per team per date; free tier: ~14 days for full backfill ($1-2 on paid tier)
 """
 
@@ -78,16 +81,16 @@ def build_player_importance():
 
 def backfill_historical_injuries(start: date | None = None, end: date | None = None):
     """
-    Scrape injury reports for each game date and compute impact scores.
+    Download NBA official injury report PDFs for each game date and compute impact scores.
 
     Scoring method is set by injury_features.scorer in config.yaml.
     Resumable: already-processed dates are overwritten safely (INSERT OR REPLACE).
     Progress is visible in the logs (one line per team per date).
 
-    Segmented by season internally: transactions are fetched once per season
-    (~8 HTTP requests), then replayed in memory for each date — not re-fetched per date.
+    Coverage starts 2021-10-01 (earliest available NBA PDF reports).
+    Pre-2021 dates produce no rows; the model treats missing injury data as zero impact.
 
-    Full backfill with formula scorer: minutes (no API calls beyond scraping).
+    Full backfill with formula scorer: ~20 min (one HTTP request per day).
     Full backfill with llm scorer: ~14 days free tier, ~30 min on paid tier.
     """
     from src.news_scraping.pipeline import run_historical
