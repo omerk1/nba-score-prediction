@@ -98,27 +98,8 @@ def _fetch_stats(season: str, date_from: date, date_to: date, max_retries: int =
     raise Exception(f"NBA API failed after {max_retries} attempts for {season} up to {date_to}")
 
 
-def _compute_importance(df: pd.DataFrame, weights: dict) -> pd.DataFrame:
-    """Normalize per team, then compute weighted importance score (0–1)."""
-    for col, share_col in [("minutes_per_game", "minutes_share"), ("pts_per_game", "pts_share")]:
-        team_total = df.groupby("team_id")[col].transform("sum")
-        df[share_col] = (df[col] / team_total.replace(0, 1)).clip(0, 1)
-
-    # usage_rate is already team-relative; normalize to team max for a consistent 0–1 scale
-    team_max_usg = df.groupby("team_id")["usage_rate"].transform("max")
-    df["usage_rate_norm"] = (df["usage_rate"] / team_max_usg.replace(0, 1)).clip(0, 1)
-
-    w = weights
-    df["importance_score"] = (
-        df["minutes_share"] * w["minutes_share"]
-        + df["usage_rate_norm"] * w["usage_rate"]
-        + df["pts_share"] * w["pts_share"]
-    ).clip(0, 1)
-    return df
-
-
 def compute_and_store(season: str, as_of_date: date) -> int:
-    """Compute importance for all players up to as_of_date and upsert to DB. Returns row count."""
+    """Fetch raw player stats up to as_of_date and store to DB. Returns row count."""
     cfg = load_config()
     season_year = int(season[:4])
     date_from = _season_start(season_year)
@@ -136,22 +117,20 @@ def compute_and_store(season: str, as_of_date: date) -> int:
         logger.debug(f"Skipping {season} as of {as_of_date} — no games yet")
         return 0
 
-    df = _compute_importance(df, cfg.injury_features.importance_weights.model_dump())
     df["as_of_date"] = str(as_of_date)
-
     df["updated_at"] = datetime.now(timezone.utc).isoformat()
     rows = df[
         ["player_id", "player_name", "team_id", "as_of_date",
-         "importance_score", "minutes_per_game", "pts_per_game", "usage_rate", "updated_at"]
+         "minutes_per_game", "pts_per_game", "usage_rate", "updated_at"]
     ].to_dict("records")
 
     init_db(cfg.injury_features.db_path)
     with get_conn(cfg.injury_features.db_path) as conn:
         conn.executemany(
             """INSERT OR REPLACE INTO player_importance
-               (player_id, player_name, team_id, as_of_date, importance_score,
+               (player_id, player_name, team_id, as_of_date,
                 minutes_per_game, pts_per_game, usage_rate, updated_at)
-               VALUES (:player_id, :player_name, :team_id, :as_of_date, :importance_score,
+               VALUES (:player_id, :player_name, :team_id, :as_of_date,
                        :minutes_per_game, :pts_per_game, :usage_rate, :updated_at)""",
             rows,
         )

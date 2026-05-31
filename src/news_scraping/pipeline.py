@@ -35,17 +35,40 @@ def _resolve_team_id(abbreviation: str) -> int | None:
 
 
 def _get_importance_map(db_path: str, team_id: int, game_date: str) -> dict[str, float]:
-    """Latest importance snapshot before game_date for each player on the team."""
+    """Compute importance scores on the fly from raw stats for each player on the team.
+
+    Reads the latest snapshot before game_date, then applies the weighted formula
+    using current config weights — so changing weights requires no re-fetch.
+    """
+    cfg = load_config()
+    w = cfg.injury_features.importance_weights
+
     with get_conn(db_path) as conn:
         rows = conn.execute(
-            """SELECT player_name, importance_score
+            """SELECT player_name, minutes_per_game, pts_per_game, usage_rate
                FROM player_importance
                WHERE team_id = ? AND as_of_date < ?
                GROUP BY player_id
                HAVING as_of_date = MAX(as_of_date)""",
             (team_id, game_date),
         ).fetchall()
-    return {r["player_name"]: r["importance_score"] for r in rows}
+
+    if not rows:
+        return {}
+
+    players = [dict(r) for r in rows]
+    total_min = sum(p["minutes_per_game"] for p in players) or 1
+    total_pts = sum(p["pts_per_game"] for p in players) or 1
+    max_usg = max(p["usage_rate"] for p in players) or 1
+
+    return {
+        p["player_name"]: min(max(
+            (p["minutes_per_game"] / total_min) * w.minutes_share
+            + (p["usage_rate"] / max_usg) * w.usage_rate
+            + (p["pts_per_game"] / total_pts) * w.pts_share,
+            0), 1)
+        for p in players
+    }
 
 
 def _store_player_injuries(db_path: str, game_date: str, team_id: int, players: list[dict]) -> None:

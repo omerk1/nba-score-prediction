@@ -8,7 +8,6 @@ CREATE TABLE IF NOT EXISTS player_importance (
     player_name      TEXT,
     team_id          INTEGER,
     as_of_date       TEXT,
-    importance_score REAL,
     minutes_per_game REAL,
     pts_per_game     REAL,
     usage_rate       REAL,
