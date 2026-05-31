@@ -46,6 +46,10 @@ _TRACKED_STATUSES = {"Out", "Doubtful", "Questionable"}
 _TEAM_MAP: dict[str, str] = {
     t["full_name"]: t["abbreviation"] for t in nba_teams.get_teams()
 }
+# 2023-24+ PDFs concatenate team names without spaces (e.g. "LosAngelesLakers")
+_TEAM_MAP_CONCAT: dict[str, str] = {
+    t["full_name"].replace(" ", ""): t["abbreviation"] for t in nba_teams.get_teams()
+}
 
 
 def _pdf_url(game_date: date, hour_str: str) -> str:
@@ -63,41 +67,57 @@ def _fetch_pdf_bytes(url: str) -> Optional[bytes]:
 
 
 def _normalize_name(pdf_name: str) -> str:
-    """Convert PDF 'Last, First' format to nba_api 'First Last' format."""
-    parts = pdf_name.split(", ", 1)
+    """Convert PDF 'Last, First' or 'Last,First' format to nba_api 'First Last' format."""
+    sep = ", " if ", " in pdf_name else ","
+    parts = pdf_name.split(sep, 1)
     return f"{parts[1]} {parts[0]}" if len(parts) == 2 else pdf_name
+
+
+_TEXT_STRATEGY = {"vertical_strategy": "text", "horizontal_strategy": "text"}
+
+
+def _extract_table(page) -> list[list]:
+    """Try default extraction first; fall back to text-alignment strategy for borderless PDFs."""
+    table = page.extract_table()
+    if table and len(table) > 1:
+        return table
+    return page.extract_table(_TEXT_STRATEGY) or []
+
+
+def _parse_row(row: list) -> dict | None:
+    """Parse a single PDF table row into an injury dict, or None if not relevant."""
+    if not row or len(row) < 6:
+        return None
+    team_name = (row[3] or "").strip()
+    player_raw = (row[4] or "").strip()
+    status = (row[5] or "").strip()
+    reason = (row[6] or "").strip() if len(row) > 6 else ""
+
+    if not player_raw or not team_name or status not in _TRACKED_STATUSES:
+        return None
+
+    abbr = _TEAM_MAP.get(team_name) or _TEAM_MAP_CONCAT.get(team_name)
+    if not abbr:
+        logger.debug(f"Unknown team name in PDF: '{team_name}'")
+        return None
+
+    return {
+        "team_abbreviation": abbr,
+        "player_name": _normalize_name(player_raw),
+        "status": status,
+        "reason": reason,
+        "days_out": 0,
+    }
 
 
 def _parse_pdf(content: bytes) -> list[dict]:
     rows = []
     with pdfplumber.open(BytesIO(content)) as pdf:
         for page in pdf.pages:
-            table = page.extract_table()
-            if not table:
-                continue
-            for row in table:
-                if not row or len(row) < 6:
-                    continue
-                team_name = (row[3] or "").strip()
-                player = _normalize_name((row[4] or "").strip())
-                status = (row[5] or "").strip()
-                reason = (row[6] or "").strip() if len(row) > 6 else ""
-
-                if not player or not team_name or status not in _TRACKED_STATUSES:
-                    continue
-
-                abbr = _TEAM_MAP.get(team_name)
-                if not abbr:
-                    logger.debug(f"Unknown team name in PDF: '{team_name}'")
-                    continue
-
-                rows.append({
-                    "team_abbreviation": abbr,
-                    "player_name": player,
-                    "status": status,
-                    "reason": reason,
-                    "days_out": 0,  # PDFs don't include days out; absence decay defaults to 1.0
-                })
+            for row in _extract_table(page):
+                entry = _parse_row(row)
+                if entry:
+                    rows.append(entry)
     return rows
 
 
