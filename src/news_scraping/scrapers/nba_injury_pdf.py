@@ -2,11 +2,11 @@
 NBA official pre-game injury report PDFs (available from the 2021-22 season).
 
 Reports are published to the NBA's CDN throughout game days at:
-  https://ak-static.cms.nba.com/referee/injury/Injury-Report_{YYYY-MM-DD}_{HH}{AM|PM}.pdf
+  Before ~Dec 23 2025: Injury-Report_{YYYY-MM-DD}_{HH}{AM|PM}.pdf
+  After  ~Dec 23 2025: Injury-Report_{YYYY-MM-DD}_{HH}_{MM}{AM|PM}.pdf  (minutes added)
 
-Multiple versions are released throughout the day as teams submit updates
-(typically 10AM through 9PM). We try all common hours and use the latest
-available report, which reflects the most up-to-date pre-game status.
+Multiple versions are released throughout the day as teams submit updates.
+We scan from latest to earliest and stop at the first hit.
 
 PDF column layout (0-indexed):
   0: Game Date  1: Game Time  2: Matchup  3: Team  4: Player Name
@@ -33,12 +33,24 @@ _HEADERS = {
     )
 }
 
-# Report hours ordered latest → earliest.
-# We stop at the first hit so we always get the most up-to-date pre-game report
-# without making unnecessary requests for earlier (less complete) versions.
-_REPORT_HOURS = [
+# Around Dec 23 2025 the NBA added minutes to the filename.
+_NEW_FORMAT_CUTOVER = date(2025, 12, 23)
+
+# Old format: HH{AM|PM} — ordered latest → earliest
+_REPORT_HOURS_OLD = [
     "11PM", "10PM", "09PM", "08PM", "07PM", "06PM", "05PM",
     "04PM", "03PM", "02PM", "01PM", "12PM", "11AM", "10AM",
+]
+
+# New format: HH_MM{AM|PM} — try :45/:30/:15/:00 per hour, latest → earliest
+_REPORT_HOURS_NEW = [
+    f"{h:02d}_{m:02d}{period}"
+    for h, period in [
+        (11, "PM"), (10, "PM"), (9, "PM"), (8, "PM"), (7, "PM"), (6, "PM"),
+        (5, "PM"), (4, "PM"), (3, "PM"), (2, "PM"), (1, "PM"), (12, "PM"),
+        (11, "AM"), (10, "AM"),
+    ]
+    for m in (45, 30, 15, 0)
 ]
 
 _TRACKED_STATUSES = {"Out", "Doubtful", "Questionable"}
@@ -173,7 +185,8 @@ def fetch_injuries_for_date(game_date: date) -> list[dict]:
     so we always get the most up-to-date pre-game report with minimal requests.
     Returns [] if no report found.
     """
-    for hour_str in _REPORT_HOURS:
+    hour_list = _REPORT_HOURS_NEW if game_date >= _NEW_FORMAT_CUTOVER else _REPORT_HOURS_OLD
+    for hour_str in hour_list:
         content = _fetch_pdf_bytes(_pdf_url(game_date, hour_str))
         if content:
             rows = _parse_pdf(content)
