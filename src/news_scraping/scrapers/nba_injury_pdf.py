@@ -84,40 +84,85 @@ def _extract_table(page) -> list[list]:
     return page.extract_table(_TEXT_STRATEGY) or []
 
 
-def _parse_row(row: list) -> dict | None:
-    """Parse a single PDF table row into an injury dict, or None if not relevant."""
-    if not row or len(row) < 6:
-        return None
-    team_name = (row[3] or "").strip()
-    player_raw = (row[4] or "").strip()
-    status = (row[5] or "").strip()
-    reason = (row[6] or "").strip() if len(row) > 6 else ""
-
-    if not player_raw or not team_name or status not in _TRACKED_STATUSES:
-        return None
-
-    abbr = _TEAM_MAP.get(team_name) or _TEAM_MAP_CONCAT.get(team_name)
-    if not abbr:
-        logger.debug(f"Unknown team name in PDF: '{team_name}'")
-        return None
-
+def _col_indices(header: list) -> dict[str, int]:
+    """Map normalised column names → indices. Strips spaces so 'Player Name' == 'PlayerName'."""
     return {
-        "team_abbreviation": abbr,
-        "player_name": _normalize_name(player_raw),
-        "status": status,
-        "reason": reason,
-        "days_out": 0,
+        (cell or "").strip().replace(" ", ""): i
+        for i, cell in enumerate(header)
+        if cell and cell.strip()
     }
 
 
 def _parse_pdf(content: bytes) -> list[dict]:
+    # 2023-24+ PDFs: header only on first page (6 cols), continuation pages have 4 cols
+    # (Team, PlayerName, CurrentStatus, Reason) with no header row.
+    _CONTINUATION_COL = {"Team": 0, "PlayerName": 1, "CurrentStatus": 2, "Reason": 3}
+
     rows = []
+    current_abbr = None  # persists across pages so team context carries over page breaks
+
     with pdfplumber.open(BytesIO(content)) as pdf:
         for page in pdf.pages:
-            for row in _extract_table(page):
-                entry = _parse_row(row)
-                if entry:
-                    rows.append(entry)
+            table = _extract_table(page)
+            if not table:
+                continue
+
+            # Locate header row — normalise to handle 'Player Name' vs 'PlayerName'
+            col = None
+            data_start = 0
+            for i, row in enumerate(table):
+                normalised = [(c or "").strip().replace(" ", "") for c in row] if row else []
+                if "Team" in normalised and "PlayerName" in normalised:
+                    col = _col_indices(row)
+                    data_start = i + 1
+                    break
+
+            if col is None:
+                # Continuation page: no header. Infer format from column count.
+                first_row = next((r for r in table if r and any(r)), None)
+                if first_row and len(first_row) == 4:
+                    col = _CONTINUATION_COL
+                    data_start = 0
+                else:
+                    continue
+
+            team_i = col.get("Team")
+            player_i = col.get("PlayerName")
+            status_i = col.get("CurrentStatus")
+            reason_i = col.get("Reason")
+            if any(x is None for x in [team_i, player_i, status_i]):
+                continue
+
+            for row in table[data_start:]:
+                if not row or not any(row):
+                    continue
+                team_name = (row[team_i] or "").strip()
+                player_raw = (row[player_i] or "").strip()
+                status = (row[status_i] or "").strip()
+                reason = (row[reason_i] or "").strip() if reason_i is not None and len(row) > reason_i else ""
+
+                if not player_raw:
+                    continue
+
+                # Carry team context forward — subsequent players on same team have empty team column
+                if team_name:
+                    abbr = _TEAM_MAP.get(team_name) or _TEAM_MAP_CONCAT.get(team_name)
+                    if abbr:
+                        current_abbr = abbr
+                    else:
+                        logger.debug(f"Unknown team name in PDF: '{team_name}'")
+                        current_abbr = None
+
+                if not current_abbr or status not in _TRACKED_STATUSES:
+                    continue
+
+                rows.append({
+                    "team_abbreviation": current_abbr,
+                    "player_name": _normalize_name(player_raw),
+                    "status": status,
+                    "reason": reason,
+                    "days_out": 0,
+                })
     return rows
 
 
