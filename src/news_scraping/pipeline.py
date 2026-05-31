@@ -105,25 +105,45 @@ def _upsert_injury_feature(
         )
 
 
-def _absence_decay(players: list[dict], importance_map: dict[str, float], rolling_window: int) -> float:
+def _get_games_out_map(db_path: str, game_date: str, team_id: int, player_names: list[str]) -> dict[str, int]:
+    """
+    Count prior game-dates each player already appears as Out in player_injuries.
+    Called after _store_player_injuries, so today is excluded via game_date < current.
+    A player appearing for the first time returns 0 (full impact, no decay).
+    """
+    if not player_names:
+        return {}
+    placeholders = ",".join("?" * len(player_names))
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT player_name, COUNT(DISTINCT game_date) "
+            f"FROM player_injuries "
+            f"WHERE team_id = ? AND game_date < ? AND status = 'Out' "
+            f"AND player_name IN ({placeholders}) "
+            f"GROUP BY player_name",
+            (team_id, game_date, *player_names),
+        ).fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
+def _absence_decay(players: list[dict], importance_map: dict[str, float], games_out_map: dict[str, int], rolling_window: int) -> float:
     """
     Importance-weighted average of per-player decay factors.
 
     The rolling stats absorb a player's absence over time, so the marginal injury
-    impact shrinks the longer they've been out. Uses days_out as a proxy for games
-    missed (days_out / 2.5 ≈ games missed for a typical NBA schedule).
+    impact shrinks the longer they've been out. Uses actual prior game appearances
+    from player_injuries as the games-missed count — correctly treats a player
+    appearing for the first time the same as a one-day absence regardless of how
+    long they were listed in consecutive reports.
 
     Half-life = rolling_window games. At 1× window: factor ≈ 0.37. Floor at 0.1.
-    Stars who've been out longer carry more weight in the aggregate decay.
-    ESPN entries lack days_out → defaults to 0 (full impact, no decay).
     """
     weights, factors = [], []
     for p in players:
         if p.get("status") != "Out":
             continue
-        days = p.get("days_out", 0)
+        games_missed = games_out_map.get(p["player_name"], 0)
         importance = importance_map.get(p["player_name"], 0.0)
-        games_missed = days / 2.5
         factor = max(0.1, math.exp(-games_missed / rolling_window))
         weights.append(importance)
         factors.append(factor)
@@ -152,8 +172,11 @@ def _process_team(
 
     _store_player_injuries(db_path, game_date, team_id, players)
 
+    out_names = [p["player_name"] for p in players if p.get("status") == "Out"]
+    games_out_map = _get_games_out_map(db_path, game_date, team_id, out_names)
+
     impact = _score_team(scorer, team_name, game_date, players, importance_map, cfg)
-    decay = _absence_decay(players, importance_map, cfg.features.rolling_window)
+    decay = _absence_decay(players, importance_map, games_out_map, cfg.features.rolling_window)
     impact = dict(impact)
     impact["impact_score"] = round(impact["impact_score"] * decay, 2)
 
