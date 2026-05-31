@@ -17,6 +17,7 @@ scores are available for scoring.
 
 import logging
 import math
+import sqlite3
 import time
 from datetime import date, datetime, timedelta, timezone
 
@@ -121,15 +122,16 @@ def _absence_decay(players: list[dict], importance_map: dict[str, float], rollin
         if p.get("status") != "Out":
             continue
         days = p.get("days_out", 0)
-        importance = importance_map.get(p["player_name"], 0.1)
+        importance = importance_map.get(p["player_name"], 0.0)
         games_missed = days / 2.5
         factor = max(0.1, math.exp(-games_missed / rolling_window))
         weights.append(importance)
         factors.append(factor)
 
-    if not weights:
+    total_weight = sum(weights)
+    if not weights or total_weight == 0.0:
         return 1.0
-    return sum(w * f for w, f in zip(weights, factors)) / sum(weights)
+    return sum(w * f for w, f in zip(weights, factors)) / total_weight
 
 
 def _score_team(scorer: str, team_name: str, game_date: str, players: list[dict], importance_map: dict, cfg) -> dict:
@@ -156,8 +158,8 @@ def _process_team(
     impact["impact_score"] = round(impact["impact_score"] * decay, 2)
 
     _upsert_injury_feature(db_path, game_date, team_id, scorer, impact)
-    logger.info(
-        f"  {team_name} [{scorer}]: impact={impact['impact_score']:.2f} | "
+    logger.debug(
+        f"  {team_name} [{scorer.value}]: impact={impact['impact_score']:.2f} | "
         f"out={impact['n_out']} | star={impact['star_out']}"
     )
 
@@ -203,11 +205,26 @@ def run_historical(start_date: date, end_date: date) -> None:
     db_path = cfg.injury_features.db_path
     init_db(db_path)
 
-    cursor = start_date
-    while cursor <= end_date:
-        entries = fetch_injuries_for_date(cursor)
+    # Only process dates that have actual games — skips off-season, all-star break, etc.
+    allowed_types = tuple(cfg.datasets_loading.allowed_season_types)
+    placeholders = ",".join("?" * len(allowed_types))
+    with sqlite3.connect(cfg.data_paths.raw_db) as conn:
+        rows = conn.execute(
+            f"SELECT DISTINCT game_date FROM game "
+            f"WHERE game_date >= ? AND game_date <= ? AND season_type IN ({placeholders}) "
+            f"ORDER BY game_date",
+            (str(start_date), str(end_date), *allowed_types),
+        ).fetchall()
+    game_dates = [date.fromisoformat(row[0][:10]) for row in rows]
+    logger.info(f"Found {len(game_dates)} game dates to process")
+
+    for game_date in game_dates:
+        # Injury PDFs are pre-game filings (submitted ≥30 min before tip-off).
+        # Using the latest report for game_date gives the most complete pre-game picture
+        # with no data leakage — we never use date+1 information for date's games.
+        entries = fetch_injuries_for_date(game_date)
         if entries:
-            date_str = str(cursor)
+            date_str = str(game_date)
             by_team: dict[str, list] = {}
             for e in entries:
                 by_team.setdefault(e["team_abbreviation"], []).append(e)
@@ -219,6 +236,3 @@ def run_historical(start_date: date, end_date: date) -> None:
                     logger.warning(f"Unknown team abbreviation: {abbr}")
                     continue
                 _process_team(db_path, team_id, abbr, date_str, players)
-
-        cursor += timedelta(days=1)
-        time.sleep(0.5)

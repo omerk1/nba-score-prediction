@@ -24,7 +24,7 @@ def score_team(players: list[dict], importance_map: dict[str, float], weights) -
 
     impact = 0.0
     for p in players:
-        importance = importance_map.get(p["player_name"], 0.1)
+        importance = importance_map.get(p["player_name"], 0.0)
         status = p.get("status", "")
         if status == "Out":
             impact += importance * weights.out_weight

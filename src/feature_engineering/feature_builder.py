@@ -334,6 +334,9 @@ class FeatureBuilder:
             df[f"{prefix}_injury_impact"] = merged["impact_score"].fillna(0).values
             df[f"{prefix}_star_out"] = merged["star_out"].fillna(0).astype(int).values
 
+        dates_with_coverage = set(injury_df["game_date"])
+        df["has_injury_data"] = game_dates.isin(dates_with_coverage).astype(int)
+
         return df
 
     def _get_feature_columns(self, df: pd.DataFrame) -> list[str]:

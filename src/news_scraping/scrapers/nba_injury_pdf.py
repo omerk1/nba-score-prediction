@@ -1,12 +1,12 @@
 """
 NBA official pre-game injury report PDFs (available from the 2021-22 season).
 
-The NBA publishes a PDF injury report before each game day at:
-  https://official.nba.com/nba-injury-report-{MM}-{DD}-{YYYY}-{time}.pdf
+Reports are published to the NBA's CDN throughout game days at:
+  https://ak-static.cms.nba.com/referee/injury/Injury-Report_{YYYY-MM-DD}_{HH}{AM|PM}.pdf
 
-Multiple versions are released throughout the day as rosters update (01pm, 05pm,
-06pm, 09pm are the most common). We try all known times and use the latest found,
-so the report reflects the most up-to-date status before tip-off.
+Multiple versions are released throughout the day as teams submit updates
+(typically 10AM through 9PM). We try all common hours and use the latest
+available report, which reflects the most up-to-date pre-game status.
 
 PDF column layout (0-indexed):
   0: Game Date  1: Game Time  2: Matchup  3: Team  4: Player Name
@@ -25,7 +25,7 @@ from nba_api.stats.static import teams as nba_teams
 
 logger = logging.getLogger(__name__)
 
-_BASE_URL = "https://official.nba.com"
+_CDN_BASE = "https://ak-static.cms.nba.com/referee/injury"
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -33,7 +33,14 @@ _HEADERS = {
     )
 }
 
-_REPORT_TIMES = ["01pm", "05pm", "06pm", "09pm"]
+# Report hours ordered latest → earliest.
+# We stop at the first hit so we always get the most up-to-date pre-game report
+# without making unnecessary requests for earlier (less complete) versions.
+_REPORT_HOURS = [
+    "11PM", "10PM", "09PM", "08PM", "07PM", "06PM", "05PM",
+    "04PM", "03PM", "02PM", "01PM", "12PM", "11AM", "10AM",
+]
+
 _TRACKED_STATUSES = {"Out", "Doubtful", "Questionable"}
 
 _TEAM_MAP: dict[str, str] = {
@@ -41,18 +48,24 @@ _TEAM_MAP: dict[str, str] = {
 }
 
 
-def _pdf_url(game_date: date, time_str: str) -> str:
-    return f"{_BASE_URL}/nba-injury-report-{game_date.strftime('%m-%d-%Y')}-{time_str}.pdf"
+def _pdf_url(game_date: date, hour_str: str) -> str:
+    return f"{_CDN_BASE}/Injury-Report_{game_date.isoformat()}_{hour_str}.pdf"
 
 
 def _fetch_pdf_bytes(url: str) -> Optional[bytes]:
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp = requests.get(url, headers=_HEADERS, timeout=5)
         if resp.status_code == 200 and "pdf" in resp.headers.get("content-type", ""):
             return resp.content
     except requests.RequestException:
         pass
     return None
+
+
+def _normalize_name(pdf_name: str) -> str:
+    """Convert PDF 'Last, First' format to nba_api 'First Last' format."""
+    parts = pdf_name.split(", ", 1)
+    return f"{parts[1]} {parts[0]}" if len(parts) == 2 else pdf_name
 
 
 def _parse_pdf(content: bytes) -> list[dict]:
@@ -66,7 +79,7 @@ def _parse_pdf(content: bytes) -> list[dict]:
                 if not row or len(row) < 6:
                     continue
                 team_name = (row[3] or "").strip()
-                player = (row[4] or "").strip()
+                player = _normalize_name((row[4] or "").strip())
                 status = (row[5] or "").strip()
                 reason = (row[6] or "").strip() if len(row) > 6 else ""
 
@@ -91,20 +104,16 @@ def _parse_pdf(content: bytes) -> list[dict]:
 def fetch_injuries_for_date(game_date: date) -> list[dict]:
     """
     Download the latest NBA official injury report PDF for game_date.
-    Tries all known report times and uses the last successful one.
-    Returns [] if no report exists (pre-2021, off-season, or no games that day).
+    Scans from latest hour to earliest and returns on the first hit,
+    so we always get the most up-to-date pre-game report with minimal requests.
+    Returns [] if no report found.
     """
-    best_content: Optional[bytes] = None
-    for time_str in _REPORT_TIMES:
-        content = _fetch_pdf_bytes(_pdf_url(game_date, time_str))
+    for hour_str in _REPORT_HOURS:
+        content = _fetch_pdf_bytes(_pdf_url(game_date, hour_str))
         if content:
-            best_content = content
-            logger.debug(f"Found report for {game_date} at {time_str}")
-        time.sleep(0.2)
+            rows = _parse_pdf(content)
+            logger.info(f"NBA PDF {game_date}: {len(rows)} injury entries")
+            return rows
+        time.sleep(0.05)
 
-    if best_content is None:
-        return []
-
-    rows = _parse_pdf(best_content)
-    logger.info(f"NBA PDF {game_date}: {len(rows)} injury entries")
-    return rows
+    return []
