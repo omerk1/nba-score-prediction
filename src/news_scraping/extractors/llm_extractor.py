@@ -10,7 +10,8 @@ import logging
 import os
 import time
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 from src.utils.config_loader import load_config
 
@@ -43,11 +44,7 @@ _MAX_RETRIES = 4
 _RETRY_BASE_DELAY = 5  # seconds; doubles each attempt
 
 _cfg = load_config()
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY", ""))
-_model = genai.GenerativeModel(
-    model_name=_cfg.injury_features.llm_model,
-    generation_config=genai.GenerationConfig(response_mime_type="application/json"),
-)
+_client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
 
 
 def _validate(raw: dict) -> dict:
@@ -119,7 +116,11 @@ def extract_impact(
 
     for attempt in range(_MAX_RETRIES):
         try:
-            response = _model.generate_content(prompt)
+            response = _client.models.generate_content(
+                model=_cfg.injury_features.llm_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(response_mime_type="application/json"),
+            )
             raw = json.loads(response.text)
             result = _validate(raw)
             logger.debug(f"Impact for {team_name} on {game_date}: {result}")
