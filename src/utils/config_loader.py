@@ -60,7 +60,8 @@ class InjuryFeaturesConfig(BaseModel):
     scorer: InjuryScorer = InjuryScorer.formula
     db_path: str = "data/raw/injury_features.sqlite"
     llm_model: str = "gemini-1.5-flash"
-    api_calls_per_minute: int = 14  # Gemini free tier is 15 RPM; stay just under
+    api_calls_per_minute: int = 14
+    pdf_era_start: str = "2021-10-01"
     importance_weights: ImportanceWeightsConfig = ImportanceWeightsConfig()
     formula_weights: FormulaWeightsConfig = FormulaWeightsConfig()
 

@@ -280,9 +280,9 @@ def run_historical(start_date: date, end_date: date) -> None:
             f"ORDER BY game_date",
             (str(start_date), str(end_date), *allowed_types),
         ).fetchall()
-    _PDF_ERA_START = date(2021, 10, 1)
+    pdf_era_start = date.fromisoformat(cfg.injury_features.pdf_era_start)
     all_dates = [date.fromisoformat(row[0][:10]) for row in rows]
-    game_dates = [d for d in all_dates if d >= _PDF_ERA_START]
+    game_dates = [d for d in all_dates if d >= pdf_era_start]
     skipped = len(all_dates) - len(game_dates)
     logger.info(
         f"Found {len(all_dates)} game dates — processing {len(game_dates)} "
