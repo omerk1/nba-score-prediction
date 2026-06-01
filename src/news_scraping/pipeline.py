@@ -89,18 +89,17 @@ def _get_importance_map(db_path: str, team_id: int, game_date: str) -> dict[str,
     if not rows:
         return {}
 
-    players = [dict(r) for r in rows]
-    total_min = sum(p["minutes_per_game"] for p in players) or 1
-    total_pts = sum(p["pts_per_game"] for p in players) or 1
-    max_usg = max(p["usage_rate"] for p in players) or 1
+    total_minutes: float = sum(r["minutes_per_game"] for r in rows) or 1.0
+    total_pts: float = sum(r["pts_per_game"] for r in rows) or 1.0
+    max_usg: float = max(r["usage_rate"] for r in rows) or 1.0
 
     return {
-        p["player_name"]: min(max(
-            (p["minutes_per_game"] / total_min) * w.minutes_share
-            + (p["usage_rate"] / max_usg) * w.usage_rate
-            + (p["pts_per_game"] / total_pts) * w.pts_share,
-            0), 1)
-        for p in players
+        r["player_name"]: min(max(
+            (r["minutes_per_game"] / total_minutes) * w.minutes_share
+            + (r["usage_rate"] / max_usg) * w.usage_rate
+            + (r["pts_per_game"] / total_pts) * w.pts_share,
+            0.0), 1.0)
+        for r in rows
     }
 
 
