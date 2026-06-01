@@ -34,9 +34,11 @@ from datetime import date
 
 from dotenv import load_dotenv
 
-from src.utils.config_loader import load_config
+load_dotenv()  # must run before src.news_scraping imports — llm_extractor reads GOOGLE_API_KEY at module level
 
-load_dotenv()  # reads GOOGLE_API_KEY (and others) from .env before any module uses them
+from src.news_scraping.pipeline import run_historical, run_nightly
+from src.news_scraping.player_importance import backfill_season
+from src.utils.config_loader import load_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -69,8 +71,6 @@ def build_player_importance():
     Hits nba_api twice per snapshot (base + advanced stats) with a 1s sleep each.
     Runtime: ~10 minutes for 8 seasons. Safe to re-run.
     """
-    from src.news_scraping.player_importance import backfill_season
-
     seasons, _, _ = _resolve_seasons_and_dates()
     logger.info(f"Building player importance for seasons: {seasons}")
     for season in seasons:
@@ -93,8 +93,6 @@ def backfill_historical_injuries(start: date | None = None, end: date | None = N
     Full backfill with formula scorer: ~20 min (one HTTP request per day).
     Full backfill with llm scorer: ~14 days free tier, ~30 min on paid tier.
     """
-    from src.news_scraping.pipeline import run_historical
-
     _, config_start, config_end = _resolve_seasons_and_dates()
     start = start or config_start
     end = end or config_end
@@ -108,8 +106,6 @@ def nightly_update():
     Fetch today's ESPN injury report and extract impact scores.
     Schedule this daily (e.g. cron at 11:00 AM ET on game days).
     """
-    from src.news_scraping.pipeline import run_nightly
-
     logger.info("Running nightly injury update")
     run_nightly()
     logger.info("nightly_update complete")

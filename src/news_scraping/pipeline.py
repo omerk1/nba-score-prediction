@@ -18,10 +18,13 @@ scores are available for scoring.
 import logging
 import math
 import sqlite3
-import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
+
+from nba_api.stats.static import teams as nba_teams
 
 from src.news_scraping.db import get_conn, init_db
+from src.news_scraping.extractors.formula_scorer import score_team
+from src.news_scraping.extractors.llm_extractor import extract_impact
 from src.news_scraping.scrapers.espn_injuries import fetch_current_injuries
 from src.news_scraping.scrapers.nba_injury_pdf import fetch_injuries_for_date
 from src.utils.config_loader import load_config
@@ -31,8 +34,7 @@ logger = logging.getLogger(__name__)
 
 def _resolve_team_id(abbreviation: str) -> int | None:
     """Map team abbreviation to NBA team_id via nba_api static data."""
-    from nba_api.stats.static import teams
-    match = next((t for t in teams.get_teams() if t["abbreviation"] == abbreviation), None)
+    match = next((t for t in nba_teams.get_teams() if t["abbreviation"] == abbreviation), None)
     return match["id"] if match else None
 
 
@@ -188,9 +190,7 @@ def _score_team(
 ) -> dict:
     """Dispatch to formula or LLM scorer based on config."""
     if scorer == "llm":
-        from src.news_scraping.extractors.llm_extractor import extract_impact
         return extract_impact(team_name, game_date, players, importance_map, player_stats, team_avg)
-    from src.news_scraping.extractors.formula_scorer import score_team
     return score_team(players, importance_map, cfg.injury_features.formula_weights)
 
 
