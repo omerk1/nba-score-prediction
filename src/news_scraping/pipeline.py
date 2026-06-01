@@ -280,10 +280,18 @@ def run_historical(start_date: date, end_date: date) -> None:
             f"ORDER BY game_date",
             (str(start_date), str(end_date), *allowed_types),
         ).fetchall()
-    game_dates = [date.fromisoformat(row[0][:10]) for row in rows]
-    logger.info(f"Found {len(game_dates)} game dates to process")
+    _PDF_ERA_START = date(2021, 10, 1)
+    all_dates = [date.fromisoformat(row[0][:10]) for row in rows]
+    game_dates = [d for d in all_dates if d >= _PDF_ERA_START]
+    skipped = len(all_dates) - len(game_dates)
+    logger.info(
+        f"Found {len(all_dates)} game dates — processing {len(game_dates)} "
+        f"(skipping {skipped} pre-PDF-era dates)"
+    )
 
-    for game_date in game_dates:
+    for i, game_date in enumerate(game_dates, 1):
+        if i % 50 == 0:
+            logger.info(f"Progress: {i}/{len(game_dates)} dates scanned")
         # Injury PDFs are pre-game filings (submitted ≥30 min before tip-off).
         # Using the latest report for game_date gives the most complete pre-game picture
         # with no data leakage — we never use date+1 information for date's games.
