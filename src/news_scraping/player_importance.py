@@ -15,8 +15,6 @@ matters more than the same on a 120-pt team.
 Computed weekly (as_of_date = snapshot date) so historical predictions only use stats
 available before each game. At join time, use latest as_of_date < game_date.
 
-The LLM extractor uses importance > 0.5 to flag star_out — a separate binary feature
-because losing a star has disproportionate impact beyond the linear score.
 """
 
 import logging

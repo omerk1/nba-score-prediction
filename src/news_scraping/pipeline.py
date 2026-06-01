@@ -94,12 +94,11 @@ def _upsert_injury_feature(
     with get_conn(db_path) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO injury_features
-               (game_date, team_id, scorer, impact_score, n_out, n_questionable, star_out, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (game_date, team_id, scorer, impact_score, n_out, n_questionable, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 game_date, team_id, scorer,
                 impact["impact_score"], impact["n_out"], impact["n_questionable"],
-                int(impact["star_out"]),
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -168,10 +167,19 @@ def _process_team(
 ) -> None:
     cfg = load_config()
     scorer = cfg.injury_features.scorer
-    importance_map = _get_importance_map(db_path, team_id, game_date)
 
     _store_player_injuries(db_path, game_date, team_id, players)
 
+    with get_conn(db_path) as conn:
+        already_scored = conn.execute(
+            "SELECT 1 FROM injury_features WHERE game_date = ? AND team_id = ? AND scorer = ? LIMIT 1",
+            (game_date, team_id, scorer),
+        ).fetchone()
+    if already_scored:
+        logger.debug(f"  {team_name} [{scorer}]: already scored for {game_date}, skipping")
+        return
+
+    importance_map = _get_importance_map(db_path, team_id, game_date)
     out_names = [p["player_name"] for p in players if p.get("status") == "Out"]
     games_out_map = _get_games_out_map(db_path, game_date, team_id, out_names)
 
@@ -182,8 +190,8 @@ def _process_team(
 
     _upsert_injury_feature(db_path, game_date, team_id, scorer, impact)
     logger.debug(
-        f"  {team_name} [{scorer.value}]: impact={impact['impact_score']:.2f} | "
-        f"out={impact['n_out']} | star={impact['star_out']}"
+        f"  {team_name} [{scorer}]: impact={impact['impact_score']:.2f} | "
+        f"out={impact['n_out']} | questionable={impact['n_questionable']}"
     )
 
 

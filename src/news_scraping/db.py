@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS injury_features (
     impact_score   REAL NOT NULL,
     n_out          INTEGER NOT NULL,
     n_questionable INTEGER NOT NULL,
-    star_out       INTEGER NOT NULL,
     updated_at     TEXT NOT NULL,
     PRIMARY KEY (game_date, team_id, scorer)
 );

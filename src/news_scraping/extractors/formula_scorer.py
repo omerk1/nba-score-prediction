@@ -31,14 +31,8 @@ def score_team(players: list[dict], importance_map: dict[str, float], weights) -
         elif status in ("Questionable", "Day-To-Day"):
             impact += importance * weights.questionable_weight
 
-    star_out = any(
-        p.get("status") == "Out" and importance_map.get(p["player_name"], 0) > 0.5
-        for p in players
-    )
-
     return {
         "impact_score": round(impact, 3),
         "n_out": n_out,
         "n_questionable": n_questionable,
-        "star_out": star_out,
     }
