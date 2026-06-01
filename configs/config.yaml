@@ -48,10 +48,10 @@ model:
   
 injury_features:
   enabled: true
-  scorer: formula                   # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
+  scorer: llm                       # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
   db_path: "data/raw/injury_features.sqlite"
   llm_model: "gemini-1.5-flash"
-  api_calls_per_minute: 14          # Gemini free tier is 15 RPM; stay just under
+  api_calls_per_minute: 900         # Paid tier limit is 1000 RPM; staying 10% under
   importance_weights:
     minutes_share: 0.4
     usage_rate: 0.4
