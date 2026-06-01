@@ -36,6 +36,35 @@ def _resolve_team_id(abbreviation: str) -> int | None:
     return match["id"] if match else None
 
 
+def _get_team_avg_score(raw_db: str, team_id: int, game_date: str, window: int) -> float | None:
+    """Return the team's average score over their last `window` games before game_date."""
+    with sqlite3.connect(raw_db) as conn:
+        rows = conn.execute(
+            """SELECT CASE WHEN team_id_home = ? THEN pts_home ELSE pts_away END as pts
+               FROM game
+               WHERE (team_id_home = ? OR team_id_away = ?) AND game_date < ?
+               ORDER BY game_date DESC LIMIT ?""",
+            (team_id, team_id, team_id, game_date, window),
+        ).fetchall()
+    if not rows:
+        return None
+    return round(sum(r[0] for r in rows) / len(rows), 1)
+
+
+def _get_player_stats(db_path: str, team_id: int, game_date: str) -> dict[str, dict]:
+    """Return raw per-game stats for each player from the latest snapshot before game_date."""
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            """SELECT player_name, pts_per_game, usage_rate
+               FROM player_importance
+               WHERE team_id = ? AND as_of_date < ?
+               GROUP BY player_id
+               HAVING as_of_date = MAX(as_of_date)""",
+            (team_id, game_date),
+        ).fetchall()
+    return {r["player_name"]: {"ppg": r["pts_per_game"], "usg": r["usage_rate"]} for r in rows}
+
+
 def _get_importance_map(db_path: str, team_id: int, game_date: str) -> dict[str, float]:
     """Compute importance scores on the fly from raw stats for each player on the team.
 
@@ -153,11 +182,14 @@ def _absence_decay(players: list[dict], importance_map: dict[str, float], games_
     return sum(w * f for w, f in zip(weights, factors)) / total_weight
 
 
-def _score_team(scorer: str, team_name: str, game_date: str, players: list[dict], importance_map: dict, cfg) -> dict:
+def _score_team(
+    scorer: str, team_name: str, game_date: str, players: list[dict],
+    importance_map: dict, cfg, player_stats: dict, team_avg: float | None,
+) -> dict:
     """Dispatch to formula or LLM scorer based on config."""
     if scorer == "llm":
         from src.news_scraping.extractors.llm_extractor import extract_impact
-        return extract_impact(team_name, game_date, players, importance_map)
+        return extract_impact(team_name, game_date, players, importance_map, player_stats, team_avg)
     from src.news_scraping.extractors.formula_scorer import score_team
     return score_team(players, importance_map, cfg.injury_features.formula_weights)
 
@@ -183,7 +215,10 @@ def _process_team(
     out_names = [p["player_name"] for p in players if p.get("status") == "Out"]
     games_out_map = _get_games_out_map(db_path, game_date, team_id, out_names)
 
-    impact = _score_team(scorer, team_name, game_date, players, importance_map, cfg)
+    player_stats = _get_player_stats(db_path, team_id, game_date) if scorer == "llm" else {}
+    team_avg = _get_team_avg_score(cfg.data_paths.raw_db, team_id, game_date, cfg.features.rolling_window) if scorer == "llm" else None
+
+    impact = _score_team(scorer, team_name, game_date, players, importance_map, cfg, player_stats, team_avg)
     decay = _absence_decay(players, importance_map, games_out_map, cfg.features.rolling_window)
     impact = dict(impact)
     impact["impact_score"] = round(impact["impact_score"] * decay, 2)

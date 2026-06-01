@@ -17,8 +17,10 @@ from src.utils.config_loader import load_config
 logger = logging.getLogger(__name__)
 
 _PROMPT_TEMPLATE = """You are an NBA analyst estimating the scoring impact of pre-game injuries.
-An average NBA team scores ~115 points. A star player out is typically -4 to -8 pts;
-a rotation player -1 to -3; a bench player 0 to -1.
+{team_avg_line}
+The importance score (0–1, team-relative) reflects each player's share of scoring
+contribution within their team. Use it alongside PPG and USG% to scale each player's
+impact continuously — higher importance means a larger negative impact when out.
 Questionable players may still play — discount their impact by ~50%.
 
 Team: {team_name}  |  Game date: {game_date}
@@ -26,11 +28,11 @@ Team: {team_name}  |  Game date: {game_date}
 Injury report:
 {injury_text}
 
-Player importance scores (0–1, team-relative; >0.5 = star contributor):
+Player stats (importance 0–1 team-relative, PPG, USG%):
 {importance_text}
 
-If a player appears in the injury report but is not listed in the importance scores,
-estimate their impact using the heuristics above based on your best judgment of their role.
+If a player appears in the injury report but is not listed in the player stats,
+estimate their impact using your best judgment of their role.
 
 Return a JSON object with exactly these fields:
 - impact_score: total estimated point impact summed across all injured players (float, negative or 0)
@@ -65,13 +67,17 @@ def extract_impact(
     game_date: str,
     injury_list: list[dict],
     importance_map: dict[str, float],
+    player_stats: dict[str, dict],
+    team_avg: float | None,
 ) -> dict:
     """
     Call Gemini to extract structured impact from a team's pre-game injury report.
 
     Args:
         injury_list: [{"player_name": str, "status": str, "reason": str}]
-        importance_map: {player_name: importance_score}
+        importance_map: {player_name: importance_score (0-1)}
+        player_stats: {player_name: {"ppg": float, "usg": float}}
+        team_avg: team's rolling average score before this game, or None if unavailable
 
     Returns:
         {"impact_score": float, "n_out": int, "n_questionable": int}
@@ -82,11 +88,29 @@ def extract_impact(
     injury_text = "\n".join(
         f"- {p['player_name']} ({p['status']}): {p.get('reason', '')}" for p in injury_list
     )
-    importance_text = (
-        "\n".join(f"- {name}: {score:.2f}" for name, score in importance_map.items())
-        or "No importance data — use best judgment."
+
+    lines = []
+    for name, score in importance_map.items():
+        stats = player_stats.get(name, {})
+        ppg = stats.get("ppg")
+        usg = stats.get("usg")
+        parts = [f"importance={score:.2f}"]
+        if ppg is not None:
+            parts.append(f"{ppg:.1f} PPG")
+        if usg is not None:
+            parts.append(f"{usg * 100:.1f}% USG")
+        lines.append(f"- {name}: {', '.join(parts)}")
+    importance_text = "\n".join(lines) or "No player data — use best judgment."
+
+    window = _cfg.features.rolling_window
+    team_avg_line = (
+        f"This team averages {team_avg:.1f} PPG over their last {window} games."
+        if team_avg is not None
+        else "Team scoring average unavailable."
     )
+
     prompt = _PROMPT_TEMPLATE.format(
+        team_avg_line=team_avg_line,
         team_name=team_name,
         game_date=game_date,
         injury_text=injury_text,
