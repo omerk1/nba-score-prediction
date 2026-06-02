@@ -53,25 +53,37 @@ def _get_team_avg_score(raw_db: str, team_id: int, game_date: str, window: int) 
     return round(sum(r[0] for r in rows) / len(rows), 1)
 
 
-def _get_player_stats(db_path: str, team_id: int, game_date: str) -> dict[str, dict]:
-    """Return raw per-game stats for each player from the latest snapshot before game_date."""
+def _season_start(raw_db: str, game_date: str) -> str:
+    """Return the first game date of the NBA season containing game_date, from the games DB."""
+    d = date.fromisoformat(game_date)
+    season_year = d.year if d.month >= 10 else d.year - 1
+    with sqlite3.connect(raw_db) as conn:
+        row = conn.execute(
+            "SELECT MIN(game_date) FROM game WHERE game_date >= ? AND game_date < ?",
+            (f"{season_year}-10-01", f"{season_year + 1}-07-01"),
+        ).fetchone()
+    return row[0][:10] if row and row[0] else f"{season_year}-10-01"
+
+
+def _get_player_stats(db_path: str, team_id: int, game_date: str, season_start: str) -> dict[str, dict]:
+    """Return raw per-game stats for each player from the latest snapshot in the current season."""
     with get_conn(db_path) as conn:
         rows = conn.execute(
             """SELECT player_name, pts_per_game, usage_rate
                FROM player_importance
-               WHERE team_id = ? AND as_of_date < ?
+               WHERE team_id = ? AND as_of_date >= ? AND as_of_date < ?
                GROUP BY player_id
                HAVING as_of_date = MAX(as_of_date)""",
-            (team_id, game_date),
+            (team_id, season_start, game_date),
         ).fetchall()
     return {r["player_name"]: {"ppg": r["pts_per_game"], "usg": r["usage_rate"]} for r in rows}
 
 
-def _get_importance_map(db_path: str, team_id: int, game_date: str) -> dict[str, float]:
+def _get_importance_map(db_path: str, team_id: int, game_date: str, season_start: str) -> dict[str, float]:
     """Compute importance scores on the fly from raw stats for each player on the team.
 
-    Reads the latest snapshot before game_date, then applies the weighted formula
-    using current config weights — so changing weights requires no re-fetch.
+    Reads the latest snapshot within the current season before game_date, then applies
+    the weighted formula using current config weights — so changing weights requires no re-fetch.
     """
     cfg = load_config()
     w = cfg.injury_features.importance_weights
@@ -80,10 +92,10 @@ def _get_importance_map(db_path: str, team_id: int, game_date: str) -> dict[str,
         rows = conn.execute(
             """SELECT player_name, minutes_per_game, pts_per_game, usage_rate
                FROM player_importance
-               WHERE team_id = ? AND as_of_date < ?
+               WHERE team_id = ? AND as_of_date >= ? AND as_of_date < ?
                GROUP BY player_id
                HAVING as_of_date = MAX(as_of_date)""",
-            (team_id, game_date),
+            (team_id, season_start, game_date),
         ).fetchall()
 
     if not rows:
@@ -210,11 +222,12 @@ def _process_team(
         logger.debug(f"  {team_name} [{scorer}]: already scored for {game_date}, skipping")
         return
 
-    importance_map = _get_importance_map(db_path, team_id, game_date)
+    season_start = _season_start(cfg.data_paths.raw_db, game_date)
+    importance_map = _get_importance_map(db_path, team_id, game_date, season_start)
     out_names = [p["player_name"] for p in players if p.get("status") == "Out"]
     games_out_map = _get_games_out_map(db_path, game_date, team_id, out_names)
 
-    player_stats = _get_player_stats(db_path, team_id, game_date) if scorer == "llm" else {}
+    player_stats = _get_player_stats(db_path, team_id, game_date, season_start) if scorer == "llm" else {}
     team_avg = _get_team_avg_score(cfg.data_paths.raw_db, team_id, game_date, cfg.features.rolling_window) if scorer == "llm" else None
 
     impact = _score_team(scorer, team_name, game_date, players, importance_map, cfg, player_stats, team_avg)
