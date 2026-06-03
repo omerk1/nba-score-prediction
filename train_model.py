@@ -16,7 +16,7 @@ import csv
 import json
 import sys
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -70,7 +70,7 @@ def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_
     out.parent.mkdir(parents=True, exist_ok=True)
 
     row = {
-        "timestamp":          datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "timestamp":          datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         "run_name":           run_name,
         # Spread market
         "val_diff_mae":       round(val_metrics["diff_mae"], 3),
@@ -109,7 +109,7 @@ def main():
     parser.add_argument("--notes", default="", help="Optional free-text notes saved to experiments.csv")
     args = parser.parse_args()
 
-    logger.info(f"Training pipeline started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"Training pipeline started at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
     config = load_config()
     
     try:
@@ -221,7 +221,7 @@ def main():
     predictor.save(model_path)
 
     metadata = {
-        'train_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'train_date': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'),
         'train_games': len(X_train),
         'val_games': len(X_val),
         'test_games': len(X_test),
