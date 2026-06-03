@@ -2,7 +2,7 @@
 Live NBA injury data from the public ESPN API.
 Used for nightly runs. No auth required.
 
-For historical backfill use prosports_transactions.py instead.
+For historical backfill use nba_injury_pdf.py instead.
 """
 
 import logging

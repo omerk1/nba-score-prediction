@@ -21,6 +21,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
@@ -40,9 +41,8 @@ logger = logging.getLogger(__name__)
 
 def _naive_baseline_metrics(features_df: pd.DataFrame, y_true: pd.DataFrame, window: int) -> dict:
     """Compute metrics for a naive predictor that uses each team's rolling avg score."""
-    from scipy.stats import norm
-    home_pred = features_df[f'home_pts_avg_L{window}'].values
-    away_pred = features_df[f'away_pts_avg_L{window}'].values
+    home_pred = features_df[f'home_team_pts_avg_L{window}'].values
+    away_pred = features_df[f'away_team_pts_avg_L{window}'].values
     home_true = y_true.iloc[:, 0].values
     away_true = y_true.iloc[:, 1].values
 
@@ -199,7 +199,7 @@ def main():
 
     reports_dir = Path("outputs/reports")
     reports_dir.mkdir(exist_ok=True, parents=True)
-    importance_df.to_csv(reports_dir / "feature_importance.csv", index=False)
+    importance_df.to_csv(reports_dir / f"feature_importance_{args.run_name}.csv", index=False)
 
     predictions = predictor.predict(X_test.head(10))
     examples_df = pd.DataFrame({

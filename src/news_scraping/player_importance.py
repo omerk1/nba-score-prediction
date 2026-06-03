@@ -15,13 +15,12 @@ matters more than the same on a 120-pt team.
 Computed weekly (as_of_date = snapshot date) so historical predictions only use stats
 available before each game. At join time, use latest as_of_date < game_date.
 
-The LLM extractor uses importance > 0.5 to flag star_out — a separate binary feature
-because losing a star has disproportionate impact beyond the linear score.
 """
 
 import logging
+import sqlite3
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 from nba_api.stats.endpoints import leaguedashplayerstats
@@ -31,59 +30,74 @@ from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
 
-_SEASON_START_MONTH = 10  # NBA regular season starts in October
+# Safe bounds for fetching — no NBA game has ever fallen outside these months.
+# Not exact season dates; used only to bound the backfill loop.
+_SEASON_DATA_START_MONTH = 10  # October: earliest possible first game
+_SEASON_DATA_END_MONTH = 7     # July: latest possible last game (e.g. 2020 bubble ended Oct, but July is safe for normal seasons)
 
 
 def _season_start(season_year: int) -> date:
-    return date(season_year, _SEASON_START_MONTH, 1)
+    return date(season_year, _SEASON_DATA_START_MONTH, 1)
 
 
-def _fetch_stats(season: str, date_from: date, date_to: date) -> pd.DataFrame:
-    """Fetch cumulative per-game base + advanced stats between two dates."""
+def _season_end(season_year: int) -> date:
+    return date(season_year + 1, _SEASON_DATA_END_MONTH, 1)
+
+
+def _get_season_bounds(season_year: int) -> tuple[date, date]:
+    """Return actual first and last game dates for a season from the raw games DB.
+    Falls back to month-based bounds if no data exists for the season."""
+    cfg = load_config()
+    start_bound = f"{season_year}-{_SEASON_DATA_START_MONTH:02d}-01"
+    end_bound = f"{season_year + 1}-{_SEASON_DATA_END_MONTH:02d}-01"
+    try:
+        with sqlite3.connect(cfg.data_paths.raw_db) as conn:
+            row = conn.execute(
+                "SELECT MIN(GAME_DATE), MAX(GAME_DATE) FROM games WHERE GAME_DATE >= ? AND GAME_DATE < ?",
+                (start_bound, end_bound),
+            ).fetchone()
+        if row and row[0] and row[1]:
+            return date.fromisoformat(row[0][:10]), date.fromisoformat(row[1][:10])
+    except Exception:
+        pass
+    return _season_start(season_year), _season_end(season_year)
+
+
+def _fetch_stats(season: str, date_from: date, date_to: date, max_retries: int = 3) -> pd.DataFrame:
+    """Fetch cumulative per-game base + advanced stats between two dates. Retries on transient errors."""
     kwargs = dict(
         season=season,
         date_from_nullable=date_from.strftime("%m/%d/%Y"),
         date_to_nullable=date_to.strftime("%m/%d/%Y"),
-        per_mode_simple="PerGame",
+        per_mode_detailed="PerGame",
     )
-    base = leaguedashplayerstats.LeagueDashPlayerStats(
-        **kwargs, measure_type_simple_ranking_nullable="Base"
-    ).get_data_frames()[0]
-    time.sleep(1)  # nba_api rate limit
+    for attempt in range(max_retries):
+        try:
+            base = leaguedashplayerstats.LeagueDashPlayerStats(
+                **kwargs, measure_type_detailed_defense="Base"
+            ).get_data_frames()[0]
+            time.sleep(1)
 
-    advanced = leaguedashplayerstats.LeagueDashPlayerStats(
-        **kwargs, measure_type_simple_ranking_nullable="Advanced"
-    ).get_data_frames()[0]
-    time.sleep(1)
+            advanced = leaguedashplayerstats.LeagueDashPlayerStats(
+                **kwargs, measure_type_detailed_defense="Advanced"
+            ).get_data_frames()[0]
+            time.sleep(1)
 
-    merged = base[["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "MIN", "PTS"]].merge(
-        advanced[["PLAYER_ID", "TEAM_ID", "USG_PCT"]], on=["PLAYER_ID", "TEAM_ID"]
-    )
-    merged.columns = ["player_id", "player_name", "team_id", "minutes_per_game", "pts_per_game", "usage_rate"]
-    return merged
+            merged = base[["PLAYER_ID", "PLAYER_NAME", "TEAM_ID", "MIN", "PTS"]].merge(
+                advanced[["PLAYER_ID", "TEAM_ID", "USG_PCT"]], on=["PLAYER_ID", "TEAM_ID"]
+            )
+            merged.columns = ["player_id", "player_name", "team_id", "minutes_per_game", "pts_per_game", "usage_rate"]
+            return merged
+        except Exception as e:
+            wait = 5 * 2 ** attempt
+            logger.warning(f"NBA API error (attempt {attempt + 1}/{max_retries}), retrying in {wait}s: {e}")
+            time.sleep(wait)
 
-
-def _compute_importance(df: pd.DataFrame, weights: dict) -> pd.DataFrame:
-    """Normalize per team, then compute weighted importance score (0–1)."""
-    for col, share_col in [("minutes_per_game", "minutes_share"), ("pts_per_game", "pts_share")]:
-        team_total = df.groupby("team_id")[col].transform("sum")
-        df[share_col] = (df[col] / team_total.replace(0, 1)).clip(0, 1)
-
-    # usage_rate is already team-relative; normalize to team max for a consistent 0–1 scale
-    team_max_usg = df.groupby("team_id")["usage_rate"].transform("max")
-    df["usage_rate_norm"] = (df["usage_rate"] / team_max_usg.replace(0, 1)).clip(0, 1)
-
-    w = weights
-    df["importance_score"] = (
-        df["minutes_share"] * w["minutes_share"]
-        + df["usage_rate_norm"] * w["usage_rate"]
-        + df["pts_share"] * w["pts_share"]
-    ).clip(0, 1)
-    return df
+    raise Exception(f"NBA API failed after {max_retries} attempts for {season} up to {date_to}")
 
 
 def compute_and_store(season: str, as_of_date: date) -> int:
-    """Compute importance for all players up to as_of_date and upsert to DB. Returns row count."""
+    """Fetch raw player stats up to as_of_date and store to DB. Returns row count."""
     cfg = load_config()
     season_year = int(season[:4])
     date_from = _season_start(season_year)
@@ -91,23 +105,31 @@ def compute_and_store(season: str, as_of_date: date) -> int:
     if as_of_date < date_from:
         return 0
 
-    df = _fetch_stats(season, date_from, as_of_date)
-    df = _compute_importance(df, cfg.injury_features.importance_weights.model_dump())
-    df["as_of_date"] = str(as_of_date)
+    try:
+        df = _fetch_stats(season, date_from, as_of_date)
+    except Exception as e:
+        logger.warning(f"Skipping {season} as of {as_of_date} — API error: {e}")
+        return 0
 
+    if df.empty:
+        logger.debug(f"Skipping {season} as of {as_of_date} — no games yet")
+        return 0
+
+    df["as_of_date"] = str(as_of_date)
+    df["updated_at"] = datetime.now(timezone.utc).isoformat()
     rows = df[
         ["player_id", "player_name", "team_id", "as_of_date",
-         "importance_score", "minutes_per_game", "pts_per_game", "usage_rate"]
+         "minutes_per_game", "pts_per_game", "usage_rate", "updated_at"]
     ].to_dict("records")
 
     init_db(cfg.injury_features.db_path)
     with get_conn(cfg.injury_features.db_path) as conn:
         conn.executemany(
             """INSERT OR REPLACE INTO player_importance
-               (player_id, player_name, team_id, as_of_date, importance_score,
-                minutes_per_game, pts_per_game, usage_rate)
-               VALUES (:player_id, :player_name, :team_id, :as_of_date, :importance_score,
-                       :minutes_per_game, :pts_per_game, :usage_rate)""",
+               (player_id, player_name, team_id, as_of_date,
+                minutes_per_game, pts_per_game, usage_rate, updated_at)
+               VALUES (:player_id, :player_name, :team_id, :as_of_date,
+                       :minutes_per_game, :pts_per_game, :usage_rate, :updated_at)""",
             rows,
         )
 
@@ -116,12 +138,27 @@ def compute_and_store(season: str, as_of_date: date) -> int:
 
 
 def backfill_season(season: str, interval_days: int = 7) -> None:
-    """Compute weekly importance snapshots across a full season."""
-    season_year = int(season[:4])
-    cursor = _season_start(season_year) + timedelta(days=interval_days)
-    today = date.today()
+    """Compute weekly importance snapshots across a full season. Skips dates already in DB."""
+    cfg = load_config()
+    init_db(cfg.injury_features.db_path)
 
-    while cursor <= today:
-        logger.info(f"Computing importance for {season} as of {cursor}")
-        compute_and_store(season, cursor)
+    season_year = int(season[:4])
+    season_start, season_end = _get_season_bounds(season_year)
+    cursor = season_start + timedelta(days=interval_days)
+    end = min(season_end, date.today())
+
+    while cursor <= end:
+        with get_conn(cfg.injury_features.db_path) as conn:
+            already_stored = conn.execute(
+                "SELECT 1 FROM player_importance WHERE as_of_date = ? LIMIT 1",
+                (str(cursor),),
+            ).fetchone()
+
+        if already_stored:
+            logger.debug(f"Skipping {season} as of {cursor} — already in DB")
+        else:
+            logger.info(f"Computing importance for {season} as of {cursor}")
+            compute_and_store(season, cursor)
+            time.sleep(3)  # space out bursts between snapshots
+
         cursor += timedelta(days=interval_days)

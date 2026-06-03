@@ -9,10 +9,12 @@ Usage:
     python predict_game.py --game-date "2026-03-15"
 """
 
-import sys
-import logging
-from pathlib import Path
 import argparse
+import logging
+import sys
+import traceback
+from pathlib import Path
+
 import pandas as pd
 
 
@@ -159,8 +161,7 @@ Examples:
             game_date=args.date
         )
     except Exception as e:
-        logger.error(f"\n❌ Error: {str(e)}")
-        import traceback
+        logger.error(f"\nError: {str(e)}")
         logger.error(traceback.format_exc())
         sys.exit(1)
 

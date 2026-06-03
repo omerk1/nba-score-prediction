@@ -47,11 +47,16 @@ model:
   random_state: 42
   
 injury_features:
-  enabled: false                    # set true once injury DB is populated
+  enabled: true
+  scorer: llm                       # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
   db_path: "data/raw/injury_features.sqlite"
-  llm_model: "gemini-1.5-flash"
-  api_calls_per_minute: 14          # Gemini free tier is 15 RPM; stay just under
+  llm_model: "gemini-2.5-flash"
+  api_calls_per_minute: 900         # Paid tier limit is 1000 RPM; staying 10% under
+  pdf_era_start: "2021-10-01"       # NBA official injury report PDFs available from 2021-22 season
   importance_weights:
     minutes_share: 0.4
     usage_rate: 0.4
     pts_share: 0.2
+  formula_weights:
+    out_weight: -1.0
+    questionable_weight: -0.5

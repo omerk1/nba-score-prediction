@@ -18,11 +18,14 @@ Usage:
     python build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
 
     # Resume a partial backfill (just move --start forward to where you left off)
-    python build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
+    python build_injury_features.py --run backfill_historical_injuries --start 2021-10-01
 
-Rate limits (Gemini free tier):
-    15 requests/minute → ~4.3s sleep per LLM call (configurable via injury_features.api_calls_per_minute)
-    1,500 requests/day → full backfill takes ~14 days; run daily and it resumes automatically
+Historical data source: NBA official injury report PDFs (available from 2021-22 season).
+Dates before 2021-10-01 will have no injury data (PDF reports did not exist yet).
+
+Scoring (controlled by injury_features.scorer in config.yaml):
+    formula — deterministic weighted sum, no API calls, full backfill completes in ~20 min
+    llm     — Gemini call per team per date; free tier: ~14 days for full backfill ($1-2 on paid tier)
 """
 
 import argparse
@@ -31,9 +34,11 @@ from datetime import date
 
 from dotenv import load_dotenv
 
-from src.utils.config_loader import load_config
+load_dotenv()  # must run before src.news_scraping imports — llm_extractor reads GOOGLE_API_KEY at module level
 
-load_dotenv()  # reads GOOGLE_API_KEY (and others) from .env before any module uses them
+from src.news_scraping.pipeline import run_historical, run_nightly
+from src.news_scraping.player_importance import backfill_season
+from src.utils.config_loader import load_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -66,8 +71,6 @@ def build_player_importance():
     Hits nba_api twice per snapshot (base + advanced stats) with a 1s sleep each.
     Runtime: ~10 minutes for 8 seasons. Safe to re-run.
     """
-    from src.news_scraping.player_importance import backfill_season
-
     seasons, _, _ = _resolve_seasons_and_dates()
     logger.info(f"Building player importance for seasons: {seasons}")
     for season in seasons:
@@ -78,20 +81,18 @@ def build_player_importance():
 
 def backfill_historical_injuries(start: date | None = None, end: date | None = None):
     """
-    Scrape injury reports for each game date and extract impact scores via Gemini.
+    Download NBA official injury report PDFs for each game date and compute impact scores.
 
+    Scoring method is set by injury_features.scorer in config.yaml.
     Resumable: already-processed dates are overwritten safely (INSERT OR REPLACE).
-    To resume after hitting the daily API limit, re-run with --start set to where
-    you left off. Progress is visible in the logs (one line per team per date).
+    Progress is visible in the logs (one line per team per date).
 
-    Segmented by season internally: transactions are fetched once per season
-    (~8 HTTP requests), then replayed in memory for each date — not re-fetched per date.
+    Coverage starts 2021-10-01 (earliest available NBA PDF reports).
+    Pre-2021 dates produce no rows; the model treats missing injury data as zero impact.
 
-    Full backfill (8 seasons): ~14 days at Gemini free tier (1,500 req/day cap).
-    Test run (2 weeks): ~15 min.
+    Full backfill with formula scorer: ~20 min (one HTTP request per day).
+    Full backfill with llm scorer: ~14 days free tier, ~30 min on paid tier.
     """
-    from src.news_scraping.pipeline import run_historical
-
     _, config_start, config_end = _resolve_seasons_and_dates()
     start = start or config_start
     end = end or config_end
@@ -105,8 +106,6 @@ def nightly_update():
     Fetch today's ESPN injury report and extract impact scores.
     Schedule this daily (e.g. cron at 11:00 AM ET on game days).
     """
-    from src.news_scraping.pipeline import run_nightly
-
     logger.info("Running nightly injury update")
     run_nightly()
     logger.info("nightly_update complete")

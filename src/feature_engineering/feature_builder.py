@@ -313,11 +313,13 @@ class FeatureBuilder:
             logger.warning(f"Injury DB not found at {db_path} — skipping injury features")
             return df
 
+        scorer = cfg.injury_features.scorer
         with sqlite3.connect(db_path) as conn:
             injury_df = pd.read_sql_query(
-                "SELECT game_date, team_id, impact_score, n_out, n_questionable, star_out "
-                "FROM injury_features",
+                "SELECT game_date, team_id, impact_score, n_out, n_questionable "
+                "FROM injury_features WHERE scorer = ?",
                 conn,
+                params=(scorer,),
             )
 
         injury_df["game_date"] = pd.to_datetime(injury_df["game_date"]).dt.normalize()
@@ -330,7 +332,11 @@ class FeatureBuilder:
             })
             merged = lookup.merge(injury_df, on=["game_date", "team_id"], how="left")
             df[f"{prefix}_injury_impact"] = merged["impact_score"].fillna(0).values
-            df[f"{prefix}_star_out"] = merged["star_out"].fillna(0).astype(int).values
+            df[f"{prefix}_n_out"] = merged["n_out"].fillna(0).astype(int).values
+            df[f"{prefix}_n_questionable"] = merged["n_questionable"].fillna(0).astype(int).values
+
+        dates_with_coverage = set(injury_df["game_date"])
+        df["has_injury_data"] = game_dates.isin(dates_with_coverage).astype(int)
 
         return df
 
