@@ -21,8 +21,17 @@ CREATE TABLE IF NOT EXISTS player_injuries (
     player_name TEXT NOT NULL,
     status      TEXT NOT NULL,
     reason      TEXT,
-    days_out    INTEGER DEFAULT 0,
+    source      TEXT NOT NULL DEFAULT 'pdf',
     PRIMARY KEY (game_date, team_id, player_name)
+);
+
+CREATE TABLE IF NOT EXISTS scrape_log (
+    game_date   TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    report_time TEXT,
+    n_entries   INTEGER NOT NULL DEFAULT 0,
+    scraped_at  TEXT NOT NULL,
+    PRIMARY KEY (game_date, source)
 );
 
 CREATE TABLE IF NOT EXISTS injury_features (
