@@ -41,8 +41,15 @@ from src.news_scraping.player_importance import backfill_season
 from src.utils.config_loader import load_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logging.getLogger("google.genai").setLevel(logging.WARNING)
+logging.getLogger("google").setLevel(logging.WARNING)
 logging.getLogger("httpx").setLevel(logging.WARNING)
+
+_NOISY_PREFIXES = ("AFC is enabled", "HTTP Request:")
+for _h in logging.root.handlers:
+    _h.addFilter(type("_F", (logging.Filter,), {"filter": staticmethod(
+        lambda r: not r.getMessage().startswith(_NOISY_PREFIXES)
+    )})())
+
 logger = logging.getLogger(__name__)
 
 
