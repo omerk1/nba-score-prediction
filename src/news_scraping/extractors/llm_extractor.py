@@ -119,7 +119,10 @@ def extract_impact(
             response = _client.models.generate_content(
                 model=_cfg.injury_features.llm_model,
                 contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type="application/json"),
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
             )
             raw = json.loads(response.text)
             result = _validate(raw)
