@@ -8,6 +8,7 @@ Set GOOGLE_API_KEY in your environment before running.
 import json
 import logging
 import os
+import threading
 import time
 
 from google import genai
@@ -49,6 +50,25 @@ _RETRY_BASE_DELAY = 5  # seconds; doubles each attempt
 
 _cfg = load_config()
 _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
+
+
+class _RateLimiter:
+    """Global rate limiter shared across all threads."""
+    def __init__(self, calls_per_minute: int):
+        self._interval = 60.0 / calls_per_minute
+        self._lock = threading.Lock()
+        self._last = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = time.monotonic()
+            gap = self._interval - (now - self._last)
+            if gap > 0:
+                time.sleep(gap)
+            self._last = time.monotonic()
+
+
+_rate_limiter = _RateLimiter(_cfg.injury_features.api_calls_per_minute)
 
 
 def _validate(raw: dict) -> dict:
@@ -169,8 +189,7 @@ def extract_impact(
             result = _validate(raw)
             result = _clip_impact(result, injury_list, player_stats, team_avg, team_name, game_date)
             logger.debug(f"Impact for {team_name} on {game_date}: {result}")
-            delay = 60.0 / _cfg.injury_features.api_calls_per_minute
-            time.sleep(delay)
+            _rate_limiter.wait()
             return result
         except Exception as e:
             wait = _RETRY_BASE_DELAY * (2 ** attempt)

@@ -18,6 +18,7 @@ scores are available for scoring.
 import logging
 import math
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 
 from nba_api.stats.static import teams as nba_teams
@@ -341,16 +342,18 @@ def run_historical(start_date: date, end_date: date) -> None:
         f"(skipping {skipped} pre-PDF-era dates)"
     )
 
+    # Collect all work items (PDF scraping is sequential; team scoring is parallelised below)
+    work_items: list[tuple] = []
     for i, game_date in enumerate(game_dates, 1):
         if i % 50 == 0:
-            logger.info(f"Progress: {i}/{len(game_dates)} dates scanned")
+            logger.info(f"Scanning: {i}/{len(game_dates)} dates")
         date_str = str(game_date)
 
         if _is_scraped(db_path, date_str, "pdf"):
             by_team_cached = _load_cached_injuries(db_path, date_str, "pdf")
             for team_id, players in by_team_cached.items():
                 abbr = _team_abbreviation(team_id) or str(team_id)
-                _process_team(db_path, team_id, abbr, date_str, players, "pdf")
+                work_items.append((db_path, team_id, abbr, date_str, players, "pdf"))
         else:
             entries, report_time = fetch_injuries_for_date(game_date)
             _log_scrape(db_path, date_str, "pdf", len(entries), report_time)
@@ -358,10 +361,33 @@ def run_historical(start_date: date, end_date: date) -> None:
                 by_team: dict[str, list] = {}
                 for e in entries:
                     by_team.setdefault(e["team_abbreviation"], []).append(e)
-                logger.info(f"Processing {date_str} ({len(by_team)} teams with injuries)")
+                logger.info(f"Scraped {date_str} ({len(by_team)} teams with injuries)")
                 for abbr, players in by_team.items():
                     team_id = _resolve_team_id(abbr)
                     if not team_id:
                         logger.warning(f"Unknown team abbreviation: {abbr}")
                         continue
-                    _process_team(db_path, team_id, abbr, date_str, players, "pdf")
+                    work_items.append((db_path, team_id, abbr, date_str, players, "pdf"))
+
+    scorer = cfg.injury_features.scorer
+    logger.info(f"Processing {len(work_items)} team-date entries (scorer={scorer})")
+
+    if scorer == "llm":
+        workers = cfg.injury_features.parallel_workers
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_process_team, *item): item for item in work_items}
+            done = 0
+            for future in as_completed(futures):
+                done += 1
+                if done % 500 == 0:
+                    logger.info(f"Progress: {done}/{len(work_items)} teams processed")
+                try:
+                    future.result()
+                except Exception as e:
+                    item = futures[future]
+                    logger.error(f"Failed {item[2]} on {item[3]}: {e}")
+    else:
+        for i, item in enumerate(work_items, 1):
+            if i % 500 == 0:
+                logger.info(f"Progress: {i}/{len(work_items)} teams processed")
+            _process_team(*item)

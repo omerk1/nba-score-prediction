@@ -51,11 +51,12 @@ def init_db(db_path: str | Path) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.executescript(_SCHEMA)
+        conn.execute("PRAGMA journal_mode=WAL")
 
 
 @contextmanager
 def get_conn(db_path: str | Path):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         yield conn

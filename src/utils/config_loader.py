@@ -61,6 +61,7 @@ class InjuryFeaturesConfig(BaseModel):
     db_path: str = "data/raw/injury_features.sqlite"
     llm_model: str = "gemini-1.5-flash"
     api_calls_per_minute: int = 14
+    parallel_workers: int = 1
     pdf_era_start: str = "2021-10-01"
     importance_weights: ImportanceWeightsConfig = ImportanceWeightsConfig()
     formula_weights: FormulaWeightsConfig = FormulaWeightsConfig()
