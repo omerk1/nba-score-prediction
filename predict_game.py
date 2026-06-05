@@ -60,7 +60,7 @@ def predict_game(home_team_id: int, away_team_id: int, game_date: str = None):
     try:
         # Load last rolling_window*3 games per team — enough to fill all rolling features
         # regardless of season start or schedule gaps
-        n_games = config.features.rolling_window * 3
+        n_games = max(config.features.rolling_windows) * 3
 
         home_recent = loader.load_recent_team_games(home_team_id, n_games)
         away_recent = loader.load_recent_team_games(away_team_id, n_games)
@@ -72,38 +72,51 @@ def predict_game(home_team_id: int, away_team_id: int, game_date: str = None):
             .reset_index(drop=True)
         )
 
+        prediction_date = pd.Timestamp(game_date).normalize() if game_date else pd.Timestamp.now().normalize()
+
         if game_date:
-            recent_games = recent_games[recent_games['GAME_DATE'] <= game_date]
+            recent_games = recent_games[recent_games['GAME_DATE'] <= prediction_date]
 
         logger.info(f"Loaded {len(recent_games)} recent games for both teams")
 
+        # Inject a synthetic upcoming-game row so the feature builder computes all
+        # rolling, H2H, and matchup features correctly for this exact matchup and date.
+        # Outcome columns are zeroed — safe because all rolling features use shift(1),
+        # so the synthetic row's unknown outcome never affects its own feature values.
+        current_season_id = recent_games.iloc[-1]['SEASON_ID']
+        synthetic_row = {col: 0 for col in recent_games.columns}
+        synthetic_row.update({
+            'GAME_ID': 'upcoming',
+            'GAME_DATE': prediction_date,
+            'HOME_TEAM_ID': home_team_id,
+            'AWAY_TEAM_ID': away_team_id,
+            'SEASON_ID': current_season_id,
+            'SEASON_TYPE': 'Regular Season',
+        })
+        all_games = pd.concat(
+            [recent_games, pd.DataFrame([synthetic_row])],
+            ignore_index=True,
+        ).sort_values('GAME_DATE').reset_index(drop=True)
+
         feature_builder = FeatureBuilder(
-            rolling_window=config.features.rolling_window,
+            rolling_windows=config.features.rolling_windows,
             h2h_margin_window=config.features.h2h_margin_window,
             h2h_win_rate_window=config.features.h2h_win_rate_window,
         )
-        features_df = feature_builder.create_all_features(recent_games)
+        features_df = feature_builder.create_all_features(all_games)
 
-        home_games = features_df[features_df['HOME_TEAM_ID'] == home_team_id]
-        away_games = features_df[features_df['AWAY_TEAM_ID'] == away_team_id]
+        game_features = features_df[
+            (features_df['HOME_TEAM_ID'] == home_team_id) &
+            (features_df['AWAY_TEAM_ID'] == away_team_id) &
+            (pd.to_datetime(features_df['GAME_DATE']).dt.normalize() == prediction_date)
+        ]
 
-        if home_games.empty or away_games.empty:
-            logger.error("Not enough games found for both teams in their roles. Check team IDs.")
+        if game_features.empty:
+            logger.error("Could not compute features for this matchup. Not enough recent game history for one or both teams.")
             return
 
-        home_row = home_games.iloc[-1]
-        away_row = away_games.iloc[-1]
-
-        # Build prediction row: home_* cols from home team's row, away_* cols from away team's row
         feature_cols = predictor.feature_names
-        row = {}
-        for col in feature_cols:
-            if col.startswith('away_'):
-                row[col] = away_row[col] if col in away_row.index else 0
-            else:
-                row[col] = home_row[col] if col in home_row.index else 0
-
-        prediction_features = pd.DataFrame([row])
+        prediction_features = game_features[feature_cols].iloc[[-1]]
         prediction = predictor.predict(prediction_features)[0]
 
         home_score = round(prediction[0])
@@ -111,8 +124,7 @@ def predict_game(home_team_id: int, away_team_id: int, game_date: str = None):
         point_diff = home_score - away_score
 
         winner = "Home" if point_diff > 0 else "Away"
-        date_str = f" ({game_date})" if game_date else ""
-        logger.info(f"\nPrediction{date_str}: Team {home_team_id} {home_score} - {away_score} Team {away_team_id}")
+        logger.info(f"\nPrediction ({prediction_date.date()}): Team {home_team_id} {home_score} - {away_score} Team {away_team_id}")
         logger.info(f"Winner: {winner} by {abs(point_diff)} | Total: {home_score + away_score}")
 
     finally:
