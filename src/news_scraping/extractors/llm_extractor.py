@@ -8,6 +8,7 @@ Set GOOGLE_API_KEY in your environment before running.
 import json
 import logging
 import os
+import threading
 import time
 
 from google import genai
@@ -17,12 +18,17 @@ from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
 
-_PROMPT_TEMPLATE = """You are an NBA analyst estimating the scoring impact of pre-game injuries.
+_PROMPT_TEMPLATE = """You are an NBA analyst estimating the per-game scoring impact of pre-game injuries.
 {team_avg_line}
 The importance score (0–1, team-relative) reflects each player's share of scoring
 contribution within their team. Use it alongside PPG and USG% to scale each player's
 impact continuously — higher importance means a larger negative impact when out.
 Questionable players may still play — discount their impact by ~50%.
+
+impact_score is the NET single-game point loss — the injured player's typical contribution
+minus what replacement-level play provides. When a player is Out, teammates absorb their
+minutes and scoring load, so the net impact is substantially less than the missing player's
+PPG. Use PPG and importance to rank each player's significance, not to sum their full output.
 
 Team: {team_name}  |  Game date: {game_date}
 
@@ -32,8 +38,7 @@ Injury report:
 Player stats (importance 0–1 team-relative, PPG, USG%):
 {importance_text}
 
-If a player appears in the injury report but is not listed in the player stats,
-estimate their impact using your best judgment of their role.
+If a player appears in the injury report but has no stats listed, treat their impact as 0.
 
 Return a JSON object with exactly these fields:
 - impact_score: total estimated point impact summed across all injured players (float, negative or 0)
@@ -47,6 +52,25 @@ _cfg = load_config()
 _client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
 
 
+class _RateLimiter:
+    """Global rate limiter shared across all threads."""
+    def __init__(self, calls_per_minute: int):
+        self._interval = 60.0 / calls_per_minute
+        self._lock = threading.Lock()
+        self._last = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = time.monotonic()
+            gap = self._interval - (now - self._last)
+            if gap > 0:
+                time.sleep(gap)
+            self._last = time.monotonic()
+
+
+_rate_limiter = _RateLimiter(_cfg.injury_features.api_calls_per_minute)
+
+
 def _validate(raw: dict) -> dict:
     required = {"impact_score", "n_out", "n_questionable"}
     missing = required - raw.keys()
@@ -57,6 +81,43 @@ def _validate(raw: dict) -> dict:
         "n_out": int(raw["n_out"]),
         "n_questionable": int(raw["n_questionable"]),
     }
+
+
+def _clip_impact(
+    result: dict,
+    injury_list: list[dict],
+    player_stats: dict[str, dict],
+    team_avg: float | None,
+    team_name: str,
+    game_date: str,
+) -> dict:
+    out_ppg = sum(
+        (player_stats.get(p["player_name"], {}).get("ppg") or 0)
+        for p in injury_list if p.get("status") == "Out"
+    )
+    q_ppg = sum(
+        (player_stats.get(p["player_name"], {}).get("ppg") or 0)
+        for p in injury_list if p.get("status") in ("Questionable", "Day-To-Day")
+    ) * 0.5
+
+    bounds = []
+    if out_ppg + q_ppg > 0:
+        bounds.append(out_ppg + q_ppg)
+    if team_avg is not None:
+        bounds.append(team_avg)
+
+    if not bounds:
+        return result
+
+    max_abs = min(bounds)
+    if result["impact_score"] < -max_abs:
+        logger.warning(
+            f"Clipping impact_score {result['impact_score']:.2f} → {-max_abs:.2f} "
+            f"for {team_name} on {game_date} (bound: out_ppg={out_ppg:.1f}, q_ppg={q_ppg:.1f}, team_avg={team_avg})"
+        )
+        result = dict(result)
+        result["impact_score"] = round(-max_abs, 2)
+    return result
 
 
 def extract_impact(
@@ -97,7 +158,7 @@ def extract_impact(
         if usg is not None:
             parts.append(f"{usg * 100:.1f}% USG")
         lines.append(f"- {name}: {', '.join(parts)}")
-    importance_text = "\n".join(lines) or "No player data — use best judgment."
+    importance_text = "\n".join(lines) or "No player data available — treat all impacts as 0."
 
     window = _cfg.features.rolling_window
     team_avg_line = (
@@ -119,15 +180,20 @@ def extract_impact(
             response = _client.models.generate_content(
                 model=_cfg.injury_features.llm_model,
                 contents=prompt,
-                config=types.GenerateContentConfig(response_mime_type="application/json"),
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                ),
             )
             raw = json.loads(response.text)
             result = _validate(raw)
+            result = _clip_impact(result, injury_list, player_stats, team_avg, team_name, game_date)
             logger.debug(f"Impact for {team_name} on {game_date}: {result}")
-            delay = 60.0 / _cfg.injury_features.api_calls_per_minute
-            time.sleep(delay)
+            _rate_limiter.wait()
             return result
         except Exception as e:
+            if "GenerateRequestsPerDayPerProjectPerModel" in str(e):
+                raise RuntimeError(f"Daily quota exhausted — re-run after quota resets. ({e})") from e
             wait = _RETRY_BASE_DELAY * (2 ** attempt)
             if attempt < _MAX_RETRIES - 1:
                 logger.warning(f"Gemini error for {team_name} on {game_date} (attempt {attempt + 1}/{_MAX_RETRIES}), retrying in {wait}s: {e}")

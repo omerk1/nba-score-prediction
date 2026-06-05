@@ -5,8 +5,8 @@ NBA Score Prediction - Game Predictor
 Predict the score of an upcoming NBA game using the trained model.
 
 Usage:
-    python predict_game.py --home "LAL" --away "GSW"
-    python predict_game.py --game-date "2026-03-15"
+    python predict_game.py --home 1610612747 --away 1610612744
+    python predict_game.py --home 1610612747 --away 1610612744 --date 2026-03-15
 """
 
 import argparse

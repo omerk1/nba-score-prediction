@@ -18,6 +18,7 @@ scores are available for scoring.
 import logging
 import math
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timezone
 
 from nba_api.stats.static import teams as nba_teams
@@ -36,6 +37,35 @@ def _resolve_team_id(abbreviation: str) -> int | None:
     """Map team abbreviation to NBA team_id via nba_api static data."""
     match = next((t for t in nba_teams.get_teams() if t["abbreviation"] == abbreviation), None)
     return match["id"] if match else None
+
+
+def _team_abbreviation(team_id: int) -> str | None:
+    match = next((t for t in nba_teams.get_teams() if t["id"] == team_id), None)
+    return match["abbreviation"] if match else None
+
+
+def _is_scraped(db_path: str, game_date: str, source: str) -> bool:
+    with get_conn(db_path) as conn:
+        return conn.execute(
+            "SELECT 1 FROM scrape_log WHERE game_date = ? AND source = ? LIMIT 1",
+            (game_date, source),
+        ).fetchone() is not None
+
+
+def _load_cached_injuries(db_path: str, game_date: str, source: str) -> dict[int, list[dict]]:
+    with get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT team_id, player_name, status, reason FROM player_injuries WHERE game_date = ? AND source = ?",
+            (game_date, source),
+        ).fetchall()
+    by_team: dict[int, list] = {}
+    for r in rows:
+        by_team.setdefault(r["team_id"], []).append({
+            "player_name": r["player_name"],
+            "status": r["status"],
+            "reason": r["reason"],
+        })
+    return by_team
 
 
 def _get_team_avg_score(raw_db: str, team_id: int, game_date: str, window: int) -> float | None:
@@ -115,18 +145,27 @@ def _get_importance_map(db_path: str, team_id: int, game_date: str, season_start
     }
 
 
-def _store_player_injuries(db_path: str, game_date: str, team_id: int, players: list[dict]) -> None:
+def _store_player_injuries(db_path: str, game_date: str, team_id: int, players: list[dict], source: str) -> None:
     """Persist raw injury records — always called regardless of scorer."""
     rows = [
-        (game_date, team_id, p["player_name"], p.get("status", ""), p.get("reason", ""), p.get("days_out", 0))
+        (game_date, team_id, p["player_name"], p.get("status", ""), p.get("reason", ""), source)
         for p in players
     ]
     with get_conn(db_path) as conn:
         conn.executemany(
             """INSERT OR REPLACE INTO player_injuries
-               (game_date, team_id, player_name, status, reason, days_out)
+               (game_date, team_id, player_name, status, reason, source)
                VALUES (?, ?, ?, ?, ?, ?)""",
             rows,
+        )
+
+
+def _log_scrape(db_path: str, game_date: str, source: str, n_entries: int, report_time: str | None = None) -> None:
+    with get_conn(db_path) as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO scrape_log (game_date, source, report_time, n_entries, scraped_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (game_date, source, report_time, n_entries, datetime.now(timezone.utc).isoformat()),
         )
 
 
@@ -206,12 +245,12 @@ def _score_team(
 
 
 def _process_team(
-    db_path: str, team_id: int, team_name: str, game_date: str, players: list[dict]
+    db_path: str, team_id: int, team_name: str, game_date: str, players: list[dict], source: str
 ) -> None:
     cfg = load_config()
     scorer = cfg.injury_features.scorer
 
-    _store_player_injuries(db_path, game_date, team_id, players)
+    _store_player_injuries(db_path, game_date, team_id, players, source)
 
     with get_conn(db_path) as conn:
         already_scored = conn.execute(
@@ -255,6 +294,7 @@ def run_nightly(game_date: date | None = None) -> None:
     init_db(db_path)
 
     entries = fetch_current_injuries()
+    _log_scrape(db_path, game_date_str, "espn", len(entries))
     by_team: dict[str, list] = {}
     for e in entries:
         by_team.setdefault(e["team_abbreviation"], []).append(e)
@@ -264,7 +304,7 @@ def run_nightly(game_date: date | None = None) -> None:
         if not team_id:
             logger.warning(f"Unknown team abbreviation: {abbr}")
             continue
-        _process_team(db_path, team_id, abbr, game_date_str, players)
+        _process_team(db_path, team_id, abbr, game_date_str, players, "espn")
 
 
 def run_historical(start_date: date, end_date: date) -> None:
@@ -302,23 +342,59 @@ def run_historical(start_date: date, end_date: date) -> None:
         f"(skipping {skipped} pre-PDF-era dates)"
     )
 
+    # Collect all work items (PDF scraping is sequential; team scoring is parallelised below)
+    work_items: list[tuple] = []
     for i, game_date in enumerate(game_dates, 1):
         if i % 50 == 0:
-            logger.info(f"Progress: {i}/{len(game_dates)} dates scanned")
-        # Injury PDFs are pre-game filings (submitted ≥30 min before tip-off).
-        # Using the latest report for game_date gives the most complete pre-game picture
-        # with no data leakage — we never use date+1 information for date's games.
-        entries = fetch_injuries_for_date(game_date)
-        if entries:
-            date_str = str(game_date)
-            by_team: dict[str, list] = {}
-            for e in entries:
-                by_team.setdefault(e["team_abbreviation"], []).append(e)
+            logger.info(f"Scanning: {i}/{len(game_dates)} dates")
+        date_str = str(game_date)
 
-            logger.info(f"Processing {date_str} ({len(by_team)} teams with injuries)")
-            for abbr, players in by_team.items():
-                team_id = _resolve_team_id(abbr)
-                if not team_id:
-                    logger.warning(f"Unknown team abbreviation: {abbr}")
-                    continue
-                _process_team(db_path, team_id, abbr, date_str, players)
+        if _is_scraped(db_path, date_str, "pdf"):
+            by_team_cached = _load_cached_injuries(db_path, date_str, "pdf")
+            for team_id, players in by_team_cached.items():
+                abbr = _team_abbreviation(team_id) or str(team_id)
+                work_items.append((db_path, team_id, abbr, date_str, players, "pdf"))
+        else:
+            entries, report_time = fetch_injuries_for_date(game_date)
+            _log_scrape(db_path, date_str, "pdf", len(entries), report_time)
+            if entries:
+                by_team: dict[str, list] = {}
+                for e in entries:
+                    by_team.setdefault(e["team_abbreviation"], []).append(e)
+                logger.info(f"Scraped {date_str} ({len(by_team)} teams with injuries)")
+                for abbr, players in by_team.items():
+                    team_id = _resolve_team_id(abbr)
+                    if not team_id:
+                        logger.warning(f"Unknown team abbreviation: {abbr}")
+                        continue
+                    work_items.append((db_path, team_id, abbr, date_str, players, "pdf"))
+
+    scorer = cfg.injury_features.scorer
+    logger.info(f"Processing {len(work_items)} team-date entries (scorer={scorer})")
+
+    if scorer == "llm":
+        workers = cfg.injury_features.parallel_workers
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {executor.submit(_process_team, *item): item for item in work_items}
+            done = 0
+            for future in as_completed(futures):
+                done += 1
+                if done % 500 == 0:
+                    logger.info(f"Progress: {done}/{len(work_items)} teams processed")
+                try:
+                    future.result()
+                except RuntimeError as e:
+                    if "Daily quota exhausted" in str(e):
+                        logger.error(str(e))
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        return
+                    item = futures[future]
+                    logger.error(f"Failed {item[2]} on {item[3]}: {e}")
+                except Exception as e:
+                    item = futures[future]
+                    logger.error(f"Failed {item[2]} on {item[3]}: {e}")
+    else:
+        for i, item in enumerate(work_items, 1):
+            if i % 500 == 0:
+                logger.info(f"Progress: {i}/{len(work_items)} teams processed")
+            _process_team(*item)

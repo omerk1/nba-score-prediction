@@ -1,152 +1,153 @@
-# NBA Score Prediction Project
+# NBA Score Prediction
 
-Predicting NBA game scores with focus on point differential accuracy using statistical features and news analysis.
+Predicting NBA game scores with emphasis on point differential accuracy using statistical features and injury impact analysis.
 
-## 🎯 Project Goal
+## Goal
 
 Predict exact scores of NBA games, prioritizing accurate point differential over absolute score proximity.
 
-**Example:** If the actual score is Home 108 - Away 101 (diff: +7):
-- ✅ Better: Home 98 - Away 91 (diff: +7)
-- ❌ Worse: Home 106 - Away 104 (diff: +2)
+**Example:** Actual score — Home 108, Away 101 (diff: +7)
+- Better: Home 98, Away 91 (diff: +7)
+- Worse: Home 106, Away 104 (diff: +2)
 
-## 🏗️ Architecture
+## Architecture
 
-**Approach:** News-Driven Feature Engineering + Gradient Boosting
+**Approach:** Statistical Feature Engineering + Gradient Boosting
 
-1. **Statistical Features**: Team performance, rolling averages, rest days, matchups
-2. **News Features**: Injury reports, momentum, team chemistry (LLM-extracted)
-3. **Model**: CatBoost/LightGBM for point differential → Convert to scores
+1. **Statistical features** — team performance, rolling averages, rest days, head-to-head matchups
+2. **Injury features** — per-game impact scores derived from official NBA injury reports (formula-based or LLM-based)
+3. **Model** — CatBoost/LightGBM predicting point differential, converted to final scores
 
-## 📊 Data Sources
-
-- **Historical Stats**: [Kaggle NBA Database](https://www.kaggle.com/datasets/wyattowalsh/basketball)
-- **News**: NBA.com, ESPN, Reddit r/nba, Basketball-Reference
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
-```bash
-python >= 3.9
-pip or conda
+
+```
+Python >= 3.9
 ```
 
 ### Installation
+
 ```bash
-# Clone the repository
 git clone <your-repo-url>
 cd nba-score-prediction
-
-# Create virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Download Data
-1. Download the [Kaggle NBA dataset](https://www.kaggle.com/datasets/wyattowalsh/basketball)
-2. Place `basketball.sqlite` in `data/raw/`
+### Fetch data
 
+```bash
+python src/data_processing/fetch_data.py
+```
 
-## 📁 Project Structure
+Data is pulled from the [nba_api](https://github.com/swar/nba_api) and stored in `data/raw/nba_api.sqlite`. Subsequent runs are incremental — existing rows are skipped via `INSERT OR IGNORE`.
+
+### Train
+
+```bash
+python train_model.py --run-name baseline_stats_only
+python train_model.py --run-name injury_v1 --notes "with injury features enabled"
+```
+
+Every run appends a row to `outputs/experiments.csv` for ablation comparison.
+
+### Predict
+
+```bash
+python predict_game.py --home 1610612747 --away 1610612744
+python predict_game.py --home 1610612747 --away 1610612744 --date 2026-03-15
+```
+
+`--home` and `--away` take numeric NBA team IDs. `--date` defaults to today.
+
+## Project Structure
 
 ```
 nba-score-prediction/
-├── data/
-│   ├── raw/              # Original data (not in git)
-│   ├── processed/        # Cleaned data
-│   ├── features/         # Engineered features
-│   └── models/           # Trained models
 ├── src/
-│   ├── data_processing/  # Data loading and cleaning
-│   ├── feature_engineering/  # Statistical & news features
-│   ├── models/           # Model training and evaluation
-│   ├── news_scraping/    # News collection scripts
-│   └── utils/            # Helper functions
-├── notebooks/            # Jupyter notebooks for exploration
-├── tests/                # Unit tests
-├── configs/              # Configuration files
-├── outputs/              # Predictions and reports
-└── docs/                 # Documentation
+│   ├── data_processing/          # Data fetching and loading (nba_api -> SQLite)
+│   ├── feature_engineering/      # Statistical and injury feature construction
+│   ├── models/                   # Model training and evaluation
+│   ├── news_scraping/            # Injury scrapers, DB, and impact extractors
+│   └── utils/                    # Config loading and shared utilities
+├── configs/
+│   └── config.yaml               # All runtime parameters
+├── data/
+│   ├── raw/                      # SQLite databases (not in git)
+│   ├── processed/                # Cleaned data
+│   ├── features/                 # Engineered features
+│   └── models/                   # Trained model artifacts
+├── notebooks/                    # Exploration notebooks
+├── outputs/                      # Predictions and experiments.csv
+├── train_model.py                # Training entry point
+├── predict_game.py               # Inference entry point
+└── build_injury_features.py      # Injury feature backfill pipeline
 ```
 
-## 🩹 Injury Features Pipeline
+## Injury Features Pipeline
 
-Player injury data is extracted via LLM and stored in a local SQLite DB, then joined into the model features at training time. The feature is toggled via `configs/config.yaml` (`injury_features.enabled`).
+Player injury data is scraped from ESPN and official NBA PDFs, scored for game impact, and joined into the model at training time. Toggled via `injury_features.enabled` in `configs/config.yaml`.
 
-### Setup
+Two scorer modes are available:
+
+| Mode | Speed | API Required | Notes |
+|------|-------|-------------|-------|
+| `formula` | Fast | No | Deterministic: importance × status weight |
+| `llm` | Slower | Yes (Gemini) | Richer context-aware impact scores |
+
+Set `scorer: formula` or `scorer: llm` in `configs/config.yaml`.
+
+### Setup (LLM mode only)
 
 ```bash
-# 1. Get a free Gemini API key at aistudio.google.com (takes 30 seconds)
 cp .env.example .env
-# Edit .env and add: GOOGLE_API_KEY=your-key-here
+# Add GOOGLE_API_KEY to .env
 ```
 
 ### Running the backfill
 
-Steps must run **in order**. All steps are **resumable** — they use `INSERT OR REPLACE`, so you can stop and restart at any point without duplicating work.
+Steps must run in order. All steps are resumable — use `INSERT OR REPLACE`, so stopping and restarting is safe.
 
 ```bash
 # Step 1: Build player importance scores from nba_api (~10 min, no LLM)
 python build_injury_features.py --run build_player_importance
 
-# Step 2: Backfill historical injury features (LLM-based, takes time — see note below)
+# Step 2: Backfill historical injury features
 python build_injury_features.py --run backfill_historical_injuries
 
-# Step 3 (daily cron): Fetch today's injuries before game time
+# Step 3 (daily): Fetch today's injuries before game time
 python build_injury_features.py --run nightly_update
 ```
 
-**Test first on a small range** before committing to the full backfill:
+Test on a small range before committing to the full backfill:
+
 ```bash
 python build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
 ```
 
-**Resuming** after hitting the daily API limit — just move `--start` forward:
+To resume after an interruption, advance `--start`:
+
 ```bash
 python build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
 ```
 
-### Rate limits (Gemini free tier)
+NBA official injury PDFs are available from the 2021-22 season onward (`pdf_era_start` in config). Earlier seasons fall back to ESPN scraping.
 
-| Limit | Value | Impact |
-|-------|-------|--------|
-| Requests/minute | 15 RPM | ~4.3s sleep after each call (auto-managed) |
-| Requests/day | 1,500 | Full backfill (8 seasons) takes ~14 days |
-
-Internally the scraper fetches all transactions **once per season**, not once per date, so the bottleneck is the LLM cap — not scraping speed.
-
-### Enabling the feature
+### Enable in training
 
 Once the DB is populated, set `injury_features.enabled: true` in `configs/config.yaml` and retrain.
 
----
+## Configuration
 
-## 🔄 Development Workflow
+All parameters are in `configs/config.yaml`:
 
-1. **Local**: Data exploration, feature engineering, experimentation
-2. **Colab** (when needed): LLM feature extraction, GPU-intensive tasks
-3. **Local**: Model training, inference, iteration
+- **Data date ranges** — train/validation/test splits by season
+- **Rolling window sizes** — for team averages and head-to-head features
+- **Model hyperparameters**
+- **Injury feature settings** — scorer mode, DB path, API rate limits, importance weights
 
-## 📈 Roadmap
+## License
 
-- [x] Project setup
-- [ ] Phase 1: Data exploration & statistical features
-- [ ] Phase 2: News scraping & LLM feature extraction
-- [ ] Phase 3: Baseline model training
-- [ ] Phase 4: Model optimization & evaluation
-- [ ] Phase 5: Production pipeline
-
-## 📝 License
-
-MIT License - Feel free to use and modify
-
-## 🤝 Contributing
-
-This is a personal project, but suggestions and improvements are welcome!
-
----
-
-**Note**: This project is designed to run locally with optional GPU usage via Google Colab for LLM inference.
+MIT

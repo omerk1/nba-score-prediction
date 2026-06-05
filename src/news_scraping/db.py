@@ -21,8 +21,17 @@ CREATE TABLE IF NOT EXISTS player_injuries (
     player_name TEXT NOT NULL,
     status      TEXT NOT NULL,
     reason      TEXT,
-    days_out    INTEGER DEFAULT 0,
+    source      TEXT NOT NULL DEFAULT 'pdf',
     PRIMARY KEY (game_date, team_id, player_name)
+);
+
+CREATE TABLE IF NOT EXISTS scrape_log (
+    game_date   TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    report_time TEXT,
+    n_entries   INTEGER NOT NULL DEFAULT 0,
+    scraped_at  TEXT NOT NULL,
+    PRIMARY KEY (game_date, source)
 );
 
 CREATE TABLE IF NOT EXISTS injury_features (
@@ -42,11 +51,12 @@ def init_db(db_path: str | Path) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.executescript(_SCHEMA)
+        conn.execute("PRAGMA journal_mode=WAL")
 
 
 @contextmanager
 def get_conn(db_path: str | Path):
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30)
     conn.row_factory = sqlite3.Row
     try:
         yield conn

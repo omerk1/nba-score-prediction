@@ -178,20 +178,20 @@ def _parse_pdf(content: bytes) -> list[dict]:
     return rows
 
 
-def fetch_injuries_for_date(game_date: date) -> list[dict]:
+def fetch_injuries_for_date(game_date: date) -> tuple[list[dict], str | None]:
     """
     Download the latest NBA official injury report PDF for game_date.
     Scans from latest hour to earliest and returns on the first hit,
     so we always get the most up-to-date pre-game report with minimal requests.
-    Returns [] if no report found.
+    Returns (entries, report_time) or ([], None) if no report found.
     """
     hour_list = _REPORT_HOURS_NEW if game_date >= _NEW_FORMAT_CUTOVER else _REPORT_HOURS_OLD
     for hour_str in hour_list:
         content = _fetch_pdf_bytes(_pdf_url(game_date, hour_str))
         if content:
             rows = _parse_pdf(content)
-            logger.info(f"NBA PDF {game_date}: {len(rows)} injury entries")
-            return rows
+            logger.info(f"NBA PDF {game_date}: {len(rows)} injury entries ({hour_str})")
+            return rows, hour_str
         time.sleep(0.05)
 
-    return []
+    return [], None
