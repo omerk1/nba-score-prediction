@@ -30,8 +30,8 @@ class FeatureBuilder:
     - Head-to-head history
     """
 
-    def __init__(self, rolling_window: int = 10, h2h_margin_window: int = 3, h2h_win_rate_window: int = 5):
-        self.rolling_window = rolling_window
+    def __init__(self, rolling_windows: list[int], h2h_margin_window: int = 3, h2h_win_rate_window: int = 5):
+        self.rolling_windows = sorted(rolling_windows)
         self.h2h_margin_window = h2h_margin_window
         self.h2h_win_rate_window = h2h_win_rate_window
 
@@ -74,40 +74,33 @@ class FeatureBuilder:
 
     def _add_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add rolling average features for recent performance."""
-        window = self.rolling_window
-
         for team_col, pts_col, prefix in [
             ('HOME_TEAM_ID', 'PTS_home', 'home_team'),
             ('AWAY_TEAM_ID', 'PTS_away', 'away_team')
         ]:
-            # Rolling average points scored
-            df[f'{prefix}_pts_avg_L{window}'] = df.groupby(team_col)[pts_col].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-            )
-
-            # Rolling win percentage — temp column so the lambda groups the right series per team
             _win = f'_win_{prefix}'
-            df[_win] = (df['POINT_DIFF'] > 0) if prefix == 'home_team' else (df['POINT_DIFF'] < 0)
-            df[f'{prefix}_win_pct_L{window}'] = df.groupby(team_col)[_win].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-            )
-            df.drop(columns=[_win], inplace=True)
-
-            # Rolling average point differential
             _diff = f'_diff_{prefix}'
+            df[_win] = (df['POINT_DIFF'] > 0) if prefix == 'home_team' else (df['POINT_DIFF'] < 0)
             df[_diff] = df['POINT_DIFF'] if prefix == 'home_team' else -df['POINT_DIFF']
-            df[f'{prefix}_diff_avg_L{window}'] = df.groupby(team_col)[_diff].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-            )
-            df.drop(columns=[_diff], inplace=True)
 
-            # Rolling shooting percentages
-            for stat in ['FG_PCT', 'FG3_PCT', 'FT_PCT']:
-                stat_col = f'{stat}_{prefix.split("_")[0]}'
-                if stat_col in df.columns:
-                    df[f'{prefix}_{stat.lower()}_L{window}'] = df.groupby(team_col)[stat_col].transform(
-                        lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-                    )
+            for window in self.rolling_windows:
+                df[f'{prefix}_pts_avg_L{window}'] = df.groupby(team_col)[pts_col].transform(
+                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                )
+                df[f'{prefix}_win_pct_L{window}'] = df.groupby(team_col)[_win].transform(
+                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                )
+                df[f'{prefix}_diff_avg_L{window}'] = df.groupby(team_col)[_diff].transform(
+                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                )
+                for stat in ['FG_PCT', 'FG3_PCT', 'FT_PCT']:
+                    stat_col = f'{stat}_{prefix.split("_")[0]}'
+                    if stat_col in df.columns:
+                        df[f'{prefix}_{stat.lower()}_L{window}'] = df.groupby(team_col)[stat_col].transform(
+                            lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                        )
+
+            df.drop(columns=[_win, _diff], inplace=True)
 
         return df
 
@@ -141,31 +134,28 @@ class FeatureBuilder:
         Captures how teams play (pace, shooting style, etc.)
         These are crucial for matchup analysis.
         """
-        window = self.rolling_window
-
         for team_col, prefix in [
             ('HOME_TEAM_ID', 'home_team'),
             ('AWAY_TEAM_ID', 'away_team')
         ]:
-            grouped = df.groupby(team_col)
-
-            # Three-point shooting rate (approximated)
-            if f'FG3_PCT_{prefix.split("_")[0]}' in df.columns:
-                df[f'{prefix}_3pt_rate_L{window}'] = grouped[f'FG3_PCT_{prefix.split("_")[0]}'].transform(
-                    lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-                )
-
-            # Offensive efficiency (points per game)
             pts_col = 'PTS_home' if prefix == 'home_team' else 'PTS_away'
-            df[f'{prefix}_off_eff_L{window}'] = grouped[pts_col].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-            )
-
-            # Defensive efficiency (opponent points)
             opp_pts_col = 'PTS_away' if prefix == 'home_team' else 'PTS_home'
-            df[f'{prefix}_def_eff_L{window}'] = grouped[opp_pts_col].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-            )
+            fg3_col = f'FG3_PCT_{prefix.split("_")[0]}'
+
+            for window in self.rolling_windows:
+                grouped = df.groupby(team_col)
+
+                if fg3_col in df.columns:
+                    df[f'{prefix}_3pt_rate_L{window}'] = grouped[fg3_col].transform(
+                        lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                    )
+
+                df[f'{prefix}_off_eff_L{window}'] = grouped[pts_col].transform(
+                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                )
+                df[f'{prefix}_def_eff_L{window}'] = grouped[opp_pts_col].transform(
+                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                )
 
         return df
 
@@ -177,13 +167,15 @@ class FeatureBuilder:
         a team when they're home, away_pts_avg when they're away). This feature makes the
         home/road gap explicit, capturing teams that are particularly strong or weak at home.
         """
-        window = self.rolling_window
+        for window in self.rolling_windows:
+            df = self._compute_venue_delta(df, window)
+        return df
 
-        # Build two lookup tables: (date, team_id) → rolling avg in that role
+    def _compute_venue_delta(self, df: pd.DataFrame, window: int) -> pd.DataFrame:
         home_lookup = (
             df[['GAME_DATE', 'HOME_TEAM_ID']]
             .assign(home_roll=df.groupby('HOME_TEAM_ID')['PTS_home'].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+                lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
             ))
             .rename(columns={'HOME_TEAM_ID': 'team_id'})
             .sort_values('GAME_DATE')
@@ -191,31 +183,27 @@ class FeatureBuilder:
         away_lookup = (
             df[['GAME_DATE', 'AWAY_TEAM_ID']]
             .assign(away_roll=df.groupby('AWAY_TEAM_ID')['PTS_away'].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+                lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
             ))
             .rename(columns={'AWAY_TEAM_ID': 'team_id'})
             .sort_values('GAME_DATE')
         )
 
-        # df is already sorted by GAME_DATE after create_all_features sorts it
         home_query = df[['GAME_DATE', 'HOME_TEAM_ID']].rename(columns={'HOME_TEAM_ID': 'team_id'})
         away_query = df[['GAME_DATE', 'AWAY_TEAM_ID']].rename(columns={'AWAY_TEAM_ID': 'team_id'})
 
-        # For home team: most recent away_roll before this game
         home_team_away_roll = pd.merge_asof(
             home_query, away_lookup, on='GAME_DATE', by='team_id', direction='backward'
         )['away_roll']
-
-        # For away team: most recent home_roll before this game
         away_team_home_roll = pd.merge_asof(
             away_query, home_lookup, on='GAME_DATE', by='team_id', direction='backward'
         )['home_roll']
 
         home_roll = df.groupby('HOME_TEAM_ID')['PTS_home'].transform(
-            lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+            lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
         )
         away_roll = df.groupby('AWAY_TEAM_ID')['PTS_away'].transform(
-            lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+            lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
         )
 
         df[f'home_team_venue_delta_L{window}'] = home_roll.values - home_team_away_roll.values
@@ -233,27 +221,19 @@ class FeatureBuilder:
         - Good shooting team vs bad perimeter defense
         - Offensive powerhouse vs defensive team
         """
-        window = self.rolling_window
+        for window in self.rolling_windows:
+            if f'home_team_off_eff_L{window}' in df.columns:
+                df[f'home_off_vs_away_def_L{window}'] = df[f'home_team_off_eff_L{window}'] - df[f'away_team_def_eff_L{window}']
+                df[f'away_off_vs_home_def_L{window}'] = df[f'away_team_off_eff_L{window}'] - df[f'home_team_def_eff_L{window}']
 
-        # Offensive vs Defensive matchup
-        if f'home_team_off_eff_L{window}' in df.columns and f'away_team_def_eff_L{window}' in df.columns:
-            # Home offense vs away defense
-            df['home_off_vs_away_def'] = df[f'home_team_off_eff_L{window}'] - df[f'away_team_def_eff_L{window}']
-            # Away offense vs home defense
-            df['away_off_vs_home_def'] = df[f'away_team_off_eff_L{window}'] - df[f'home_team_def_eff_L{window}']
+            if f'home_team_3pt_rate_L{window}' in df.columns:
+                df[f'home_3pt_advantage_L{window}'] = df[f'home_team_3pt_rate_L{window}'] - df[f'away_team_3pt_rate_L{window}']
 
-        # Style mismatch: 3-point shooting
-        if f'home_team_3pt_rate_L{window}' in df.columns:
-            # Home 3PT shooting advantage
-            df['home_3pt_advantage'] = df[f'home_team_3pt_rate_L{window}'] - df[f'away_team_3pt_rate_L{window}']
+            if f'home_team_win_pct_L{window}' in df.columns:
+                df[f'form_differential_L{window}'] = df[f'home_team_win_pct_L{window}'] - df[f'away_team_win_pct_L{window}']
 
-        # Recent form differential
-        if f'home_team_win_pct_L{window}' in df.columns:
-            df['form_differential'] = df[f'home_team_win_pct_L{window}'] - df[f'away_team_win_pct_L{window}']
-
-        # Strength differential (point differential trends)
-        if f'home_team_diff_avg_L{window}' in df.columns:
-            df['strength_differential'] = df[f'home_team_diff_avg_L{window}'] - df[f'away_team_diff_avg_L{window}']
+            if f'home_team_diff_avg_L{window}' in df.columns:
+                df[f'strength_differential_L{window}'] = df[f'home_team_diff_avg_L{window}'] - df[f'away_team_diff_avg_L{window}']
 
         return df
 

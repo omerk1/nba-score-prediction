@@ -27,7 +27,8 @@ class DatasetsLoadingConfig(BaseModel):
 
 
 class FeaturesConfig(BaseModel):
-    rolling_window: int
+    rolling_windows: list[int]
+    naive_rolling_baseline: int
     min_games_played: int
     h2h_margin_window: int = 3
     h2h_win_rate_window: int = 5

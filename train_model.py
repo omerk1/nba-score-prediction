@@ -88,7 +88,7 @@ def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_
         # Run metadata
         "n_features":         n_features,
         "injury_enabled":     bool(config.injury_features and config.injury_features.enabled),
-        "rolling_window":     config.features.rolling_window,
+        "rolling_windows":    ",".join(str(w) for w in config.features.rolling_windows),
         "notes":              notes,
     }
 
@@ -129,7 +129,7 @@ def main():
         return
 
     feature_builder = FeatureBuilder(
-        rolling_window=config.features.rolling_window,
+        rolling_windows=config.features.rolling_windows,
         h2h_margin_window=config.features.h2h_margin_window,
         h2h_win_rate_window=config.features.h2h_win_rate_window,
     )
@@ -172,16 +172,19 @@ def main():
     train_metrics, val_metrics = predictor.train(X_train, y_train, X_val, y_val)
     test_metrics = predictor.evaluate(X_test, y_test, dataset_name="Test")
 
-    window = config.features.rolling_window
-    baseline_val  = _naive_baseline_metrics(val_features,  y_val,  window)
-    baseline_test = _naive_baseline_metrics(test_features, y_test, window)
-    logger.info(
-        f"Naive baseline (rolling-{window}) — "
-        f"val diff_mae: {baseline_val['diff_mae']:.2f} | "
-        f"test diff_mae: {baseline_test['diff_mae']:.2f} | "
-        f"val win_acc: {baseline_val['win_accuracy']:.1%} | "
-        f"test win_acc: {baseline_test['win_accuracy']:.1%}"
-    )
+    naive_window = config.features.naive_rolling_baseline
+    if naive_window not in config.features.rolling_windows:
+        logger.warning(f"naive_rolling_baseline {naive_window} is not in rolling_windows {config.features.rolling_windows} — skipping naive baseline")
+    else:
+        baseline_val  = _naive_baseline_metrics(val_features,  y_val,  naive_window)
+        baseline_test = _naive_baseline_metrics(test_features, y_test, naive_window)
+        logger.info(
+            f"Naive baseline (rolling-{naive_window}) — "
+            f"val diff_mae: {baseline_val['diff_mae']:.2f} | "
+            f"test diff_mae: {baseline_test['diff_mae']:.2f} | "
+            f"val win_acc: {baseline_val['win_accuracy']:.1%} | "
+            f"test win_acc: {baseline_test['win_accuracy']:.1%}"
+        )
     baseline_run_name = f"naive_rolling_{window}"
     experiments_path = Path("outputs/experiments.csv")
     already_logged = (
