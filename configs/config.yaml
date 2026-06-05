@@ -41,6 +41,16 @@ features:
     - "TOTAL_POINTS"
     - "HOME_TEAM_WINS"
     - "matchup_key"
+    - "FG_PCT_home"
+    - "FG_PCT_away"
+    - "FT_PCT_home"
+    - "FT_PCT_away"
+    - "FG3_PCT_home"
+    - "FG3_PCT_away"
+    - "AST_home"
+    - "AST_away"
+    - "REB_home"
+    - "REB_away"
   
 # Model parameters
 model:
@@ -48,7 +58,7 @@ model:
   
 injury_features:
   enabled: true
-  scorer: llm                       # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
+  scorer: llm                           # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
   db_path: "data/raw/injury_features.sqlite"
   llm_model: "gemini-2.5-flash"
   api_calls_per_minute: 900         # Paid tier limit is 1000 RPM; staying 10% under
