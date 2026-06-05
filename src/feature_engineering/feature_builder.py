@@ -67,9 +67,6 @@ class FeatureBuilder:
 
     def _add_basic_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add basic game-level features"""
-        # Home indicator
-        df['is_home'] = 1
-
         # Season progress (0 to 1)
         df['season_progress'] = df.groupby('SEASON_ID').cumcount() / df.groupby('SEASON_ID')['SEASON_ID'].transform('count')
 
@@ -90,7 +87,7 @@ class FeatureBuilder:
 
             # Rolling win percentage — temp column so the lambda groups the right series per team
             _win = f'_win_{prefix}'
-            df[_win] = (df['POINT_DIFF'] > 0) if prefix == 'home' else (df['POINT_DIFF'] < 0)
+            df[_win] = (df['POINT_DIFF'] > 0) if prefix == 'home_team' else (df['POINT_DIFF'] < 0)
             df[f'{prefix}_win_pct_L{window}'] = df.groupby(team_col)[_win].transform(
                 lambda x: x.shift(1).rolling(window, min_periods=1).mean()
             )
@@ -98,7 +95,7 @@ class FeatureBuilder:
 
             # Rolling average point differential
             _diff = f'_diff_{prefix}'
-            df[_diff] = df['POINT_DIFF'] if prefix == 'home' else -df['POINT_DIFF']
+            df[_diff] = df['POINT_DIFF'] if prefix == 'home_team' else -df['POINT_DIFF']
             df[f'{prefix}_diff_avg_L{window}'] = df.groupby(team_col)[_diff].transform(
                 lambda x: x.shift(1).rolling(window, min_periods=1).mean()
             )
@@ -106,7 +103,7 @@ class FeatureBuilder:
 
             # Rolling shooting percentages
             for stat in ['FG_PCT', 'FG3_PCT', 'FT_PCT']:
-                stat_col = f'{stat}_{prefix}'
+                stat_col = f'{stat}_{prefix.split("_")[0]}'
                 if stat_col in df.columns:
                     df[f'{prefix}_{stat.lower()}_L{window}'] = df.groupby(team_col)[stat_col].transform(
                         lambda x: x.shift(1).rolling(window, min_periods=1).mean()
@@ -152,11 +149,6 @@ class FeatureBuilder:
         ]:
             grouped = df.groupby(team_col)
 
-            # Offensive pace (approximated by total points)
-            df[f'{prefix}_pace_L{window}'] = grouped['TOTAL_POINTS'].transform(
-                lambda x: x.shift(1).rolling(window, min_periods=1).mean()
-            )
-
             # Three-point shooting rate (approximated)
             if f'FG3_PCT_{prefix.split("_")[0]}' in df.columns:
                 df[f'{prefix}_3pt_rate_L{window}'] = grouped[f'FG3_PCT_{prefix.split("_")[0]}'].transform(
@@ -164,13 +156,13 @@ class FeatureBuilder:
                 )
 
             # Offensive efficiency (points per game)
-            pts_col = 'PTS_home' if prefix == 'home' else 'PTS_away'
+            pts_col = 'PTS_home' if prefix == 'home_team' else 'PTS_away'
             df[f'{prefix}_off_eff_L{window}'] = grouped[pts_col].transform(
                 lambda x: x.shift(1).rolling(window, min_periods=1).mean()
             )
 
             # Defensive efficiency (opponent points)
-            opp_pts_col = 'PTS_away' if prefix == 'home' else 'PTS_home'
+            opp_pts_col = 'PTS_away' if prefix == 'home_team' else 'PTS_home'
             df[f'{prefix}_def_eff_L{window}'] = grouped[opp_pts_col].transform(
                 lambda x: x.shift(1).rolling(window, min_periods=1).mean()
             )
@@ -243,29 +235,25 @@ class FeatureBuilder:
         """
         window = self.rolling_window
 
-        # Pace mismatch (advantage for faster team)
-        if f'home_pace_L{window}' in df.columns and f'away_pace_L{window}' in df.columns:
-            df['pace_differential'] = df[f'home_pace_L{window}'] - df[f'away_pace_L{window}']
-
         # Offensive vs Defensive matchup
-        if f'home_off_eff_L{window}' in df.columns and f'away_def_eff_L{window}' in df.columns:
+        if f'home_team_off_eff_L{window}' in df.columns and f'away_team_def_eff_L{window}' in df.columns:
             # Home offense vs away defense
-            df['home_off_vs_away_def'] = df[f'home_off_eff_L{window}'] - df[f'away_def_eff_L{window}']
+            df['home_off_vs_away_def'] = df[f'home_team_off_eff_L{window}'] - df[f'away_team_def_eff_L{window}']
             # Away offense vs home defense
-            df['away_off_vs_home_def'] = df[f'away_off_eff_L{window}'] - df[f'home_def_eff_L{window}']
+            df['away_off_vs_home_def'] = df[f'away_team_off_eff_L{window}'] - df[f'home_team_def_eff_L{window}']
 
         # Style mismatch: 3-point shooting
-        if f'home_3pt_rate_L{window}' in df.columns:
+        if f'home_team_3pt_rate_L{window}' in df.columns:
             # Home 3PT shooting advantage
-            df['home_3pt_advantage'] = df[f'home_3pt_rate_L{window}'] - df[f'away_3pt_rate_L{window}']
+            df['home_3pt_advantage'] = df[f'home_team_3pt_rate_L{window}'] - df[f'away_team_3pt_rate_L{window}']
 
         # Recent form differential
-        if f'home_win_pct_L{window}' in df.columns:
-            df['form_differential'] = df[f'home_win_pct_L{window}'] - df[f'away_win_pct_L{window}']
+        if f'home_team_win_pct_L{window}' in df.columns:
+            df['form_differential'] = df[f'home_team_win_pct_L{window}'] - df[f'away_team_win_pct_L{window}']
 
         # Strength differential (point differential trends)
-        if f'home_diff_avg_L{window}' in df.columns:
-            df['strength_differential'] = df[f'home_diff_avg_L{window}'] - df[f'away_diff_avg_L{window}']
+        if f'home_team_diff_avg_L{window}' in df.columns:
+            df['strength_differential'] = df[f'home_team_diff_avg_L{window}'] - df[f'away_team_diff_avg_L{window}']
 
         return df
 
