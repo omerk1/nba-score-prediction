@@ -192,6 +192,8 @@ def extract_impact(
             _rate_limiter.wait()
             return result
         except Exception as e:
+            if "GenerateRequestsPerDayPerProjectPerModel" in str(e):
+                raise RuntimeError(f"Daily quota exhausted — re-run after quota resets. ({e})") from e
             wait = _RETRY_BASE_DELAY * (2 ** attempt)
             if attempt < _MAX_RETRIES - 1:
                 logger.warning(f"Gemini error for {team_name} on {game_date} (attempt {attempt + 1}/{_MAX_RETRIES}), retrying in {wait}s: {e}")

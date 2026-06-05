@@ -383,6 +383,13 @@ def run_historical(start_date: date, end_date: date) -> None:
                     logger.info(f"Progress: {done}/{len(work_items)} teams processed")
                 try:
                     future.result()
+                except RuntimeError as e:
+                    if "Daily quota exhausted" in str(e):
+                        logger.error(str(e))
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        return
+                    item = futures[future]
+                    logger.error(f"Failed {item[2]} on {item[3]}: {e}")
                 except Exception as e:
                     item = futures[future]
                     logger.error(f"Failed {item[2]} on {item[3]}: {e}")
