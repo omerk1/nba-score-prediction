@@ -333,7 +333,7 @@ if __name__ == "__main__":
         data_start_date=cfg.datasets_loading.data_start_date,
     )
 
-    fb = FeatureBuilder(rolling_window=cfg.features.rolling_window)
+    fb = FeatureBuilder(rolling_windows=cfg.features.rolling_windows)
 
     train_features = fb.create_all_features(train_df)
     test_features = fb.create_all_features(test_df)

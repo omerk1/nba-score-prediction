@@ -185,17 +185,18 @@ def main():
             f"val win_acc: {baseline_val['win_accuracy']:.1%} | "
             f"test win_acc: {baseline_test['win_accuracy']:.1%}"
         )
-    baseline_run_name = f"naive_rolling_{window}"
-    experiments_path = Path("outputs/experiments.csv")
-    already_logged = (
-        experiments_path.exists()
-        and baseline_run_name in experiments_path.read_text()
-    )
-    if not already_logged:
-        _save_experiment(
-            baseline_run_name, f"auto-generated baseline (rolling {window}-game avg)",
-            config, baseline_val, baseline_test, 2
+    if naive_window in config.features.rolling_windows:
+        baseline_run_name = f"naive_rolling_{naive_window}"
+        experiments_path = Path("outputs/experiments.csv")
+        already_logged = (
+            experiments_path.exists()
+            and baseline_run_name in experiments_path.read_text()
         )
+        if not already_logged:
+            _save_experiment(
+                baseline_run_name, f"auto-generated baseline (rolling {naive_window}-game avg)",
+                config, baseline_val, baseline_test, 2
+            )
 
     importance_df = predictor.get_feature_importance(top_n=20)
     print("\nTop 20 features:\n" + importance_df.to_string(index=False))
@@ -233,7 +234,7 @@ def main():
         'val_metrics': val_metrics,
         'test_metrics': test_metrics,
         'model_type': 'catboost',
-        'rolling_window': config.features.rolling_window,
+        'rolling_windows': config.features.rolling_windows,
         'random_state': config.model.random_state,
     }
     with open(models_dir / "training_metadata.json", 'w') as f:
