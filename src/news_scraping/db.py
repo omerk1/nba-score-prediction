@@ -38,9 +38,9 @@ CREATE TABLE IF NOT EXISTS injury_features (
     game_date      TEXT NOT NULL,
     team_id        INTEGER NOT NULL,
     scorer         TEXT NOT NULL DEFAULT 'formula',
-    impact_score   REAL NOT NULL,
     n_out          INTEGER NOT NULL,
     n_questionable INTEGER NOT NULL,
+    team_deficit   REAL NOT NULL DEFAULT 0.0,
     updated_at     TEXT NOT NULL,
     PRIMARY KEY (game_date, team_id, scorer)
 );
@@ -52,6 +52,15 @@ def init_db(db_path: str | Path) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.executescript(_SCHEMA)
         conn.execute("PRAGMA journal_mode=WAL")
+        # Migrate existing DBs
+        try:
+            conn.execute("ALTER TABLE injury_features ADD COLUMN team_deficit REAL NOT NULL DEFAULT 0.0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            conn.execute("ALTER TABLE injury_features DROP COLUMN impact_score")
+        except sqlite3.OperationalError:
+            pass  # Column already dropped or never existed
 
 
 @contextmanager

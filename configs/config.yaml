@@ -82,6 +82,8 @@ injury_features:
     minutes_share: 0.4
     usage_rate: 0.4
     pts_share: 0.2
-  formula_weights:
-    out_weight: -1.0
-    questionable_weight: -0.5
+  severity_weights:
+    severe: 1.0    # Surgery, fracture, tear, rupture, ACL
+    moderate: 0.6  # Sprain, strain, bone bruise
+    minor: 0.3     # Soreness, illness, injury recovery, unknown
+  doubtful_weight: 0.8  # Fraction of Out severity applied to Doubtful players
