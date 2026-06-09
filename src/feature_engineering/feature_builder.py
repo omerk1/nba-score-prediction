@@ -7,6 +7,7 @@ Focus on capturing team strength and style mismatches.
 """
 
 import logging
+import math
 import sqlite3
 from pathlib import Path
 
@@ -16,6 +17,43 @@ from src.utils.config_loader import load_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# (lat, lon, utc_offset_hours) for each NBA team's home arena.
+# UTC offsets are standard (winter) time — the relative difference between
+# teams stays constant regardless of DST since all US zones shift together
+# (except Phoenix, which never observes DST and is fixed at UTC-7).
+_TEAM_LOCATIONS: dict[int, tuple[float, float, int]] = {
+    1610612737: (33.749,  -84.388,  -5),  # ATL
+    1610612738: (42.360,  -71.059,  -5),  # BOS
+    1610612739: (41.499,  -81.694,  -5),  # CLE
+    1610612740: (29.951,  -90.072,  -6),  # NOP
+    1610612741: (41.878,  -87.630,  -6),  # CHI
+    1610612742: (32.777,  -96.797,  -6),  # DAL
+    1610612743: (39.739, -104.990,  -7),  # DEN
+    1610612744: (37.768, -122.388,  -8),  # GSW
+    1610612745: (29.760,  -95.370,  -6),  # HOU
+    1610612746: (34.043, -118.267,  -8),  # LAC
+    1610612747: (34.043, -118.267,  -8),  # LAL
+    1610612748: (25.762,  -80.192,  -5),  # MIA
+    1610612749: (43.039,  -87.907,  -6),  # MIL
+    1610612750: (44.978,  -93.265,  -6),  # MIN
+    1610612751: (40.683,  -73.972,  -5),  # BKN
+    1610612752: (40.751,  -73.993,  -5),  # NYK
+    1610612753: (28.538,  -81.379,  -5),  # ORL
+    1610612754: (39.768,  -86.158,  -5),  # IND
+    1610612755: (39.953,  -75.165,  -5),  # PHI
+    1610612756: (33.448, -112.074,  -7),  # PHX (no DST, fixed UTC-7)
+    1610612757: (45.523, -122.677,  -8),  # POR
+    1610612758: (38.582, -121.494,  -8),  # SAC
+    1610612759: (29.424,  -98.494,  -6),  # SAS
+    1610612760: (35.468,  -97.516,  -6),  # OKC
+    1610612761: (43.653,  -79.383,  -5),  # TOR
+    1610612762: (40.761, -111.891,  -7),  # UTA
+    1610612763: (35.150,  -90.049,  -6),  # MEM
+    1610612764: (38.898,  -77.037,  -5),  # WAS
+    1610612765: (42.331,  -83.046,  -5),  # DET
+    1610612766: (35.227,  -80.843,  -5),  # CHA
+}
 
 
 class FeatureBuilder:
@@ -47,6 +85,7 @@ class FeatureBuilder:
         df = self._add_home_advantage_features(df)
         df = self._add_matchup_features(df)
         df = self._add_h2h_features(df)
+        df = self._add_travel_features(df)
         df = self._add_injury_features(df)
 
         initial_rows = len(df)
@@ -291,6 +330,95 @@ class FeatureBuilder:
         }
 
         df.drop(columns=['_canonical_team', '_canonical_margin', '_h2h_margin_canon', '_h2h_win_canon'], inplace=True)
+
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    @staticmethod
+    def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        R = 3958.8  # Earth radius in miles
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        return R * 2 * math.asin(math.sqrt(a))
+
+    def _add_travel_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add travel distance and timezone shift for each team since their last game.
+
+        Game location = home team's city. For each team-game, we look up their
+        previous game's city, compute Haversine distance, and the timezone delta.
+        Positive tz_shift = traveling east (harder on the body clock).
+        """
+        loc = _TEAM_LOCATIONS
+
+        # Long format: one row per (game, team) recording where the game is played
+        home_rows = pd.DataFrame({
+            'GAME_DATE': df['GAME_DATE'].values,
+            'team_id':   df['HOME_TEAM_ID'].values,
+            'city_team': df['HOME_TEAM_ID'].values,  # game is in home team's city
+        })
+        away_rows = pd.DataFrame({
+            'GAME_DATE': df['GAME_DATE'].values,
+            'team_id':   df['AWAY_TEAM_ID'].values,
+            'city_team': df['HOME_TEAM_ID'].values,  # away team travels to home team's city
+        })
+        long_df = (
+            pd.concat([home_rows, away_rows])
+            .sort_values('GAME_DATE')
+            .reset_index(drop=True)
+        )
+
+        long_df['prev_city_team'] = long_df.groupby('team_id')['city_team'].shift(1)
+        # Default previous city to team's own home (no travel) when no prior game exists
+        long_df['prev_city_team'] = long_df['prev_city_team'].fillna(long_df['team_id'])
+
+        def travel_miles(row):
+            curr = loc.get(int(row['city_team']))
+            prev = loc.get(int(row['prev_city_team']))
+            if curr is None or prev is None:
+                return 0.0
+            return self._haversine_miles(prev[0], prev[1], curr[0], curr[1])
+
+        def tz_shift(row):
+            curr = loc.get(int(row['city_team']))
+            prev = loc.get(int(row['prev_city_team']))
+            if curr is None or prev is None:
+                return 0
+            return curr[2] - prev[2]  # positive = traveled east
+
+        long_df['travel_miles'] = long_df.apply(travel_miles, axis=1)
+        long_df['tz_shift']     = long_df.apply(tz_shift,     axis=1)
+
+        # Rolling travel miles over last 7 and 14 days (day-windows capture road-trip
+        # fatigue better than game-count windows since schedule density varies).
+        long_df['GAME_DATE'] = pd.to_datetime(long_df['GAME_DATE'])
+        long_df = long_df.sort_values(['team_id', 'GAME_DATE'])
+        for days in [7, 14]:
+            col = f'travel_miles_{days}d'
+            long_df[col] = (
+                long_df.groupby('team_id', group_keys=False)
+                .apply(lambda g, d=days: (
+                    g.set_index('GAME_DATE')['travel_miles']
+                    .rolling(f'{d}D', closed='both')
+                    .sum()
+                    .set_axis(g.index)
+                ))
+            )
+
+        rolling_cols = ['travel_miles_7d', 'travel_miles_14d']
+        new_cols = {}
+        for team_col, prefix in [('HOME_TEAM_ID', 'home_team'), ('AWAY_TEAM_ID', 'away_team')]:
+            query = df[['GAME_DATE', team_col]].rename(columns={team_col: 'team_id'})
+            query['GAME_DATE'] = pd.to_datetime(query['GAME_DATE'])
+            merged = query.merge(
+                long_df[['GAME_DATE', 'team_id', 'travel_miles', 'tz_shift'] + rolling_cols],
+                on=['GAME_DATE', 'team_id'],
+                how='left',
+            )
+            new_cols[f'{prefix}_travel_miles']      = merged['travel_miles'].fillna(0).values
+            new_cols[f'{prefix}_tz_shift']           = merged['tz_shift'].fillna(0).values
+            new_cols[f'{prefix}_travel_miles_7d']   = merged['travel_miles_7d'].fillna(0).values
+            new_cols[f'{prefix}_travel_miles_14d']  = merged['travel_miles_14d'].fillna(0).values
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
