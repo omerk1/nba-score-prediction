@@ -21,7 +21,8 @@ datasets_loading:
 
 # Feature engineering
 features:
-  rolling_window: 10      # Games for rolling averages
+  rolling_windows: [5, 10, 20]   # Games for rolling averages (multiple windows)
+  naive_rolling_baseline: 10    # Window used for the naive rolling-avg baseline comparison
   min_games_played: 5     # Minimum games for features
   h2h_margin_window: 3    # Meetings for H2H margin average
   h2h_win_rate_window: 5  # Meetings for H2H win rate
@@ -57,7 +58,7 @@ model:
   random_state: 42
   
 injury_features:
-  enabled: true
+  enabled: false
   scorer: llm                           # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
   db_path: "data/raw/injury_features.sqlite"
   llm_model: "gemini-2.5-flash"
