@@ -41,8 +41,8 @@ logger = logging.getLogger(__name__)
 
 def _naive_baseline_metrics(features_df: pd.DataFrame, y_true: pd.DataFrame, window: int) -> dict:
     """Compute metrics for a naive predictor that uses each team's rolling avg score."""
-    home_pred = features_df[f'home_team_pts_avg_L{window}'].values
-    away_pred = features_df[f'away_team_pts_avg_L{window}'].values
+    home_pred = features_df[f'home_team_off_eff_L{window}'].values
+    away_pred = features_df[f'away_team_off_eff_L{window}'].values
     home_true = y_true.iloc[:, 0].values
     away_true = y_true.iloc[:, 1].values
 
