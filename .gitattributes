@@ -1,0 +1,10 @@
+# Enforce LF line endings for all text files
+* text=auto eol=lf
+
+# Explicitly binary files (no line ending conversion)
+*.pkl binary
+*.db  binary
+*.sqlite binary
+*.h5  binary
+*.pt  binary
+*.pth binary
