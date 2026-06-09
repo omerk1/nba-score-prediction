@@ -88,11 +88,10 @@ class FeatureBuilder:
         df = self._add_travel_features(df)
         df = self._add_injury_features(df)
 
-        initial_rows = len(df)
-        df = df.dropna(subset=self._get_feature_columns(df))
-        dropped = initial_rows - len(df)
+        feature_cols = self._get_feature_columns(df)
+        nan_games = df[feature_cols].isna().any(axis=1).sum()
 
-        logger.info(f"Features built: {len(self._get_feature_columns(df))} cols, {len(df):,} games ({dropped} dropped)")
+        logger.info(f"Features built: {len(feature_cols)} cols, {len(df):,} games ({nan_games} with NaN — kept, CatBoost handles natively)")
 
         return df
 
