@@ -37,10 +37,21 @@ class FeaturesConfig(BaseModel):
     exclude: list[str]
 
 
+class TuningConfig(BaseModel):
+    n_trials: int
+    depth: list[int]
+    learning_rate: list[float]
+    l2_leaf_reg: list[float]
+    min_data_in_leaf: list[int]
+    subsample: list[float]
+    colsample_bylevel: list[float]
+
+
 class ModelConfig(BaseModel):
     random_state: int = 42
     iterations: int = 1000
     early_stopping_rounds: int = 50
+    tuning: Optional[TuningConfig] = None
 
 
 class ImportanceWeightsConfig(BaseModel):

@@ -60,7 +60,15 @@ features:
 model:
   random_state: 42
   iterations: 1000              # Max boosting rounds; early stopping will use fewer
-  early_stopping_rounds: 50    # used by multirmse run, ignored by MultiOutputRegressor
+  early_stopping_rounds: 50    # Stop if val loss doesn't improve for this many rounds
+  tuning:
+    n_trials: 40
+    depth:             [3, 10]    # Lower bound 3: previous best landed on boundary (4)
+    learning_rate:     [0.01, 0.3]
+    l2_leaf_reg:       [1.0, 30.0]
+    min_data_in_leaf:  [1, 30]
+    subsample:         [0.5, 1.0]
+    colsample_bylevel: [0.5, 1.0]
   
 injury_features:
   enabled: false

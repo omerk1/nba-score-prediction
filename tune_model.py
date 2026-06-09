@@ -35,11 +35,14 @@ optuna.logging.set_verbosity(optuna.logging.WARNING)
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-name', required=True)
-    parser.add_argument('--n-trials', type=int, default=40)
+    parser.add_argument('--n-trials', type=int, default=None, help='Override config tuning.n_trials')
     parser.add_argument('--notes', default='')
     args = parser.parse_args()
 
     config = load_config()
+    if config.model.tuning is None:
+        logger.error("No 'tuning' section found in config.yaml under 'model'. Add it before running.")
+        return
 
     # --- Load data once ---
     try:
@@ -95,14 +98,16 @@ def main():
     logger.info(f"Train: {len(X_train):,} | Val: {len(X_val):,} | Test: {len(X_test):,} | Features: {len(feature_cols)}")
 
     # --- Optuna objective ---
+    t = config.model.tuning
+
     def objective(trial):
         params = {
-            'depth':             trial.suggest_int('depth', 4, 10),
-            'learning_rate':     trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
-            'l2_leaf_reg':       trial.suggest_float('l2_leaf_reg', 1.0, 30.0, log=True),
-            'min_data_in_leaf':  trial.suggest_int('min_data_in_leaf', 1, 30),
-            'subsample':         trial.suggest_float('subsample', 0.5, 1.0),
-            'colsample_bylevel': trial.suggest_float('colsample_bylevel', 0.5, 1.0),
+            'depth':             trial.suggest_int('depth', *t.depth),
+            'learning_rate':     trial.suggest_float('learning_rate', *t.learning_rate, log=True),
+            'l2_leaf_reg':       trial.suggest_float('l2_leaf_reg', *t.l2_leaf_reg, log=True),
+            'min_data_in_leaf':  trial.suggest_int('min_data_in_leaf', *t.min_data_in_leaf),
+            'subsample':         trial.suggest_float('subsample', *t.subsample),
+            'colsample_bylevel': trial.suggest_float('colsample_bylevel', *t.colsample_bylevel),
             'iterations':        config.model.iterations,
             'early_stopping_rounds': config.model.early_stopping_rounds,
         }
@@ -116,9 +121,22 @@ def main():
         return val_metrics['diff_mae']
 
     # --- Run study ---
-    logger.info(f"Starting Optuna study: {args.n_trials} trials")
-    study = optuna.create_study(direction='minimize')
-    study.optimize(objective, n_trials=args.n_trials, show_progress_bar=True)
+    storage_path = Path('outputs/optuna_study.db')
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    study = optuna.create_study(
+        study_name=args.run_name,
+        direction='minimize',
+        storage=f'sqlite:///{storage_path}',
+        load_if_exists=True,
+    )
+
+    n_trials = args.n_trials if args.n_trials is not None else config.model.tuning.n_trials
+    logger.info(f"Starting Optuna study: {n_trials} trials")
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
+
+    # Save full trial history for inspection
+    trials_df = study.trials_dataframe()
+    trials_df.to_csv(Path('outputs') / f'optuna_trials_{args.run_name}.csv', index=False)
 
     best = study.best_params
     logger.info(f"Best val diff_MAE: {study.best_value:.4f}")
