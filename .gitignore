@@ -9,9 +9,8 @@ data/processed/*
 # But keep .gitkeep files
 !**/.gitkeep
 
-# Keep ablation log and tuning trial history
+# Keep ablation log
 !outputs/experiments.csv
-!outputs/optuna_trials_*.csv
 
 # Python
 __pycache__/
