@@ -88,7 +88,7 @@ def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_
         # Run metadata
         "n_features":         n_features,
         "injury_enabled":     bool(config.injury_features and config.injury_features.enabled),
-        "rolling_window":     config.features.rolling_window,
+        "rolling_windows":    ",".join(str(w) for w in config.features.rolling_windows),
         "notes":              notes,
     }
 
@@ -123,13 +123,14 @@ def main():
             test_end_date=config.datasets_loading.test_end_date,
             allowed_season_types=config.datasets_loading.allowed_season_types,
             data_start_date=config.datasets_loading.data_start_date,
+            context_season_types=config.datasets_loading.context_season_types,
         )
     except FileNotFoundError as e:
         logger.error(str(e))
         return
 
     feature_builder = FeatureBuilder(
-        rolling_window=config.features.rolling_window,
+        rolling_windows=config.features.rolling_windows,
         h2h_margin_window=config.features.h2h_margin_window,
         h2h_win_rate_window=config.features.h2h_win_rate_window,
     )
@@ -137,8 +138,18 @@ def main():
     train_features = train_features[
         train_features['GAME_DATE'] >= pd.Timestamp(config.datasets_loading.train_start_date)
     ].reset_index(drop=True)
+
     val_features = feature_builder.create_all_features(val_df)
+    val_features = val_features[
+        (val_features['GAME_DATE'] >= pd.Timestamp(config.datasets_loading.validation_start_date)) &
+        (val_features['SEASON_TYPE'].isin(config.datasets_loading.allowed_season_types))
+    ].reset_index(drop=True)
+
     test_features = feature_builder.create_all_features(test_df)
+    test_features = test_features[
+        (test_features['GAME_DATE'] >= pd.Timestamp(config.datasets_loading.test_start_date)) &
+        (test_features['SEASON_TYPE'].isin(config.datasets_loading.allowed_season_types))
+    ].reset_index(drop=True)
 
     features_dir = Path("data/features")
     features_dir.mkdir(exist_ok=True, parents=True)
@@ -160,7 +171,8 @@ def main():
 
     predictor = ScorePredictor(
         model_type='catboost',
-        iterations=200,
+        iterations=config.model.iterations,
+        early_stopping_rounds=config.model.early_stopping_rounds,
         depth=6,
         learning_rate=0.1,
         subsample=0.8,
@@ -172,27 +184,31 @@ def main():
     train_metrics, val_metrics = predictor.train(X_train, y_train, X_val, y_val)
     test_metrics = predictor.evaluate(X_test, y_test, dataset_name="Test")
 
-    window = config.features.rolling_window
-    baseline_val  = _naive_baseline_metrics(val_features,  y_val,  window)
-    baseline_test = _naive_baseline_metrics(test_features, y_test, window)
-    logger.info(
-        f"Naive baseline (rolling-{window}) — "
-        f"val diff_mae: {baseline_val['diff_mae']:.2f} | "
-        f"test diff_mae: {baseline_test['diff_mae']:.2f} | "
-        f"val win_acc: {baseline_val['win_accuracy']:.1%} | "
-        f"test win_acc: {baseline_test['win_accuracy']:.1%}"
-    )
-    baseline_run_name = f"naive_rolling_{window}"
-    experiments_path = Path("outputs/experiments.csv")
-    already_logged = (
-        experiments_path.exists()
-        and baseline_run_name in experiments_path.read_text()
-    )
-    if not already_logged:
-        _save_experiment(
-            baseline_run_name, f"auto-generated baseline (rolling {window}-game avg)",
-            config, baseline_val, baseline_test, 2
+    naive_window = config.features.naive_rolling_baseline
+    if naive_window not in config.features.rolling_windows:
+        logger.warning(f"naive_rolling_baseline {naive_window} is not in rolling_windows {config.features.rolling_windows} — skipping naive baseline")
+    else:
+        baseline_val  = _naive_baseline_metrics(val_features,  y_val,  naive_window)
+        baseline_test = _naive_baseline_metrics(test_features, y_test, naive_window)
+        logger.info(
+            f"Naive baseline (rolling-{naive_window}) — "
+            f"val diff_mae: {baseline_val['diff_mae']:.2f} | "
+            f"test diff_mae: {baseline_test['diff_mae']:.2f} | "
+            f"val win_acc: {baseline_val['win_accuracy']:.1%} | "
+            f"test win_acc: {baseline_test['win_accuracy']:.1%}"
         )
+    if naive_window in config.features.rolling_windows:
+        baseline_run_name = f"naive_rolling_{naive_window}"
+        experiments_path = Path("outputs/experiments.csv")
+        already_logged = (
+            experiments_path.exists()
+            and baseline_run_name in experiments_path.read_text()
+        )
+        if not already_logged:
+            _save_experiment(
+                baseline_run_name, f"auto-generated baseline (rolling {naive_window}-game avg)",
+                config, baseline_val, baseline_test, 2
+            )
 
     importance_df = predictor.get_feature_importance(top_n=20)
     print("\nTop 20 features:\n" + importance_df.to_string(index=False))
@@ -230,7 +246,7 @@ def main():
         'val_metrics': val_metrics,
         'test_metrics': test_metrics,
         'model_type': 'catboost',
-        'rolling_window': config.features.rolling_window,
+        'rolling_windows': config.features.rolling_windows,
         'random_state': config.model.random_state,
     }
     with open(models_dir / "training_metadata.json", 'w') as f:

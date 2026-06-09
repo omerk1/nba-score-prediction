@@ -18,10 +18,14 @@ datasets_loading:
   test_end_date: "2026-04-12"          # End of 2025-26 regular season
   allowed_season_types:
     - "Regular Season"
+  context_season_types:       # Season types loaded as warm-up context for val/test rolling features
+    - "Regular Season"
+    - "Playoffs"
 
 # Feature engineering
 features:
-  rolling_window: 10      # Games for rolling averages
+  rolling_windows: [5, 10, 20]   # Games for rolling averages (multiple windows)
+  naive_rolling_baseline: 10    # Window used for the naive rolling-avg baseline comparison
   min_games_played: 5     # Minimum games for features
   h2h_margin_window: 3    # Meetings for H2H margin average
   h2h_win_rate_window: 5  # Meetings for H2H win rate
@@ -55,10 +59,20 @@ features:
 # Model parameters
 model:
   random_state: 42
+  iterations: 750              # Max boosting rounds; early stopping will use fewer
+  early_stopping_rounds: 50    # Stop if val loss doesn't improve for this many rounds
+  tuning:
+    n_trials: 40
+    depth:             [2, 8]      # Best consistently 3-5; extended lower to 2
+    learning_rate:     [0.005, 0.15]  # Top trials always <0.08; tightened upper
+    l2_leaf_reg:       [1.0, 30.0]
+    min_data_in_leaf:  [1, 50]     # Top trials clustered 15-26; extended upper
+    subsample:         [0.5, 1.0]
+    colsample_bylevel: [0.5, 1.0]
   
 injury_features:
   enabled: true
-  scorer: llm                           # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
+  scorer: formula                           # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
   db_path: "data/raw/injury_features.sqlite"
   llm_model: "gemini-2.5-flash"
   api_calls_per_minute: 900         # Paid tier limit is 1000 RPM; staying 10% under
