@@ -18,6 +18,9 @@ datasets_loading:
   test_end_date: "2026-04-12"          # End of 2025-26 regular season
   allowed_season_types:
     - "Regular Season"
+  context_season_types:       # Season types loaded as warm-up context for val/test rolling features
+    - "Regular Season"
+    - "Playoffs"
 
 # Feature engineering
 features:
@@ -56,6 +59,8 @@ features:
 # Model parameters
 model:
   random_state: 42
+  iterations: 1000              # Max boosting rounds; early stopping will use fewer
+  early_stopping_rounds: 50    # Stop if val loss doesn't improve for this many rounds
   
 injury_features:
   enabled: false

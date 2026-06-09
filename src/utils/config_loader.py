@@ -24,6 +24,7 @@ class DatasetsLoadingConfig(BaseModel):
     test_start_date: str
     test_end_date: Optional[str] = None
     allowed_season_types: Optional[list[str]] = None
+    context_season_types: Optional[list[str]] = None
 
 
 class FeaturesConfig(BaseModel):
@@ -38,6 +39,8 @@ class FeaturesConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     random_state: int = 42
+    iterations: int = 1000
+    early_stopping_rounds: int = 50
 
 
 class ImportanceWeightsConfig(BaseModel):

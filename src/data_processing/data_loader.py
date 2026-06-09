@@ -176,6 +176,7 @@ def load_training_data(
         test_end_date: Optional[str] = None,
         allowed_season_types: Optional[list[str]] = None,
         data_start_date: Optional[str] = None,
+        context_season_types: Optional[list[str]] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Load train, validation, and test splits using time-based boundaries.
@@ -183,13 +184,19 @@ def load_training_data(
     data_start_date: if provided, the train DataFrame starts from this earlier date so
     that rolling features computed on it have proper historical context. The caller is
     responsible for filtering to train_start_date after feature engineering.
+
+    context_season_types: season types to include when loading warm-up context for val/test
+    (e.g. also include Playoffs). Falls back to allowed_season_types if not provided.
+    Val loads from train_end_date; test loads from val_end_date — playoffs in those windows
+    inform rolling features without ever becoming eval samples (caller filters them out).
     """
+    ctx_types = context_season_types or allowed_season_types
     loader = NBADataLoader(db_path=db_path)
     try:
         context_start = data_start_date or train_start_date
         train_df = loader.load_games(start_date=context_start, end_date=train_end_date, allowed_season_types=allowed_season_types)
-        val_df = loader.load_games(start_date=val_start_date, end_date=val_end_date, allowed_season_types=allowed_season_types)
-        test_df = loader.load_games(start_date=test_start_date, end_date=test_end_date, allowed_season_types=allowed_season_types)
+        val_df   = loader.load_games(start_date=train_end_date, end_date=val_end_date,   allowed_season_types=ctx_types)
+        test_df  = loader.load_games(start_date=val_end_date,   end_date=test_end_date,  allowed_season_types=ctx_types)
         return train_df, val_df, test_df
     finally:
         loader.close()
