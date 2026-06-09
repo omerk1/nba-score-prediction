@@ -71,8 +71,8 @@ model:
     colsample_bylevel: [0.5, 1.0]
   
 injury_features:
-  enabled: false
-  scorer: llm                           # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
+  enabled: true
+  scorer: formula                           # formula (fast, no API) or llm (richer, needs GOOGLE_API_KEY)
   db_path: "data/raw/injury_features.sqlite"
   llm_model: "gemini-2.5-flash"
   api_calls_per_minute: 900         # Paid tier limit is 1000 RPM; staying 10% under

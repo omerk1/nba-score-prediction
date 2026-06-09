@@ -9,6 +9,10 @@ data/processed/*
 # But keep .gitkeep files
 !**/.gitkeep
 
+# Keep ablation log and tuning trial history
+!outputs/experiments.csv
+!outputs/optuna_trials_*.csv
+
 # Python
 __pycache__/
 *.py[cod]
@@ -66,6 +70,12 @@ logs/
 outputs/predictions/*
 outputs/visualizations/*
 outputs/reports/*
+
+# Claude Code settings (local overrides are personal, project settings are shared)
+.claude/settings.local.json
+
+# Generated model artifacts
+data/models/training_metadata.json
 
 # API keys and secrets
 .env
