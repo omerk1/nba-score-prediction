@@ -12,11 +12,9 @@ from typing import Optional
 import pandas as pd
 import numpy as np
 
-from sklearn.multioutput import MultiOutputRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 from scipy.stats import norm
-import lightgbm as lgb
-from catboost import CatBoostRegressor
+from catboost import CatBoostRegressor, Pool
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,32 +51,19 @@ class ScorePredictor:
         logger.info(f"ScorePredictor initialized with {model_type}")
 
     def _create_model(self):
-        """Create the base model"""
-        if self.model_type == 'catboost':
-            base_model = CatBoostRegressor(
-                random_state=self.random_state,
-                iterations=self.model_params.get('iterations', 200),
-                depth=self.model_params.get('depth', 6),
-                learning_rate=self.model_params.get('learning_rate', 0.1),
-                subsample=self.model_params.get('subsample', 0.8),
-                colsample_bylevel=self.model_params.get('colsample_bylevel', 0.8),
-                verbose=self.model_params.get('verbose', False),
-                loss_function='RMSE'
-            )
-        elif self.model_type == 'lightgbm':
-            base_model = lgb.LGBMRegressor(
-                random_state=self.random_state,
-                n_estimators=self.model_params.get('n_estimators', 200),
-                max_depth=self.model_params.get('max_depth', 6),
-                learning_rate=self.model_params.get('learning_rate', 0.1),
-                subsample=self.model_params.get('subsample', 0.8),
-                colsample_bytree=self.model_params.get('colsample_bytree', 0.8),
-            )
-        else:
-            raise ValueError(f"Unknown model_type: {self.model_type}. Use 'xgboost', 'lightgbm', or 'catboost'")
-
-        # Wrap in MultiOutputRegressor for simultaneous prediction
-        return MultiOutputRegressor(base_model)
+        if self.model_type != 'catboost':
+            raise ValueError(f"Unknown model_type: {self.model_type}. Only 'catboost' is supported.")
+        return CatBoostRegressor(
+            random_seed=self.random_state,
+            iterations=self.model_params.get('iterations', 1000),
+            depth=self.model_params.get('depth', 6),
+            learning_rate=self.model_params.get('learning_rate', 0.1),
+            bootstrap_type='Bernoulli',
+            subsample=self.model_params.get('subsample', 0.8),
+            colsample_bylevel=self.model_params.get('colsample_bylevel', 0.8),
+            verbose=self.model_params.get('verbose', False),
+            loss_function='MultiRMSE',
+        )
 
     def train(
         self,
@@ -99,15 +84,20 @@ class ScorePredictor:
         self.feature_names = X_train.columns.tolist()
         self.model = self._create_model()
 
-        logger.info(f"Training {self.model_type} on {len(X_train):,} games with {len(self.feature_names)} features...")
-        self.model.fit(X_train, y_train)
-        logger.info("Training complete")
+        early_stopping_rounds = self.model_params.get('early_stopping_rounds', 50)
+        eval_set = Pool(X_val, y_val) if X_val is not None and y_val is not None else None
 
-        # Evaluate on training set
+        logger.info(f"Training {self.model_type} on {len(X_train):,} games with {len(self.feature_names)} features...")
+        self.model.fit(
+            X_train, y_train,
+            eval_set=eval_set,
+            early_stopping_rounds=early_stopping_rounds if eval_set is not None else None,
+        )
+        logger.info(f"Training complete (best iteration: {self.model.best_iteration_})")
+
         train_metrics = self.evaluate(X_train, y_train, dataset_name="Training")
 
-        # Evaluate on validation set if provided
-        if X_val is not None and y_val is not None:
+        if eval_set is not None:
             val_metrics = self.evaluate(X_val, y_val, dataset_name="Validation")
             return train_metrics, val_metrics
 
@@ -219,17 +209,9 @@ class ScorePredictor:
         if self.model is None:
             raise ValueError("Model not trained yet.")
 
-        # Average importance across both output models
-        importances = []
-        for estimator in self.model.estimators_:
-            if hasattr(estimator, 'feature_importances_'):
-                importances.append(estimator.feature_importances_)
-
-        avg_importance = np.mean(importances, axis=0)
-
         importance_df = pd.DataFrame({
             'feature': self.feature_names,
-            'importance': avg_importance
+            'importance': self.model.get_feature_importance(),
         }).sort_values('importance', ascending=False).head(top_n)
 
         return importance_df

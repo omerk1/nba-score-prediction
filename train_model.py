@@ -123,6 +123,7 @@ def main():
             test_end_date=config.datasets_loading.test_end_date,
             allowed_season_types=config.datasets_loading.allowed_season_types,
             data_start_date=config.datasets_loading.data_start_date,
+            context_season_types=config.datasets_loading.context_season_types,
         )
     except FileNotFoundError as e:
         logger.error(str(e))
@@ -137,8 +138,18 @@ def main():
     train_features = train_features[
         train_features['GAME_DATE'] >= pd.Timestamp(config.datasets_loading.train_start_date)
     ].reset_index(drop=True)
+
     val_features = feature_builder.create_all_features(val_df)
+    val_features = val_features[
+        (val_features['GAME_DATE'] >= pd.Timestamp(config.datasets_loading.validation_start_date)) &
+        (val_features['SEASON_TYPE'].isin(config.datasets_loading.allowed_season_types))
+    ].reset_index(drop=True)
+
     test_features = feature_builder.create_all_features(test_df)
+    test_features = test_features[
+        (test_features['GAME_DATE'] >= pd.Timestamp(config.datasets_loading.test_start_date)) &
+        (test_features['SEASON_TYPE'].isin(config.datasets_loading.allowed_season_types))
+    ].reset_index(drop=True)
 
     features_dir = Path("data/features")
     features_dir.mkdir(exist_ok=True, parents=True)
@@ -160,7 +171,8 @@ def main():
 
     predictor = ScorePredictor(
         model_type='catboost',
-        iterations=200,
+        iterations=config.model.iterations,
+        early_stopping_rounds=config.model.early_stopping_rounds,
         depth=6,
         learning_rate=0.1,
         subsample=0.8,

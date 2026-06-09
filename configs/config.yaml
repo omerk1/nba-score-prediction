@@ -60,7 +60,7 @@ features:
 model:
   random_state: 42
   iterations: 1000              # Max boosting rounds; early stopping will use fewer
-  early_stopping_rounds: 50    # Stop if val loss doesn't improve for this many rounds
+  early_stopping_rounds: 50    # used by multirmse run, ignored by MultiOutputRegressor
   
 injury_features:
   enabled: false
