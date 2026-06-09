@@ -31,8 +31,8 @@ class FeaturesConfig(BaseModel):
     rolling_windows: list[int]
     naive_rolling_baseline: int
     min_games_played: int
-    h2h_margin_window: int = 3
-    h2h_win_rate_window: int = 5
+    h2h_margin_window: int
+    h2h_win_rate_window: int
     targets: list[str]
     exclude: list[str]
 
@@ -48,21 +48,21 @@ class TuningConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    random_state: int = 42
-    iterations: int = 1000
-    early_stopping_rounds: int = 50
-    tuning: Optional[TuningConfig] = None
+    random_state: int
+    iterations: int
+    early_stopping_rounds: int
+    tuning: Optional[TuningConfig] = None  # absent when not tuning
 
 
 class ImportanceWeightsConfig(BaseModel):
-    minutes_share: float = 0.4
-    usage_rate: float = 0.4
-    pts_share: float = 0.2
+    minutes_share: float
+    usage_rate: float
+    pts_share: float
 
 
 class FormulaWeightsConfig(BaseModel):
-    out_weight: float = -1.0
-    questionable_weight: float = -0.5
+    out_weight: float
+    questionable_weight: float
 
 
 class InjuryScorer(str, Enum):
@@ -71,15 +71,15 @@ class InjuryScorer(str, Enum):
 
 
 class InjuryFeaturesConfig(BaseModel):
-    enabled: bool = False
-    scorer: InjuryScorer = InjuryScorer.formula
-    db_path: str = "data/raw/injury_features.sqlite"
-    llm_model: str = "gemini-1.5-flash"
-    api_calls_per_minute: int = 14
-    parallel_workers: int = 1
-    pdf_era_start: str = "2021-10-01"
-    importance_weights: ImportanceWeightsConfig = ImportanceWeightsConfig()
-    formula_weights: FormulaWeightsConfig = FormulaWeightsConfig()
+    enabled: bool
+    scorer: InjuryScorer
+    db_path: str
+    llm_model: str
+    api_calls_per_minute: int
+    parallel_workers: int
+    pdf_era_start: str
+    importance_weights: ImportanceWeightsConfig
+    formula_weights: FormulaWeightsConfig
 
 
 class Config(BaseModel):
