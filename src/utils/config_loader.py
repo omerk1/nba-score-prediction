@@ -54,6 +54,15 @@ class ModelConfig(BaseModel):
     tuning: Optional[TuningConfig] = None  # absent when not tuning
 
 
+class EloFeaturesConfig(BaseModel):
+    enabled: bool
+    initial_rating: float
+    k_factor: float
+    home_advantage: float
+    mov_multiplier: bool
+    season_regression: float
+
+
 class ImportanceWeightsConfig(BaseModel):
     minutes_share: float
     usage_rate: float
@@ -95,6 +104,7 @@ class Config(BaseModel):
     datasets_loading: DatasetsLoadingConfig
     features: FeaturesConfig
     model: ModelConfig
+    elo_features: Optional[EloFeaturesConfig] = None
     injury_features: Optional[InjuryFeaturesConfig] = None
 
 

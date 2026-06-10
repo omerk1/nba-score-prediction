@@ -86,6 +86,7 @@ class FeatureBuilder:
         df = self._add_matchup_features(df)
         df = self._add_h2h_features(df)
         df = self._add_travel_features(df)
+        df = self._add_elo_features(df)
         df = self._add_injury_features(df)
 
         feature_cols = self._get_feature_columns(df)
@@ -417,6 +418,53 @@ class FeatureBuilder:
             new_cols[f'{prefix}_travel_miles_7d']   = merged['travel_miles_7d'].fillna(0).values
             new_cols[f'{prefix}_travel_miles_14d']  = merged['travel_miles_14d'].fillna(0).values
 
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_elo_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add pre-game Elo ratings (home_team_elo, away_team_elo, elo_diff).
+
+        Elo is inherently sequential — a team's rating depends on every prior
+        result, not just a recent window. So ratings are computed once over
+        the full chronological game history (not just the rows in `df`),
+        then merged onto `df` by GAME_ID. This ensures val/test games carry
+        forward ratings accumulated during train, rather than restarting at
+        initial_rating each split.
+        """
+        cfg = load_config()
+        if not cfg.elo_features or not cfg.elo_features.enabled:
+            return df
+
+        from src.data_processing.data_loader import NBADataLoader
+        from src.feature_engineering.elo import compute_elo_ratings
+
+        loader = NBADataLoader(db_path=cfg.data_paths.raw_db)
+        try:
+            all_games = loader.load_games(
+                start_date=cfg.datasets_loading.data_start_date,
+                end_date=cfg.datasets_loading.test_end_date,
+                allowed_season_types=cfg.datasets_loading.context_season_types or cfg.datasets_loading.allowed_season_types,
+            )
+        finally:
+            loader.close()
+
+        elo_cfg = cfg.elo_features
+        elo_df = compute_elo_ratings(
+            all_games,
+            initial_rating=elo_cfg.initial_rating,
+            k_factor=elo_cfg.k_factor,
+            home_advantage=elo_cfg.home_advantage,
+            mov_multiplier=elo_cfg.mov_multiplier,
+            season_regression=elo_cfg.season_regression,
+        )
+
+        merged = df[['GAME_ID']].merge(elo_df, on='GAME_ID', how='left')
+
+        new_cols = {
+            'home_team_elo': merged['home_team_elo'].values,
+            'away_team_elo': merged['away_team_elo'].values,
+            'elo_diff': merged['home_team_elo'].values + elo_cfg.home_advantage - merged['away_team_elo'].values,
+        }
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_injury_features(self, df: pd.DataFrame) -> pd.DataFrame:
