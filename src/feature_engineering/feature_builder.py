@@ -115,16 +115,14 @@ class FeatureBuilder:
             df[f'_diff_{prefix}'] = diff_series
 
             for window in self.rolling_windows:
-                new_cols[f'{prefix}_pts_avg_L{window}'] = df.groupby(team_col)[pts_col].transform(
-                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
-                )
+                # pts_avg omitted — off_eff in _add_style_features is identical
                 new_cols[f'{prefix}_win_pct_L{window}'] = df.groupby(team_col)[f'_win_{prefix}'].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
                 new_cols[f'{prefix}_diff_avg_L{window}'] = df.groupby(team_col)[f'_diff_{prefix}'].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
-                for stat in ['FG_PCT', 'FG3_PCT', 'FT_PCT']:
+                for stat in ['FG_PCT', 'FT_PCT']:  # FG3_PCT omitted — 3pt_rate in _add_style_features is identical
                     stat_col = f'{stat}_{prefix.split("_")[0]}'
                     if stat_col in df.columns:
                         new_cols[f'{prefix}_{stat.lower()}_L{window}'] = df.groupby(team_col)[stat_col].transform(
@@ -224,8 +222,8 @@ class FeatureBuilder:
         """
         Add per-team venue delta: rolling avg pts at home minus rolling avg pts on the road.
 
-        The role-split rolling features already capture venue-specific form (home_pts_avg tracks
-        a team when they're home, away_pts_avg when they're away). This feature makes the
+        The role-split rolling features already capture venue-specific form (home_off_eff tracks
+        a team when they're home, away_off_eff when they're away). This feature makes the
         home/road gap explicit, capturing teams that are particularly strong or weak at home.
         """
         new_cols = {}
@@ -434,7 +432,7 @@ class FeatureBuilder:
         scorer = cfg.injury_features.scorer
         with sqlite3.connect(db_path) as conn:
             injury_df = pd.read_sql_query(
-                "SELECT game_date, team_id, impact_score, n_out, n_questionable "
+                "SELECT game_date, team_id, n_out, n_questionable, team_deficit "
                 "FROM injury_features WHERE scorer = ?",
                 conn,
                 params=(scorer,),
@@ -444,15 +442,25 @@ class FeatureBuilder:
         game_dates = pd.to_datetime(df["GAME_DATE"]).dt.normalize()
 
         new_cols = {}
+        home_merged, away_merged = None, None
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
             lookup = pd.DataFrame({
                 "game_date": game_dates.values,
                 "team_id": df[team_col].values,
             })
             merged = lookup.merge(injury_df, on=["game_date", "team_id"], how="left")
-            new_cols[f"{prefix}_injury_impact"] = merged["impact_score"].fillna(0).values
             new_cols[f"{prefix}_n_out"] = merged["n_out"].fillna(0).astype(int).values
             new_cols[f"{prefix}_n_questionable"] = merged["n_questionable"].fillna(0).astype(int).values
+            new_cols[f"{prefix}_team_deficit"] = merged["team_deficit"].fillna(0).values
+            if prefix == "home_team":
+                home_merged = merged
+            else:
+                away_merged = merged
+
+        new_cols["team_deficit_diff"] = (
+            home_merged["team_deficit"].fillna(0).values
+            - away_merged["team_deficit"].fillna(0).values
+        )
 
         dates_with_coverage = set(injury_df["game_date"])
         new_cols["has_injury_data"] = game_dates.isin(dates_with_coverage).astype(int)

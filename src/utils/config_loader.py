@@ -60,9 +60,10 @@ class ImportanceWeightsConfig(BaseModel):
     pts_share: float
 
 
-class FormulaWeightsConfig(BaseModel):
-    out_weight: float
-    questionable_weight: float
+class SeverityWeightsConfig(BaseModel):
+    severe: float
+    moderate: float
+    minor: float
 
 
 class InjuryScorer(str, Enum):
@@ -79,7 +80,8 @@ class InjuryFeaturesConfig(BaseModel):
     parallel_workers: int
     pdf_era_start: str
     importance_weights: ImportanceWeightsConfig
-    formula_weights: FormulaWeightsConfig
+    severity_weights: SeverityWeightsConfig
+    doubtful_weight: float
 
 
 class Config(BaseModel):

@@ -175,11 +175,12 @@ def _upsert_injury_feature(
     with get_conn(db_path) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO injury_features
-               (game_date, team_id, scorer, impact_score, n_out, n_questionable, updated_at)
+               (game_date, team_id, scorer, n_out, n_questionable, team_deficit, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 game_date, team_id, scorer,
-                impact["impact_score"], impact["n_out"], impact["n_questionable"],
+                impact["n_out"], impact["n_questionable"],
+                impact.get("team_deficit", 0.0),
                 datetime.now(timezone.utc).isoformat(),
             ),
         )
@@ -240,8 +241,19 @@ def _score_team(
 ) -> dict:
     """Dispatch to formula or LLM scorer based on config."""
     if scorer == "llm":
-        return extract_impact(team_name, game_date, players, importance_map, player_stats, team_avg)
-    return score_team(players, importance_map, cfg.injury_features.formula_weights)
+        result = extract_impact(team_name, game_date, players, importance_map, player_stats, team_avg)
+        from src.news_scraping.extractors.formula_scorer import compute_team_deficit
+        result["team_deficit"] = compute_team_deficit(
+            players, importance_map,
+            cfg.injury_features.severity_weights,
+            cfg.injury_features.doubtful_weight,
+        )
+        return result
+    return score_team(
+        players, importance_map,
+        cfg.injury_features.severity_weights,
+        cfg.injury_features.doubtful_weight,
+    )
 
 
 def _process_team(
