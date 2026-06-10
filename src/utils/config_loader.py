@@ -54,6 +54,13 @@ class ModelConfig(BaseModel):
     tuning: Optional[TuningConfig] = None  # absent when not tuning
 
 
+class EloTuningConfig(BaseModel):
+    n_trials: int
+    k_factor: list[float]
+    home_advantage: list[float]
+    season_regression: list[float]
+
+
 class EloFeaturesConfig(BaseModel):
     enabled: bool
     initial_rating: float
@@ -61,6 +68,7 @@ class EloFeaturesConfig(BaseModel):
     home_advantage: float
     mov_multiplier: bool
     season_regression: float
+    tuning: Optional[EloTuningConfig] = None
 
 
 class ImportanceWeightsConfig(BaseModel):
