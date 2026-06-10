@@ -63,7 +63,7 @@ model:
   early_stopping_rounds: 50    # Stop if val loss doesn't improve for this many rounds
   tuning:
     n_trials: 40
-    depth:             [2, 8]      # Best consistently 3-5; extended lower to 2
+    depth:             [2, 8]       # Best consistently 5-8; [2,10] tried, didn't help (team_deficit_v2)
     learning_rate:     [0.005, 0.15]  # Top trials always <0.08; tightened upper
     l2_leaf_reg:       [1.0, 30.0]
     min_data_in_leaf:  [1, 50]     # Top trials clustered 15-26; extended upper
