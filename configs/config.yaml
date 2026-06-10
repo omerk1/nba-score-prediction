@@ -77,6 +77,11 @@ elo_features:
   home_advantage: 100.0     # Rating-point edge for home team (~64% win prob between equal teams; 538 default)
   mov_multiplier: true      # Margin-of-victory adjustment (538 formula)
   season_regression: 0.33   # Fraction reverted toward initial_rating at season start (538 default ~1/3)
+  tuning:
+    n_trials: 30
+    k_factor:           [5.0, 40.0]
+    home_advantage:     [50.0, 150.0]
+    season_regression:  [0.0, 0.75]
 
 injury_features:
   enabled: true
