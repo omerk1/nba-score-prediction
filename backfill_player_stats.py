@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from nba_api.stats.endpoints import BoxScoreTraditionalV2
+from nba_api.stats.endpoints import BoxScoreTraditionalV3
 import numpy as np
 
 from src.data_processing.data_loader import NBADataLoader
@@ -85,7 +85,7 @@ def _fetch_box_score(game_id: str) -> pd.DataFrame:
     """
     try:
         time.sleep(SLEEP_SECONDS)
-        box_score = BoxScoreTraditionalV2(game_id=game_id)
+        box_score = BoxScoreTraditionalV3(game_id=game_id)
         df = box_score.get_data_frames()[0]
 
         if df.empty:
