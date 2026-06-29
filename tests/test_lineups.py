@@ -35,7 +35,7 @@ class TestGetAvailableLineup:
         mock_roster.return_value = mock_instance
 
         clear_cache()  # Clear cache before test
-        result = get_available_lineup(20231, 1610612738, "2024-01-15")
+        result = get_available_lineup(22023, 1610612738, "2024-01-15")
 
         assert isinstance(result, list), "Result should be a list"
         assert all(isinstance(x, int) for x in result), "All elements should be integers"
@@ -54,7 +54,7 @@ class TestGetAvailableLineup:
         mock_roster.return_value = mock_instance
 
         clear_cache()
-        result = get_available_lineup(20231, 1610612738, "2024-01-15")
+        result = get_available_lineup(22023, 1610612738, "2024-01-15")
 
         assert 12 <= len(result) <= 20, f"Roster size {len(result)} outside typical range"
 
@@ -70,7 +70,7 @@ class TestGetAvailableLineup:
         mock_roster.return_value = mock_instance
 
         clear_cache()
-        result = get_available_lineup(20231, 1610612738, "2024-01-15")
+        result = get_available_lineup(22023, 1610612738, "2024-01-15")
 
         # Should only include active players (indices 0, 2, 4)
         assert len(result) == 3, "Should filter to 3 active players"
@@ -78,23 +78,23 @@ class TestGetAvailableLineup:
 
     def test_invalid_season_id(self):
         """Test that invalid season_id raises ValueError."""
-        with pytest.raises(ValueError, match="Invalid season_id"):
+        with pytest.raises(ValueError, match="5-digit composite format"):
             get_available_lineup(1000, 1610612738, "2024-01-15")
 
     def test_invalid_team_id(self):
         """Test that invalid team_id raises ValueError."""
         with pytest.raises(ValueError, match="Invalid team_id"):
-            get_available_lineup(20231, 100, "2024-01-15")
+            get_available_lineup(22023, 100, "2024-01-15")
 
     def test_invalid_game_date_format(self):
         """Test that invalid game_date format raises ValueError."""
         with pytest.raises(ValueError, match="Invalid game_date format"):
-            get_available_lineup(20231, 1610612738, "2024-01-15T00:00:00")
+            get_available_lineup(22023, 1610612738, "2024-01-15T00:00:00")
 
     def test_invalid_game_date_length(self):
         """Test that game_date with wrong length raises ValueError."""
         with pytest.raises(ValueError, match="Invalid game_date format"):
-            get_available_lineup(20231, 1610612738, "2024-01")
+            get_available_lineup(22023, 1610612738, "2024-01")
 
     @patch("src.lineups.lineup_collector.CommonTeamRoster")
     def test_caching_behavior(self, mock_roster):
@@ -110,11 +110,11 @@ class TestGetAvailableLineup:
         clear_cache()
 
         # First call should hit the API
-        result1 = get_available_lineup(20231, 1610612738, "2024-01-15")
+        result1 = get_available_lineup(22023, 1610612738, "2024-01-15")
         assert mock_roster.call_count == 1
 
         # Second call with same parameters should use cache
-        result2 = get_available_lineup(20231, 1610612738, "2024-01-15")
+        result2 = get_available_lineup(22023, 1610612738, "2024-01-15")
         assert mock_roster.call_count == 1  # No additional call
 
         # Results should be identical
@@ -134,11 +134,11 @@ class TestGetAvailableLineup:
         clear_cache()
 
         # Call for team 1
-        get_available_lineup(20231, 1610612738, "2024-01-15")
+        get_available_lineup(22023, 1610612738, "2024-01-15")
         assert mock_roster.call_count == 1
 
         # Call for different team should trigger another API call
-        get_available_lineup(20231, 1610612742, "2024-01-15")
+        get_available_lineup(22023, 1610612742, "2024-01-15")
         assert mock_roster.call_count == 2
 
     @patch("src.lineups.lineup_collector.CommonTeamRoster")
@@ -150,7 +150,7 @@ class TestGetAvailableLineup:
         mock_roster.return_value = mock_instance
 
         clear_cache()
-        result = get_available_lineup(20231, 1610612738, "2024-01-15")
+        result = get_available_lineup(22023, 1610612738, "2024-01-15")
 
         assert isinstance(result, list), "Should return list even if empty"
         assert len(result) == 0, "Empty roster should return empty list"
@@ -161,7 +161,7 @@ class TestGetAvailableLineup:
         mock_roster.side_effect = Exception("API connection error")
 
         clear_cache()
-        result = get_available_lineup(20231, 1610612738, "2024-01-15")
+        result = get_available_lineup(22023, 1610612738, "2024-01-15")
 
         # Should return empty list on error
         assert isinstance(result, list)
@@ -185,14 +185,14 @@ class TestClearCache:
         clear_cache()
 
         # Populate cache
-        get_available_lineup(20231, 1610612738, "2024-01-15")
+        get_available_lineup(22023, 1610612738, "2024-01-15")
         assert mock_roster.call_count == 1
 
         # Clear cache
         clear_cache()
 
         # Next call should hit API again
-        get_available_lineup(20231, 1610612738, "2024-01-15")
+        get_available_lineup(22023, 1610612738, "2024-01-15")
         assert mock_roster.call_count == 2
 
 
@@ -213,7 +213,7 @@ class TestLineupDataLoader:
         clear_cache()
 
         with LineupDataLoader() as loader:
-            result = loader.get_lineup(20231, 1610612738, "2024-01-15")
+            result = loader.get_lineup(22023, 1610612738, "2024-01-15")
             assert isinstance(result, list)
             assert all(isinstance(x, int) for x in result)
 
@@ -231,7 +231,7 @@ class TestLineupDataLoader:
         clear_cache()
 
         loader = LineupDataLoader()
-        result = loader.get_lineup(20231, 1610612738, "2024-01-15")
+        result = loader.get_lineup(22023, 1610612738, "2024-01-15")
 
         assert len(result) == 3
         assert result == [201950, 201951, 201952]
@@ -269,9 +269,9 @@ class TestIntegration:
         clear_cache()
 
         # Query Celtics
-        celtics_lineup = get_available_lineup(20231, 1610612738, "2024-01-15")
+        celtics_lineup = get_available_lineup(22023, 1610612738, "2024-01-15")
         # Query Lakers
-        lakers_lineup = get_available_lineup(20231, 1610612742, "2024-01-15")
+        lakers_lineup = get_available_lineup(22023, 1610612742, "2024-01-15")
 
         assert len(celtics_lineup) == 14
         assert len(lakers_lineup) == 14

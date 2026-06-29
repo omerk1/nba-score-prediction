@@ -18,6 +18,7 @@ import time
 from typing import Optional
 
 from nba_api.stats.endpoints import CommonTeamRoster
+from src.utils.season_utils import season_id_to_string
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -36,7 +37,8 @@ def _get_roster_cached(season_id: int, team_id: int) -> list[int]:
     Get roster player IDs from cache or fetch from API.
 
     Args:
-        season_id: NBA season ID (e.g., 20231)
+        season_id: NBA season ID in composite format (e.g., 22023 for 2023-24).
+                   Format: '2' + start_year (so 22023 = 2023-24 season)
         team_id: team ID
 
     Returns:
@@ -51,9 +53,10 @@ def _get_roster_cached(season_id: int, team_id: int) -> list[int]:
     try:
         # Fetch roster from nba_api
         time.sleep(SLEEP_SECONDS)  # Rate limiting
+        season_str = season_id_to_string(season_id)
         roster_data = CommonTeamRoster(
             team_id=team_id,
-            season=f"{season_id}-{str(season_id + 1)[2:]}",
+            season=season_str,
         ).get_data_frames()[0]
 
         if roster_data.empty:
@@ -97,7 +100,9 @@ def get_available_lineup(
     cross-reference with injury data.
 
     Args:
-        season_id: NBA season ID (e.g., 20231 for 2023-24 season)
+        season_id: NBA season ID in composite format (e.g., 22023 for 2023-24 season).
+                   Format: '2' + start_year (20000 + year). Example: 22023 = 2023-24.
+                   Will be converted to "2023-24" format for nba_api.
         team_id: team ID (e.g., 1610612738 for Celtics)
         game_date: game date in YYYY-MM-DD format (included for API compatibility,
                    roster is season-wide)
@@ -106,10 +111,13 @@ def get_available_lineup(
         list[int]: player IDs of active roster members
 
     Raises:
-        ValueError: if parameters are invalid
+        ValueError: if parameters are invalid (invalid season_id format, team_id, or game_date)
     """
-    if not isinstance(season_id, int) or season_id < 2000:
-        raise ValueError(f"Invalid season_id: {season_id}")
+    # Validate season_id format will happen in season_id_to_string
+    try:
+        season_id_to_string(season_id)  # Validates format and range
+    except ValueError:
+        raise
 
     if not isinstance(team_id, int) or team_id < 1000:
         raise ValueError(f"Invalid team_id: {team_id}")
