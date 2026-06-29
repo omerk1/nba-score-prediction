@@ -1,22 +1,34 @@
 """
-NBA Score Prediction - Elo Parameter Tuning
-============================================
+NBA Score Prediction - Elo Parameter Tuning (Expanded)
+=======================================================
 
 Bayesian search (Optuna/TPE) over Elo rating formula parameters
 (k_factor, home_advantage, season_regression, mov_multiplier).
+
+Explores expanded search space:
+- k_factor: 16–48 (vs. previous 5–40)
+- home_advantage: current value ±3% (vs. previous 50–150)
+- season_regression: 0.1–0.5 (vs. previous 0.0–0.75)
+- mov_multiplier: True and False (categorical)
 
 CatBoost hyperparameters are held fixed at elo_v1's best trial — this
 isolates the effect of Elo's own formula parameters from model
 hyperparameters (one change at a time).
 
+Results are logged to outputs/elo_tuning_results.csv with columns:
+k_factor, home_advantage, season_regression, mov_multiplier,
+mae (diff_mae), mae_within_5 (diff_within_5), win_accuracy.
+
 Usage:
     python tune_elo.py --run-name elo_param_search
+    python tune_elo.py --run-name elo_param_search --n-trials 50
 """
 
 import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Dict, Any
 
 import optuna
 import pandas as pd
@@ -45,10 +57,66 @@ FIXED_MODEL_PARAMS = {
 
 ELO_COLS = ['home_team_elo', 'away_team_elo', 'elo_diff']
 
+# Expanded search space for Elo parameters
+# Current home_advantage is 117.87 from config; ±3% gives [114.33, 121.40]
+SEARCH_SPACE = {
+    'k_factor': (16.0, 48.0),
+    'home_advantage': (114.33, 121.40),  # 117.87 ± 3%
+    'season_regression': (0.1, 0.5),
+    'mov_multiplier': [True, False],
+}
 
-def main():
+# Storage for trial results to log to CSV
+trial_results: list[Dict[str, Any]] = []
+
+
+def apply_elo(features_df: pd.DataFrame, elo_df: pd.DataFrame, home_advantage: float) -> pd.DataFrame:
+    """
+    Apply Elo ratings to features dataframe.
+
+    Args:
+        features_df: Features dataframe with GAME_ID column
+        elo_df: Elo ratings dataframe with GAME_ID, home_team_elo, away_team_elo
+        home_advantage: Home advantage parameter for Elo differential calculation
+
+    Returns:
+        Updated features dataframe with Elo columns
+    """
+    merged = features_df[['GAME_ID']].merge(elo_df, on='GAME_ID', how='left')
+    out = features_df.copy()
+    out['home_team_elo'] = merged['home_team_elo'].values
+    out['away_team_elo'] = merged['away_team_elo'].values
+    out['elo_diff'] = merged['home_team_elo'].values + home_advantage - merged['away_team_elo'].values
+    return out
+
+
+def save_tuning_results(output_path: Path) -> None:
+    """
+    Save all trial results to CSV with columns:
+    k_factor, home_advantage, season_regression, mov_multiplier,
+    mae, mae_within_5, win_accuracy.
+
+    Args:
+        output_path: Path to save the CSV file
+    """
+    if not trial_results:
+        logger.warning("No trial results to save")
+        return
+
+    results_df = pd.DataFrame(trial_results)
+    results_df = results_df[[
+        'k_factor', 'home_advantage', 'season_regression', 'mov_multiplier',
+        'mae', 'mae_within_5', 'win_accuracy'
+    ]]
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    results_df.to_csv(output_path, index=False)
+    logger.info(f"Tuning results saved to {output_path} ({len(results_df)} trials)")
+
+
+def main() -> None:
+    """Execute Elo parameter tuning with expanded search space."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--run-name', required=True)
+    parser.add_argument('--run-name', required=True, help='Name for this tuning run')
     parser.add_argument('--n-trials', type=int, default=None, help='Override config elo_features.tuning.n_trials')
     args = parser.parse_args()
 
@@ -105,19 +173,24 @@ def main():
     )
     loader.close()
 
-    def apply_elo(features_df: pd.DataFrame, elo_df: pd.DataFrame, home_advantage: float) -> pd.DataFrame:
-        merged = features_df[['GAME_ID']].merge(elo_df, on='GAME_ID', how='left')
-        out = features_df.copy()
-        out['home_team_elo'] = merged['home_team_elo'].values
-        out['away_team_elo'] = merged['away_team_elo'].values
-        out['elo_diff'] = merged['home_team_elo'].values + home_advantage - merged['away_team_elo'].values
-        return out
+    def objective(trial: optuna.Trial) -> float:
+        """
+        Objective function for Optuna tuning.
 
-    def objective(trial):
-        k_factor = trial.suggest_float('k_factor', *et.k_factor)
-        home_advantage = trial.suggest_float('home_advantage', *et.home_advantage)
-        season_regression = trial.suggest_float('season_regression', *et.season_regression)
-        mov_multiplier = trial.suggest_categorical('mov_multiplier', [True, False])
+        Explores Elo parameters using SEARCH_SPACE, trains a model,
+        and returns validation diff_mae. Also records all metrics
+        to trial_results for CSV logging.
+
+        Args:
+            trial: Optuna trial object
+
+        Returns:
+            Validation diff_mae (mean absolute error on point differential)
+        """
+        k_factor = trial.suggest_float('k_factor', *SEARCH_SPACE['k_factor'])
+        home_advantage = trial.suggest_float('home_advantage', *SEARCH_SPACE['home_advantage'])
+        season_regression = trial.suggest_float('season_regression', *SEARCH_SPACE['season_regression'])
+        mov_multiplier = trial.suggest_categorical('mov_multiplier', SEARCH_SPACE['mov_multiplier'])
 
         elo_df = compute_elo_ratings(
             all_games,
@@ -140,6 +213,19 @@ def main():
             **FIXED_MODEL_PARAMS,
         )
         _, val_metrics = predictor.train(X_train, y_train, X_val, y_val)
+
+        # Record trial result for CSV logging
+        trial_result = {
+            'k_factor': k_factor,
+            'home_advantage': home_advantage,
+            'season_regression': season_regression,
+            'mov_multiplier': mov_multiplier,
+            'mae': val_metrics['diff_mae'],
+            'mae_within_5': val_metrics['diff_within_5'],
+            'win_accuracy': val_metrics['win_accuracy'],
+        }
+        trial_results.append(trial_result)
+
         return val_metrics['diff_mae']
 
     storage_path = Path('outputs/optuna_study.db')
@@ -153,8 +239,18 @@ def main():
 
     n_trials = args.n_trials if args.n_trials is not None else et.n_trials
     logger.info(f"Starting Elo param search: {n_trials} trials")
+    logger.info(f"Search space:")
+    logger.info(f"  k_factor: {SEARCH_SPACE['k_factor']}")
+    logger.info(f"  home_advantage: {SEARCH_SPACE['home_advantage']}")
+    logger.info(f"  season_regression: {SEARCH_SPACE['season_regression']}")
+    logger.info(f"  mov_multiplier: {SEARCH_SPACE['mov_multiplier']}")
     study.optimize(objective, n_trials=n_trials, show_progress_bar=True)
 
+    # Save results to CSV
+    csv_path = Path('outputs/elo_tuning_results.csv')
+    save_tuning_results(csv_path)
+
+    # Save Optuna trials to CSV as well (for historical reference)
     trials_df = study.trials_dataframe()
     trials_df.to_csv(Path('outputs') / f'optuna_trials_{args.run_name}.csv', index=False)
 
