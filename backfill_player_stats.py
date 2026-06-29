@@ -31,7 +31,8 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from nba_api.stats.endpoints import BoxScoreTraditionalV2
+from nba_api.stats.endpoints import BoxScoreTraditionalV3
+import numpy as np
 
 from src.data_processing.data_loader import NBADataLoader
 from src.migrations.migration_create_player_stats_cache import migrate_player_stats_cache
@@ -47,13 +48,14 @@ logger = logging.getLogger(__name__)
 SLEEP_SECONDS = 0.6
 
 # Statistics to cache and their column names in box score data
+# V3 uses camelCase column names
 STAT_COLUMNS = {
-    'PPG': 'PTS',       # Points Per Game
-    'AST': 'AST',       # Assists
-    'REB': 'REB',       # Rebounds (total)
-    'BLK': 'BLK',       # Blocks
-    'STL': 'STL',       # Steals
-    'FG%': 'FG_PCT',    # Field Goal Percentage
+    'PPG': 'points',                # Points Per Game
+    'AST': 'assists',               # Assists
+    'REB': 'reboundsTotal',         # Rebounds (total)
+    'BLK': 'blocks',                # Blocks
+    'STL': 'steals',                # Steals
+    'FG%': 'fieldGoalsPercentage',  # Field Goal Percentage
 }
 
 
@@ -79,21 +81,21 @@ def _fetch_box_score(game_id: str) -> pd.DataFrame:
         game_id: NBA game ID
 
     Returns:
-        DataFrame with columns including PLAYER_ID, PTS, AST, REB, BLK, STL, FG_PCT
+        DataFrame with columns including personId, points, assists, reboundsTotal, blocks, steals, fieldGoalsPercentage
         Returns empty DataFrame if fetch fails.
     """
     try:
         time.sleep(SLEEP_SECONDS)
-        box_score = BoxScoreTraditionalV2(game_id=game_id)
+        box_score = BoxScoreTraditionalV3(game_id=game_id)
         df = box_score.get_data_frames()[0]
 
         if df.empty:
             logger.warning(f"Empty box score for game {game_id}")
             return pd.DataFrame()
 
-        # Filter to player rows (exclude team totals)
-        # Team totals typically have PLAYER_ID = 0 or NULL
-        df = df[df['PLAYER_ID'].notna() & (df['PLAYER_ID'] != 0)]
+        # Filter to player rows (exclude team totals and DNPs)
+        # Keep only rows with valid personId
+        df = df[df['personId'].notna()]
 
         return df
     except Exception as e:
@@ -126,12 +128,16 @@ def _insert_player_stats(
 
     rows_to_insert = []
     for _, row in box_score_df.iterrows():
-        player_id = int(row['PLAYER_ID'])
+        player_id = int(row['personId'])
 
         # Insert one row per stat for this player
         for stat_name, col_name in STAT_COLUMNS.items():
             try:
                 stat_value = float(row[col_name])
+                # Skip NaN/None values to avoid NOT NULL constraint violations
+                if pd.isna(stat_value):
+                    logger.debug(f"Skipping {stat_name} for player {player_id}: NaN value")
+                    continue
                 rows_to_insert.append((player_id, game_date, stat_name, stat_value))
             except (ValueError, KeyError, TypeError) as e:
                 logger.debug(f"Skipping {stat_name} for player {player_id}: {e}")
