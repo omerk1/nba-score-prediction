@@ -32,6 +32,7 @@ from typing import Optional
 
 import pandas as pd
 from nba_api.stats.endpoints import BoxScoreTraditionalV2
+import numpy as np
 
 from src.data_processing.data_loader import NBADataLoader
 from src.migrations.migration_create_player_stats_cache import migrate_player_stats_cache
@@ -132,6 +133,10 @@ def _insert_player_stats(
         for stat_name, col_name in STAT_COLUMNS.items():
             try:
                 stat_value = float(row[col_name])
+                # Skip NaN/None values to avoid NOT NULL constraint violations
+                if pd.isna(stat_value):
+                    logger.debug(f"Skipping {stat_name} for player {player_id}: NaN value")
+                    continue
                 rows_to_insert.append((player_id, game_date, stat_name, stat_value))
             except (ValueError, KeyError, TypeError) as e:
                 logger.debug(f"Skipping {stat_name} for player {player_id}: {e}")
