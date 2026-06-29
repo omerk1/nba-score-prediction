@@ -300,7 +300,17 @@ class FeatureBuilder:
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_h2h_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add head-to-head historical features from the current home team's perspective."""
+        """
+        Add head-to-head historical features from the current home team's perspective.
+
+        Features computed:
+        - h2h_home_margin_L{mw}: rolling avg margin over last mw games
+        - h2h_home_win_rate_L{ww}: rolling win% over last ww games
+        - h2h_win_pct_3yr: win% over last 3 seasons
+        - h2h_avg_diff: average point differential across all history
+        - h2h_home_win_pct: win% when playing at home
+        - h2h_away_win_pct: win% when playing away
+        """
         mw = self.h2h_margin_window
         ww = self.h2h_win_rate_window
 
@@ -314,22 +324,141 @@ class FeatureBuilder:
             lambda r: r['POINT_DIFF'] if r['HOME_TEAM_ID'] == r['_canonical_team'] else -r['POINT_DIFF'],
             axis=1
         )
-        df['_h2h_margin_canon'] = df.groupby('matchup_key', group_keys=False).apply(
-            lambda x: x['_canonical_margin'].shift(1).rolling(mw, min_periods=1).mean()
-        )
-        df['_h2h_win_canon'] = df.groupby('matchup_key', group_keys=False).apply(
-            lambda x: (x['_canonical_margin'] > 0).shift(1).rolling(ww, min_periods=1).mean()
-        )
+        # For h2h features, process each matchup_key separately to avoid index issues
+        h2h_results = {}
+        for key in ['_h2h_margin_canon', '_h2h_win_canon', '_h2h_win_3yr_canon', '_h2h_avg_diff_canon']:
+            h2h_results[key] = pd.Series(index=df.index, dtype=float)
+
+        for matchup_key in df['matchup_key'].unique():
+            mask = df['matchup_key'] == matchup_key
+            group_indices = df[mask].index
+            group_df = df.loc[group_indices].copy()
+
+            # _h2h_margin_canon
+            h2h_results['_h2h_margin_canon'].loc[group_indices] = (
+                group_df['_canonical_margin'].shift(1).rolling(mw, min_periods=1).mean().values
+            )
+
+            # _h2h_win_canon
+            h2h_results['_h2h_win_canon'].loc[group_indices] = (
+                (group_df['_canonical_margin'] > 0).shift(1).rolling(ww, min_periods=1).mean().values
+            )
+
+            # _h2h_win_3yr_canon
+            h2h_results['_h2h_win_3yr_canon'].loc[group_indices] = (
+                self._compute_h2h_3year_win_pct(group_df).values
+            )
+
+            # _h2h_avg_diff_canon
+            h2h_results['_h2h_avg_diff_canon'].loc[group_indices] = (
+                group_df['_canonical_margin'].shift(1).expanding(min_periods=1).mean().values
+            )
+
+        for key, series in h2h_results.items():
+            df[key] = series
+
+        # 3. Home/away split win percentages (from home team perspective)
+        df['_h2h_home_win_pct'] = self._compute_h2h_home_away_splits(df, 'home')
+        df['_h2h_away_win_pct'] = self._compute_h2h_home_away_splits(df, 'away')
 
         is_canon_home = df['HOME_TEAM_ID'] == df['_canonical_team']
         new_cols = {
             f'h2h_home_margin_L{mw}':   df['_h2h_margin_canon'].where(is_canon_home, -df['_h2h_margin_canon']),
             f'h2h_home_win_rate_L{ww}': df['_h2h_win_canon'].where(is_canon_home, 1 - df['_h2h_win_canon']),
+            'h2h_win_pct_3yr': df['_h2h_win_3yr_canon'].where(is_canon_home, 1 - df['_h2h_win_3yr_canon']),
+            'h2h_avg_diff': df['_h2h_avg_diff_canon'].where(is_canon_home, -df['_h2h_avg_diff_canon']),
+            'h2h_home_win_pct': df['_h2h_home_win_pct'],
+            'h2h_away_win_pct': df['_h2h_away_win_pct'],
         }
 
-        df.drop(columns=['_canonical_team', '_canonical_margin', '_h2h_margin_canon', '_h2h_win_canon'], inplace=True)
+        df.drop(columns=['matchup_key', '_canonical_team', '_canonical_margin', '_h2h_margin_canon', '_h2h_win_canon',
+                         '_h2h_win_3yr_canon', '_h2h_avg_diff_canon', '_h2h_home_win_pct', '_h2h_away_win_pct'],
+                inplace=True)
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _compute_h2h_3year_win_pct(self, matchup_games: pd.DataFrame) -> pd.Series:
+        """
+        Compute head-to-head win% over last 3 seasons.
+
+        Args:
+            matchup_games: DataFrame with all games between a specific pair of teams, sorted by date
+
+        Returns:
+            Series with win% from canonical team's perspective, shifted (no leakage)
+        """
+        if len(matchup_games) == 0:
+            return pd.Series(dtype=float)
+
+        # Preserve original index but sort by date
+        orig_index = matchup_games.index
+        matchup_sorted = matchup_games.sort_values('GAME_DATE').reset_index(drop=True)
+        current_season = matchup_sorted['SEASON_ID'].values
+        canonical_win = (matchup_sorted['_canonical_margin'] > 0).astype(float).values
+
+        result = []
+        for i in range(len(matchup_sorted)):
+            if i == 0:
+                result.append(float('nan'))
+            else:
+                # Look back at all games within last 3 seasons
+                curr_season = current_season[i]
+                recent_3yr_mask = current_season[:i] >= curr_season - 3
+                if recent_3yr_mask.sum() == 0:
+                    result.append(float('nan'))
+                else:
+                    win_pct = canonical_win[:i][recent_3yr_mask].mean()
+                    result.append(win_pct)
+
+        # Return Series with original index
+        result_series = pd.Series(result, index=matchup_sorted.index)
+        return result_series.reindex(orig_index)
+
+    def _compute_h2h_home_away_splits(self, df: pd.DataFrame, venue_type: str) -> pd.Series:
+        """
+        Compute home team's win% based on venue (home or away).
+
+        Args:
+            df: Games DataFrame with HOME_TEAM_ID, AWAY_TEAM_ID, GAME_DATE, POINT_DIFF
+            venue_type: 'home' or 'away'
+
+        Returns:
+            Series with win% (indexed by df.index)
+        """
+        result = pd.Series(float('nan'), index=df.index)
+
+        for idx in df.index:
+            if idx == 0:
+                continue
+
+            home_team_id = df.loc[idx, 'HOME_TEAM_ID']
+            away_team_id = df.loc[idx, 'AWAY_TEAM_ID']
+            curr_date = df.loc[idx, 'GAME_DATE']
+
+            # Get all prior games
+            prior = df.loc[:idx-1]
+
+            if venue_type == 'home':
+                # Home team playing at home against this opponent
+                matching = prior[
+                    (prior['HOME_TEAM_ID'] == home_team_id) &
+                    (prior['AWAY_TEAM_ID'] == away_team_id)
+                ]
+                if len(matching) > 0:
+                    wins = (matching['POINT_DIFF'] > 0).sum()
+                    result.loc[idx] = wins / len(matching)
+            else:  # away
+                # Home team playing away against this opponent
+                matching = prior[
+                    (prior['HOME_TEAM_ID'] == away_team_id) &
+                    (prior['AWAY_TEAM_ID'] == home_team_id)
+                ]
+                if len(matching) > 0:
+                    # Win when away means POINT_DIFF < 0
+                    wins = (matching['POINT_DIFF'] < 0).sum()
+                    result.loc[idx] = wins / len(matching)
+
+        return result
 
     @staticmethod
     def _haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
