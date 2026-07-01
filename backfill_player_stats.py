@@ -73,34 +73,45 @@ def _get_last_cached_date(db_path: str) -> Optional[str]:
         return None
 
 
-def _fetch_box_score(game_id: str) -> pd.DataFrame:
+def _fetch_box_score(game_id: str, max_retries: int = 3) -> pd.DataFrame:
     """
-    Fetch player box score data for a game from the NBA API.
+    Fetch player box score data for a game from the NBA API with exponential backoff.
 
     Args:
         game_id: NBA game ID
+        max_retries: Maximum retry attempts on failure
 
     Returns:
         DataFrame with columns including personId, points, assists, reboundsTotal, blocks, steals, fieldGoalsPercentage
-        Returns empty DataFrame if fetch fails.
+        Returns empty DataFrame if all attempts fail.
     """
-    try:
-        time.sleep(SLEEP_SECONDS)
-        box_score = BoxScoreTraditionalV3(game_id=game_id)
-        df = box_score.get_data_frames()[0]
+    for attempt in range(max_retries):
+        try:
+            time.sleep(SLEEP_SECONDS)
+            box_score = BoxScoreTraditionalV3(game_id=game_id)
+            df = box_score.get_data_frames()[0]
 
-        if df.empty:
-            logger.warning(f"Empty box score for game {game_id}")
-            return pd.DataFrame()
+            if df.empty:
+                logger.warning(f"Empty box score for game {game_id}")
+                return pd.DataFrame()
 
-        # Filter to player rows (exclude team totals and DNPs)
-        # Keep only rows with valid personId
-        df = df[df['personId'].notna()]
+            # Filter to player rows (exclude team totals and DNPs)
+            # Keep only rows with valid personId
+            df = df[df['personId'].notna()]
 
-        return df
-    except Exception as e:
-        logger.error(f"Failed to fetch box score for game {game_id}: {e}")
-        return pd.DataFrame()
+            return df
+        except Exception as e:
+            wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+            if attempt < max_retries - 1:
+                logger.debug(
+                    f"Failed to fetch game {game_id} (attempt {attempt + 1}/{max_retries}): {e}. "
+                    f"Retrying in {wait_time}s..."
+                )
+                time.sleep(wait_time)
+            else:
+                logger.error(f"Failed to fetch box score for game {game_id} after {max_retries} attempts: {e}")
+
+    return pd.DataFrame()
 
 
 def _insert_player_stats(
