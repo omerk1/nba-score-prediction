@@ -8,14 +8,18 @@
 - **A2** ✅ Extended H2H Features (PR #16, ready to merge)
 - **A3** ✅ Player Box Score Projections (PR #18, awaiting expansion confirmation to 6 stats)
 - **A4** ✅ Lineup Data Collection (PR #14, ready to merge)
-- **A5** ❌ Polymarket Signals (DELETED — synthetic data only, user requirement was real APIs)
-- **A6** ❌ Vegas Signals (DELETED — synthetic data only, user requirement was real APIs)
+- **A5** ✅ Polymarket Signals (PR #22, merged — real Polymarket API data, robust backfill, playoffs/championships focus)
+- **A6** 🔄 OddsPapi Sportsbook Signals (planned — full season coverage, 250+ bookmakers)
 
 ### Backfill Infrastructure ✅
-- **Backfill Resilience** (PR #21, pending review)
+- **Backfill Resilience** (PR #21, merged)
   - Exponential backoff retry in backfill_player_stats.py
   - recover_failed_backfill.py script for manual recovery
   - Database fully recovered: 1,850,508 stats (all 23 previously failed games recovered)
+- **A5 Robust Backfill** (PR #22, merged)
+  - Error tracking and recovery script (recover_polymarket_failed.py)
+  - Incremental progress saves (resume-safe)
+  - 529 playoff/championship odds collected (93.3% success rate)
 
 ---
 
@@ -163,7 +167,8 @@ Once decided → implement in feature/a7-style-matchup
 
 ## Notes
 
-- **PR #21** (backfill resilience) pending merge — doesn't block Phase 2
+- **PR #21, #22 merged** — backfill resilience + A5 robust Polymarket collector ready
 - **Phase 1 Group A PRs** (#14, #16, #18) ready to merge once reviewed
-- **A5, A6 deleted intentionally** — will rebuild betting module when real data source identified
+- **A5 complete** (real Polymarket data) — playoffs/championships focus, use A6 (OddsPapi) for full season
+- **A6 planned** — OddsPapi sportsbook integration blocked on API key setup
 - **Player stats cache** fully backfilled (1,850,508 stats) — ready for A3 expansion and B1/B2 work
