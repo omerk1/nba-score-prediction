@@ -1,4 +1,4 @@
-# A7: Style Matchup Score — Architecture & Design (v2)
+i m# A7: Style Matchup Score — Architecture & Design (v2)
 
 > **Status:** EXPERIMENTAL — not yet integrated into feature_builder  
 > **Supersedes:** A7_STYLE_MATCHUP_DESIGN.md (v1)  
