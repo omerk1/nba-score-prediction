@@ -1,0 +1,13 @@
+timestamp,run_name,encoding_phase,similarity_method,similarity_threshold_or_k,layers_enabled,n_games_evaluated,fallback_rate,mean_confidence,corr_style_vs_margin,mae_high_conf,mae_low_conf,corr_a2_alone,corr_a7_alone,corr_a2_plus_a7,notes
+2026-07-02 19:16 UTC,layer_ablation_L1_only,1,"none (naive diff sum, no search)",,L1,3922,0.0,,-0.1428,,,0.1177,-0.1428,0.1886,"Naive equal-weight sum of z-scored home-away diffs, layer=1 (no injury adj), no similarity search."
+2026-07-02 19:16 UTC,layer_ablation_L1_L2,1,"none (naive diff sum, no search)",,L1+L2,3922,0.0,,-0.1401,,,0.1177,-0.1401,0.1866,"Naive equal-weight sum of z-scored home-away diffs, layer=2 (injury-adjusted), no similarity search."
+2026-07-02 19:16 UTC,layer_ablation_L1_L2_L3_cosine,1,cosine,0.7,L1+L2+L3,3922,0.0003,0.992,0.2806,12.3111,10.7793,0.1177,0.2806,0.2955,"Full pipeline: injury-adjusted fingerprints + cosine similarity search, H2H fallback below min_confidence_sample."
+2026-07-02 19:16 UTC,layer_ablation_L1_L2_L3_knn,1,knn,30,L1+L2+L3,3922,0.0,0.6,0.2482,12.3025,,0.1177,0.2482,0.2669,"Full pipeline: injury-adjusted fingerprints + KNN similarity search, H2H fallback below min_confidence_sample."
+2026-07-02 19:16 UTC,threshold_sweep_cosine_0.5,1,cosine,0.5,L1+L2+L3,3922,0.0,1.0,0.2823,12.4372,,0.1177,0.2823,0.2975,Magic-number exploration: cosine threshold sweep (see Phase 3 phase log).
+2026-07-02 19:16 UTC,threshold_sweep_cosine_0.6,1,cosine,0.6,L1+L2+L3,3922,0.0,0.9999,0.2846,12.3634,,0.1177,0.2846,0.2989,Magic-number exploration: cosine threshold sweep (see Phase 3 phase log).
+2026-07-02 19:16 UTC,threshold_sweep_cosine_0.8,1,cosine,0.8,L1+L2+L3,3922,0.0586,0.6919,0.2405,12.4806,11.956,0.1177,0.2405,0.2557,Magic-number exploration: cosine threshold sweep (see Phase 3 phase log).
+2026-07-02 19:16 UTC,threshold_sweep_cosine_0.9,1,cosine,0.9,L1+L2+L3,3922,0.8896,0.0814,0.123,14.3378,12.7833,0.1177,0.123,0.1252,Magic-number exploration: cosine threshold sweep (see Phase 3 phase log).
+2026-07-02 19:16 UTC,k_sweep_knn_10,1,knn,10,L1+L2+L3,3922,0.0,0.2,0.1804,,12.7343,0.1177,0.1804,0.2099,Magic-number exploration: KNN k sweep (see Phase 3 phase log).
+2026-07-02 19:16 UTC,k_sweep_knn_20,1,knn,20,L1+L2+L3,3922,0.0,0.4,0.2211,,12.4228,0.1177,0.2211,0.2434,Magic-number exploration: KNN k sweep (see Phase 3 phase log).
+2026-07-02 19:16 UTC,k_sweep_knn_50,1,knn,50,L1+L2+L3,3922,0.0,1.0,0.268,12.2696,,0.1177,0.268,0.2842,Magic-number exploration: KNN k sweep (see Phase 3 phase log).
+2026-07-02 19:16 UTC,k_sweep_knn_100,1,knn,100,L1+L2+L3,3922,0.0,1.0,0.2843,12.2657,,0.1177,0.2843,0.2989,Magic-number exploration: KNN k sweep (see Phase 3 phase log).

@@ -9,8 +9,9 @@ data/processed/*
 # But keep .gitkeep files
 !**/.gitkeep
 
-# Keep ablation log
+# Keep ablation logs
 !outputs/experiments.csv
+!outputs/a7_style_matchup_results.csv
 
 # Python
 __pycache__/
