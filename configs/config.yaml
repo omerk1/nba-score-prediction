@@ -100,3 +100,38 @@ injury_features:
     moderate: 0.6  # Sprain, strain, bone bruise
     minor: 0.3     # Soreness, illness, injury recovery, unknown
   doubtful_weight: 0.8  # Fraction of Out severity applied to Doubtful players
+
+style_matchup:
+  # A7 exploratory module (src/matchups/). Not read by config_loader.py's Config
+  # schema (not integrated into feature_builder yet) — parsed directly by
+  # src/matchups/config.py. See docs/a7_style_matchup_design.md and
+  # docs/A7_PHASE_LOG.md for how these values were chosen.
+  fingerprint_window: 20
+  decay_halflife: 5
+  encoding: hand_picked
+  similarity_method: cosine   # cosine | knn -- see Phase 3 findings in phase log
+  similarity_threshold: 0.70
+  knn_k: 30
+  min_confidence_sample: 10
+  full_confidence_sample: 50
+  low_confidence_fallback: h2h
+  archetype_method: percentile
+  injury_impact_calibrated: true  # values below are Phase-0 empirical deltas, not v1 guesses
+  injury_impact:
+    facilitator:
+      assist_rate: -0.0066
+      pace_score: -1.2722
+    scorer:
+      three_pt_reliance: 0.0237
+      paint_activity: 0.344
+    combo:
+      pace_score: -1.1087
+      three_pt_reliance: -0.0047
+      paint_activity: 0.0229
+      defensive_rating: 0.2746
+      assist_rate: -0.0051
+    rim_protector:
+      defensive_rating: 0.5376
+      paint_activity: -0.2716
+    perimeter_specialist:
+      defensive_rating: -0.3131
