@@ -126,6 +126,36 @@ style_matchup:
 
 ---
 
+#### 5. Known Infra Gaps (found during implementation planning)
+
+**Gap 1 — Phase 1 fingerprint inputs don't exist where expected.**
+`data/raw/nba_api.sqlite`'s `game` table only stores fg_pct/ft_pct/fg3_pct/ast/reb —
+no FGA, FGM, FTA, FG3A, TOV, which the pace/paint/3pt-reliance/assist-rate formulas
+need. `src/data_processing/fetch_data.py` already calls `nba_api.stats.endpoints.
+LeagueGameLog` for this table; that endpoint returns the missing columns too, they're
+just not selected/stored today.
+**Fix:** source raw box-score inputs from a fresh `LeagueGameLog` call (same
+convention as `fetch_data.py`), cached in a new additive table (not an `ALTER TABLE`
+on `game` — mirror the `player_stats_cache` pattern instead). Do **not** use
+`data/raw/basketball.sqlite` — a static one-time Kaggle dump (last touched
+2023-07-06), not part of the live pipeline, and not kept in sync.
+
+**Gap 2 — Phase 0 calibration needs player_id, injury records only have player_name.**
+`player_injuries` (in `data/raw/injury_features.sqlite`) stores `player_name` as free
+text with no `player_id`; `player_stats_cache` (needed for archetype classification)
+is keyed by `player_id`. No existing join key between them.
+**Fix:** resolve names via `nba_api.stats.static.players.get_players()` (same
+convention `src/news_scraping/pipeline.py:_resolve_team_id` already uses for teams
+via `nba_api.stats.static.teams`), disambiguating duplicate names using whichever
+candidate has `player_stats_cache` activity near the injury date. Track the overall
+resolution coverage rate — if low, Phase 0's calibration deltas are unreliable and
+that must be flagged, not silently ignored. Note: the doc's own Layer ablation
+(L1 only vs. L1+2 vs. L1+2+3) acts as a natural check here — if a bad join corrupts
+Layer 2, it'll show up as L1+2 correlating *worse* than L1 alone, not as a silently
+wrong "style signal works" conclusion.
+
+---
+
 ### A7 Decision Matrix
 
 | Item | Option A | Option B | Option C | Recommendation |
