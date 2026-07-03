@@ -542,3 +542,374 @@ before any `feature_builder.py` integration is considered:
 - Should Layer 4 (role-level matchup flags, live-prediction only) be scoped as
   a follow-up now that Layers 1-3 are validated?
 
+---
+
+## WIDER EXPLORATION RUN (second unattended pass, branch `work/a7-wider-exploration`)
+
+Builds on the Phases 0-4 work above without redoing it. New code lives in new
+files under `src/matchups/`: `split.py`, `tuning.py`, `encoding_pca.py`,
+`clustering.py`, `supervised.py`, `wider_results.py`. No existing file was
+modified. `outputs/a7_matchups_cache.sqlite` (built by the previous run) and the
+read-only `data/raw/{nba_api,injury_features}.sqlite` symlinks were copied/
+recreated into this worktree from the human's checkout (this worktree started
+with neither present) — no existing cache data was deleted or altered, only
+read from.
+
+### Guardrail (item #4) — Train/Validation Split
+**Status:** complete
+
+**What was built:** `src/matchups/split.py` reads `configs/config.yaml`'s
+EXISTING `datasets_loading` block (via the project's own `load_config()`) rather
+than inventing a new date scheme, exactly as instructed. Train =
+`2018-10-16` to `2024-04-14` (7,480 evaluable games in the A7 historical index),
+validation = `2024-10-22` to `2025-04-13` (1,225 games). `test_start_date`/
+`test_end_date` are deliberately left untouched (not requested this run).
+
+To make hyperparameter search over `fingerprint_window`/`decay_halflife`
+tractable (recomputing the rolling fingerprint touches ~25k team-game rows and
+the previous run's functions persist every call into the shared
+`matchup_fingerprints` cache table), `src/matchups/tuning.py` reimplements the
+fingerprint -> injury-adjust -> matchup-index -> similarity-search pipeline
+**in memory**, reusing the existing modules' private helpers
+(`fingerprint._load_raw_team_game_metrics`, `fingerprint._decayed_weighted_mean`,
+`matchup_index._load_games`, `injury_layer._out_players_with_reason` /
+`_team_game_archetype_severity`) so the math is identical, but nothing is
+written back to the cache DB during search. The injury-delta application was
+also vectorized (precompute one `(game_date, team_id) -> per-metric delta`
+lookup table once, merge instead of a 25k-row `iterrows()` loop) for speed —
+same stacking rule as `injury_layer.py` (additive across archetypes, max
+severity within an archetype), just restructured for reuse across trials.
+
+**Correctness check before trusting the in-memory pipeline:** re-ran the exact
+Phase 3/4 config (window=20, halflife=5, cosine@0.70, eval from 2023-10-01) through
+the new in-memory path and got **corr=0.2814** vs the cached/DB-backed
+implementation's documented **0.2806** — matches within floating-point/groupby-
+ordering noise, confirming the in-memory reimplementation is a faithful
+reproduction before it was used for hyperparameter search.
+
+**Key finding (new, not in the previous run):** correlation is **substantially
+lower when evaluated on the 2018-2024 train split than on the 2024-2025
+validation split or the previous run's 2023-2026 window**, for every single
+method tried this run (see full table below). E.g. the exact hand-picked default
+(window=20/halflife=5/cosine@0.70) scores train=0.166 vs validation=0.285 vs the
+original Phase 4 number of 0.281 (a similar, overlapping window). This is **not
+evidence of overfitting** — it is a corpus-depth effect: cosine/KNN lookup
+borrows sample size from the full history of games strictly before the target
+date, and train-split games as early as 2018-10-16 have barely two years of
+warm-start history (from the 2016-10-01 data start) to search over, while
+validation-split games in 2024-25 have eight-plus years of accumulated history.
+**Flagging this explicitly so absolute correlation numbers are not read as
+context-free** — A7's effectiveness should be expected to keep improving over
+calendar time simply because the searchable history keeps growing, independent
+of any hyperparameter or method choice.
+
+**Fallbacks used:** none required — `configs/config.yaml`'s existing
+`datasets_loading` block had everything needed.
+
+**Next dependencies:** items #1/#2/#3 below all use `tuning.py`'s
+`load_constants()` / `evaluate_config()` and `split.get_split_dates()` as their
+shared foundation.
+
+---
+
+### Item #1 — Real Hyperparameter Search
+**Status:** complete
+
+**What was built/tried:** `src/matchups/tuning.py:run_optuna_search()` —
+Optuna (TPE sampler, seed=42, 40 trials) jointly searching:
+`fingerprint_window` (int, 10-40), `decay_halflife` (float, 2-15),
+`similarity_method` (categorical, cosine|knn), `similarity_threshold` (float,
+0.4-0.9, only sampled/used when method=cosine), `knn_k` (int, 10-150, only when
+method=knn), `min_confidence_sample` (int, 5-30), `full_confidence_sample` (int,
+`max(min_confidence_sample, 30)`-150). Objective = `corr_style_vs_margin`,
+maximized, evaluated **only on the TRAIN split** (per guardrail #4) — never
+peeking at validation during search. Followed this repo's existing
+`tune_model.py`/`tune_elo.py` Optuna convention (TPE sampler, `direction`,
+`study.optimize`), adapted for this module's in-memory pipeline instead of
+CatBoost. All trials run with **layer=2 (injury-adjusted) fingerprints**, per
+the coordinator's explicit clarification that the 0.281 baseline this run
+compares against is a layer=2 number.
+
+**Key findings:**
+- Best config found: `fingerprint_window=37, decay_halflife=13.20,
+  similarity_method=knn, knn_k=81, min_confidence_sample=21,
+  full_confidence_sample=82` (threshold field unused since method=knn).
+- Best train corr (the actual selection metric) = **0.2181**, vs. the
+  hand-picked default's train corr = **0.1660** (re-evaluated on the identical
+  train split for a fair comparison — the previous run's 0.281 number was
+  measured on a different, overlapping window, not this train split).
+- **The improvement holds up on validation, not just where it was selected**:
+  best config validation corr = **0.3227** vs. default's validation corr =
+  **0.2853** — a +0.037 gain on BOTH splits, which is exactly the pattern you
+  want to see (a genuine improvement, not a config that only looks good on the
+  data it was chosen against).
+- The search moved fingerprint construction toward a **much smoother/slower-
+  moving style signal** than the design-doc defaults: window 37 (vs 20) and
+  half-life 13.2 games (vs 5) — recent-game weighting is far less aggressive
+  than the original hand-picked choice.
+- The search picked **KNN over cosine** this run (opposite of the previous
+  run's winner) with **k=81** — much larger than the design doc's k=30 default,
+  but consistent with the *previous* run's own sweep finding that KNN
+  correlation rises monotonically with k up to at least k=100. This search
+  corroborates that finding rather than contradicting it: a properly tuned KNN
+  (large k) is competitive with or better than cosine, it just needs a much
+  larger k than the design doc's original recommendation.
+- `min_confidence_sample`/`full_confidence_sample` also loosened (21/82 vs
+  10/50) — plausibly because the smoother window/half-life produces more stable
+  but less sharply-peaked similarity scores, so more neighbors are needed
+  before "confidence" saturates.
+
+**Train vs validation split results:** train=0.2181 (selection), validation=
+0.3227 (report). Gap is *positive* in the direction of validation being
+higher — consistent with the corpus-depth effect noted under the guardrail
+section, not overfitting. The default config shows the identical directional
+gap (0.166 train -> 0.285 validation), which is further evidence the gap is a
+property of the split's calendar position, not of this particular
+hyperparameter choice.
+
+**Fallbacks used:**
+- Hyperparameter search re-implements the fingerprint/injury/index/search
+  pipeline in memory rather than calling the existing DB-backed functions
+  directly, to avoid 40+ rounds of DELETE+INSERT into the shared
+  `matchup_fingerprints` cache table (see guardrail section) — a performance/
+  cache-hygiene fallback, not a methodological one; verified to reproduce the
+  DB-backed path's numbers first (see guardrail section).
+- 40 trials / one seed, not a larger budget — a deliberate time-budget choice
+  (prioritized per the instructions' "guardrail + item #1 over #2/#3" ranking).
+  Flagged in the summary below as worth a wider sweep before treating the
+  found config as final.
+
+**Next dependencies:** items #2/#3 below use the SAME default (window=20,
+halflife=5, cosine@0.70) as their comparison anchor rather than the newly
+found best config, so that "does encoding/method X beat hand-picked" is judged
+against the same baseline the previous run already validated, not a moving
+target; the hyperparameter-search result is reported as its own separate
+finding.
+
+---
+
+### Item #2 — Alternative Encodings/Methods (Tried Unconditionally)
+**Status:** complete
+
+**What was built/tried:**
+- `src/matchups/encoding_pca.py` — PCA encoding (design doc Phase 2). 11 raw
+  box-score-derived metrics (the exact 5 hand-picked metrics, verbatim, +6 more
+  from the design doc's Phase 2 list that don't require shot-chart data:
+  `reb_rate, to_rate, ft_rate, def_reb_rate, opp_3pt_rate_allowed,
+  opp_paint_rate_allowed` — the design doc's other Phase 2 metrics
+  `second_chance_rate/fast_break_rate/avg_shot_distance/pull_up_rate/
+  catch_shoot_rate` require shot-chart/play-type endpoints and are out of scope
+  per this run's explicit instructions). Injury adjustment (layer=2) is applied
+  to the 5 hand-picked columns BEFORE PCA (injury deltas have no defined
+  meaning in PCA-component space). `StandardScaler + PCA(n_components=5)` fit
+  on **TRAIN-split team-games only** (no leakage into validation), `.transform()`
+  applied to all rows using the fitted object — matches the design doc's
+  explicit "fit PCA on training set only" instruction.
+- `src/matchups/clustering.py` — KMeans (k=8, design doc's example) archetype-
+  pair bucket lookup (design doc Phase 3), as an alternative SEARCH method (not
+  a per-vector cosine/KNN search). Centroids fit on layer=2 z-scored hand-picked
+  vectors, TRAIN-split team-games only; all team-games (train+validation)
+  assigned a cluster via `.predict()`. A game's score is the **leakage-safe**
+  historical average margin for its `(home_cluster, away_cluster)` bucket —
+  implemented via a per-bucket `np.searchsorted` exclusion (excludes every
+  OTHER game on the same date within the same bucket, not just earlier row
+  positions — a naive `groupby().shift(1)` would NOT exclude same-date bucket-
+  mates, since bucket membership is much coarser than exact team identity).
+
+**Key findings (both encodings compared side by side with hand-picked, same
+default cosine@0.70/window=20/halflife=5 search params, same train/validation
+split, layer=2 throughout):**
+
+| method | train corr | validation corr |
+|---|---|---|
+| hand-picked (cosine@0.70, default) | 0.1660 | 0.2853 |
+| PCA (5 components, 11 raw metrics) | 0.1217 | 0.2624 |
+| clustering (k=8 bucket lookup) | 0.0862 | 0.1921 |
+
+- **Neither PCA nor clustering beats hand-picked encoding, on either split.**
+  This reverses the design doc's framing of PCA as the "recommended upgrade" —
+  at least with the box-score-only metric set available (no shot-chart data),
+  hand-picked wins outright.
+- PCA's 5 components explain only ~72% of the 11 raw metrics' variance
+  (`[0.206, 0.189, 0.123, 0.108, 0.098]`) — some information is discarded by
+  dimensionality reduction, which may explain part of the shortfall; not
+  explored further this run (would require sweeping `n_components`, out of
+  this run's time budget).
+- **Clustering is the weakest method tried, on both splits, by a wide margin.**
+  This empirically confirms the design doc's own stated con
+  ("loses nuance between teams within the same cluster") — discretizing a
+  continuous 10-dim matchup vector into one of only 64 possible cluster-pair
+  buckets throws away most of the fine-grained ranking information cosine
+  similarity preserves. Cluster sizes were reasonably balanced (1,288-2,325
+  team-games per cluster on the train split) — the weak result is not an
+  artifact of a degenerate/imbalanced clustering.
+- Only 67 of 8,705 games (train+validation combined) had zero prior bucket
+  history (new/unseen cluster pair) — clustering's core promised advantage
+  (guaranteed sample size) does hold, it just isn't worth the correlation cost
+  here.
+
+**Train vs validation split results:** both new methods show the SAME
+directional train<validation gap as hand-picked (corpus-depth effect, see
+guardrail section) — this is a property of the split's calendar position, not
+specific to either encoding.
+
+**Fallbacks used:**
+- PCA's raw metric count (11) is well below the design doc's aspirational
+  15-20 — the shortfall is entirely the metrics that require shot-chart data
+  (explicitly out of scope this run), not a shortcut taken within scope.
+- `n_components=5` was matched to hand-picked's dimensionality for an
+  apples-to-apples 10-dim matchup vector rather than swept — a deliberate
+  scope-limiting choice given the time budget, flagged above as worth a follow-
+  up sweep.
+
+**Next dependencies:** none — items #2's results stand on their own; item #3
+below uses the SAME hand-picked layer=2 vectors as its input (not PCA or
+cluster features), since the ask was to compare a new *model paradigm* against
+the existing *encoding*, not to combine both changes at once.
+
+---
+
+### Item #3 — Supervised Model (New Paradigm)
+**Status:** complete
+
+**What was built/tried:** `src/matchups/supervised.py` — `CatBoostRegressor`
+(depth=4, learning_rate=0.05, iterations<=300, early-stopping on an internal
+chronological dev slice — the last 15% of TRAIN-split dates, carved out so the
+TRUE validation split is never touched during fitting or early-stopping
+decisions) trained directly on the 10-dim injury-adjusted (layer=2) matchup
+vector (`home_pace_score...away_assist_rate`) to predict `actual_home_margin`.
+No historical similarity search is involved at prediction time — this is direct
+regression, a genuinely different family from every lookup-based method above,
+per the instructions. Hyperparameters were fixed at a small, reasonable
+default (not run through the full Optuna search — out of scope for item #3,
+whose question is "does the paradigm work," not "what's the optimal catboost
+config").
+
+**Key findings:**
+- Train corr = **0.3877** (full train split, though the internal dev slice was
+  held out from fitting), validation corr = **0.2845**.
+- Validation corr (0.2845) is a **virtual tie with hand-picked's untuned
+  default (0.2853)** and clearly **below the hyperparameter-searched lookup
+  config (0.3227)**.
+- The train/validation gap for this method runs in the OPPOSITE direction from
+  every lookup-based method: train (0.3877) > validation (0.2845), a real
+  ~0.10 corr drop. Every lookup method instead shows validation > train (the
+  corpus-depth effect). This is a meaningfully different signature — a fitted
+  model can partially memorize training-period noise despite early stopping,
+  whereas parameter-only lookup methods have no such fitting step and instead
+  benefit purely from a deeper search corpus over time. **This train/val gap
+  reads as mild overfitting**, not corpus depth.
+- `best_iteration` landed at 298 of a 300-iteration budget (early stopping
+  barely engaged) — the small feature set (10 dims) and modest depth (4) likely
+  limit how much it CAN overfit, but the gap above suggests some still occurred.
+
+**Train vs validation split results:** train=0.3877, validation=0.2845 — see
+above; this is the one method in the whole run where train beats validation,
+flagged as its own distinct finding (mild overfitting signature vs. the
+corpus-depth-driven gap everywhere else).
+
+**Fallbacks used:**
+- Fixed hyperparameters rather than a tuned config — explicitly scoped this way
+  per the instructions (item #3 is "does the paradigm beat lookup," not
+  "optimize the paradigm"). Noted in the summary below as worth revisiting
+  before fully ruling out the supervised approach, since an UNTUNED config
+  already matches the untuned lookup baseline.
+- Internal train-tail dev slice (15%) for early stopping, invented for this
+  module since neither the design doc nor the previous run specified a
+  supervised-model validation protocol — chosen to strictly preserve the
+  guardrail (true validation split never touched during fitting).
+
+**Next dependencies:** none — this is the final new method for this run.
+
+---
+
+## WIDER EXPLORATION SUMMARY
+
+**Best-performing method/configuration overall, and does it hold up on
+validation:** The hyperparameter-searched lookup config (KNN, k=81,
+fingerprint_window=37, decay_halflife=13.2, min/full_confidence_sample=21/82,
+layer=2) — **validation corr = 0.3227**, the highest of every method/config
+tried in this run. It was selected purely on the TRAIN split (0.2181) and its
+lead over the untuned default HOLDS on validation (+0.037 on both splits) —
+this is a genuine improvement, not an artifact of the split it was chosen on.
+
+**How the hyperparameter-searched config compares to the previous run's hand-
+picked defaults:** +0.037 correlation on both train (0.166->0.218) and
+validation (0.285->0.323), evaluated on the identical guardrail split for both.
+The search moved toward a much smoother fingerprint (window 37 vs 20, half-life
+13.2 vs 5 games) and toward KNN with a much larger k (81) than the design doc's
+original k=30 — corroborating, not contradicting, the previous run's own
+sweep finding that KNN improves monotonically with k.
+
+**Did PCA or clustering ever beat hand-picked cosine, and by how much:** No,
+neither did, on either split. PCA underperformed by 0.044 (train) / 0.023
+(validation). Clustering underperformed by 0.080 (train) / 0.093 (validation)
+— clustering was the single weakest method tried in the entire run. This
+reverses the design doc's framing of PCA as a "recommended upgrade" (at least
+given the box-score-only metric set available without shot-chart data) and
+empirically confirms the design doc's own stated clustering weakness
+("loses nuance").
+
+**Did the supervised-model paradigm beat lookup-and-average, and by how much:**
+No. Validation corr (0.2845) ties the untuned hand-picked default (0.2853) and
+loses to the hyperparameter-tuned lookup config (0.3227) by 0.038. Unlike every
+lookup method, its train correlation (0.3877) is HIGHER than its validation
+correlation — a distinct, opposite-direction gap that reads as mild overfitting
+rather than the corpus-depth effect seen everywhere else. It was evaluated with
+fixed, untuned hyperparameters, so this is not necessarily the paradigm's
+ceiling — see open questions below.
+
+**New finding not specific to any one item:** correlation is systematically
+lower on the 2018-2024 train split than on the 2024-2025 validation split (or
+the previous run's 2023-2026 window) for EVERY method tried, hand-picked
+included. This is best explained by historical-corpus depth (lookup methods
+borrow sample size from all strictly-prior games, and train-split games as
+early as 2018 have far less lookback history than validation-split games in
+2024-25) rather than by any method/hyperparameter choice — flagged so future
+readers don't treat absolute correlation numbers as context-free constants.
+
+**New open questions for human review:**
+1. Should `configs/config.yaml`'s `style_matchup` defaults be updated to the
+   hyperparameter-search result (window=37, halflife=13.2, method=knn, k=81,
+   min/full_confidence=21/82)? It's a validation-confirmed improvement, but
+   came from only 40 trials / one seed — recommend a wider sweep (more trials,
+   >=1 additional seed) before writing these into config.yaml as the new
+   default, not just adopting them directly from this single run.
+2. The train<validation correlation gap (corpus-depth effect) means A7's
+   measured effectiveness is itself a function of calendar time / how much
+   history has accumulated by prediction time — should this be accounted for
+   explicitly (e.g. reporting confidence-by-corpus-depth, not just confidence-
+   by-neighbor-count) if A7 is ever integrated?
+3. PCA's 5 components captured only ~72% of the 11 raw metrics' variance — was
+   5 the right number, or would more components (trading interpretability for
+   signal) close the gap with hand-picked? Not swept this run.
+4. The supervised-model paradigm was evaluated with fixed, untuned
+   hyperparameters and still tied the untuned lookup baseline — worth one more
+   look with an actual (small) hyperparameter sweep for the catboost model
+   before concluding the paradigm categorically loses to lookup-and-average.
+5. The three open items from the end of the PREVIOUS run (perimeter_specialist
+   injury-impact sign flip, `combo` archetype validity, and the original
+   evaluation-window choice) remain untouched by this run and still need human
+   review — this run's train/validation split addresses the evaluation-window
+   question going forward (a leakage-safe, project-standard split now exists
+   and was used throughout), but does not retroactively resolve it for the
+   Phase 0-4 numbers, which still used the original 2023-2026 window.
+
+**Recommended next step:** **Iterate, do not integrate yet, and do not
+abandon** (same overall posture as the previous run, now with more evidence
+behind it). Concretely:
+- Adopt this run's train/validation split (`src/matchups/split.py`) as the
+  standard evaluation harness for any future A7 work, instead of the ad hoc
+  2023-2026 window.
+- Treat the hyperparameter-search result as a promising candidate default,
+  pending a slightly larger trials/seed sweep, before writing it into
+  `config.yaml` as the new production default.
+- Do not pursue PCA or clustering further as replacements for hand-picked
+  cosine/KNN — hand-picked has now won two full exploration rounds in a row
+  against both alternatives.
+- Do not adopt the supervised-model paradigm as a replacement for
+  lookup-and-average based on this evidence, but don't fully close the door
+  either — a genuinely untuned config already matched the untuned lookup
+  default, so a proper (small) hyperparameter search for it is a reasonable
+  low-cost follow-up before a final verdict.
+
