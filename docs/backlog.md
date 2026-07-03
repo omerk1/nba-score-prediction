@@ -182,6 +182,15 @@ wrong "style signal works" conclusion.
 **Status:** Post-A7 validation
 **Goal:** Integrate style_matchup features into model, measure improvement vs A2 alone
 
+### Future: Richer Style-Fingerprint Inputs (Shot Charts)
+**Status:** Deferred — deliberately skipped for the first A7 exploration to keep scope contained
+**Goal:** Add shot-distance/shot-zone tendencies to Layer 1 fingerprints, beyond the current 5
+hand-picked box-score-derived metrics (pace, 3pt reliance, paint activity, def rating, assist rate)
+**Data source:** `nba_api` shot-chart/shot-zone endpoints — per-game granular calls, real
+backfill time and rate-limit cost, bigger scope than the current box-score-only approach
+**Revisit when:** the current 5-metric encoding's ceiling looks limiting (e.g. Phase 2/PCA
+exploration plateaus below what richer inputs might unlock)
+
 ---
 
 ## Decision Checklist for A7
