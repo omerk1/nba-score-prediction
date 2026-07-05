@@ -169,14 +169,36 @@ def run_search_inmemory(
     idx: pd.DataFrame, h2h: pd.DataFrame, method: str, threshold: float, k: int,
     min_confidence_sample: int, full_confidence_sample: int,
     eval_start: str, eval_end: str,
+    floor: float | None = None, recency_years: float | None = None,
 ) -> pd.DataFrame:
     """Identical leakage-guard/search logic to similarity.run_similarity_search,
-    operating on an in-memory idx built by build_index_inmemory (no DB read)."""
+    operating on an in-memory idx built by build_index_inmemory (no DB read).
+
+    Extended this run (walk-forward CV) with two new, backward-compatible axes:
+      method="knn_floor" -- the hybrid method (item #2): up to `k` nearest neighbors
+        by cosine similarity, but ONLY those that also clear `floor` (a minimum
+        cosine similarity). If fewer than `k` games clear the floor, fewer are used
+        (never padded with dissimilar games to force the count) -- this is what lets
+        n_similar shrink naturally in thin/mismatched periods, which flows straight
+        into the existing confidence/fallback mechanism unchanged.
+      recency_years -- (item #3) if set, the search corpus for a target game is
+        further restricted to prior games within `recency_years` of the target's
+        date (in addition to the existing strict "before this date" exclusion).
+        None (default) preserves the original unbounded-history behavior.
+
+    Leakage discipline unchanged: dates are converted to datetime64 (from the
+    date-sorted idx) and both the upper bound (strictly before target date, via
+    np.searchsorted side="left") and the new lower bound (recency cutoff, same
+    technique) are computed via np.searchsorted on this sorted array -- same
+    same-date-exclusion guarantee as the original string-based version (datetime64
+    ordering matches ISO-date-string ordering exactly for same-format dates).
+    """
     vector_cols = [c for c in idx.columns if c.startswith("home_") or c.startswith("away_")]
     V = idx[vector_cols].to_numpy(dtype=np.float64)
     norms = np.linalg.norm(V, axis=1)
     norms[norms == 0] = 1e-9
-    dates = idx["game_date"].to_numpy()
+    dates = pd.to_datetime(idx["game_date"]).to_numpy()
+    margins = idx["actual_home_margin"].to_numpy()
 
     idx = idx.merge(h2h, on="game_id", how="left")
     idx["h2h_score"] = idx["h2h_score"].fillna(0.0)
@@ -188,22 +210,36 @@ def run_search_inmemory(
     for i in eval_positions:
         target_date = dates[i]
         end_pos = int(np.searchsorted(dates, target_date, side="left"))
-        if end_pos == 0:
+        start_pos = 0
+        if recency_years is not None:
+            cutoff = target_date - np.timedelta64(int(round(recency_years * 365.25)), "D")
+            start_pos = int(np.searchsorted(dates, cutoff, side="left"))
+        if end_pos <= start_pos:
             n_similar = 0
             style_score = None
         else:
-            hist_V = V[:end_pos]
-            hist_norms = norms[:end_pos]
+            hist_V = V[start_pos:end_pos]
+            hist_norms = norms[start_pos:end_pos]
+            hist_margins = margins[start_pos:end_pos]
             sims = (hist_V @ V[i]) / (hist_norms * norms[i])
             if method == "cosine":
                 keep = np.where(sims >= threshold)[0]
             elif method == "knn":
                 n_take = min(k, len(sims))
                 keep = np.argpartition(-sims, n_take - 1)[:n_take] if n_take > 0 else np.array([], dtype=int)
+            elif method == "knn_floor":
+                floor_idx = np.where(sims >= floor)[0]
+                if len(floor_idx) <= k:
+                    keep = floor_idx
+                else:
+                    sub_sims = sims[floor_idx]
+                    n_take = min(k, len(floor_idx))
+                    top_local = np.argpartition(-sub_sims, n_take - 1)[:n_take]
+                    keep = floor_idx[top_local]
             else:
                 raise ValueError(f"Unknown similarity_method: {method}")
             n_similar = len(keep)
-            style_score = float(idx["actual_home_margin"].to_numpy()[:end_pos][keep].mean()) if n_similar else None
+            style_score = float(hist_margins[keep].mean()) if n_similar else None
 
         confidence = min(n_similar / full_confidence_sample, 1.0) if n_similar else 0.0
         fallback_used = n_similar < min_confidence_sample
@@ -228,17 +264,21 @@ def evaluate_config(
     consts: dict, window: int, halflife: float, method: str, threshold: float, k: int,
     min_confidence_sample: int, full_confidence_sample: int,
     eval_start: str, eval_end: str, layer: int = 2,
+    floor: float | None = None, recency_years: float | None = None,
 ) -> dict:
     """Full in-memory pipeline for one hyperparameter configuration. layer=2 (injury-
     adjusted) is the default and the one comparable to the established 0.281 baseline;
-    layer=1 is available for explicit ablation only (see module docstring)."""
+    layer=1 is available for explicit ablation only (see module docstring).
+
+    `floor` (method="knn_floor") and `recency_years` (any method) are the two new
+    axes added this run -- see run_search_inmemory's docstring."""
     fp1 = build_fingerprints_inmemory(consts["raw"], window=window, halflife=halflife)
     fp = apply_injury_deltas(fp1, consts["delta_lookup"]) if layer == 2 else fp1
     idx = build_index_inmemory(fp, consts["games"])
     out = run_search_inmemory(
         idx, consts["h2h"], method=method, threshold=threshold, k=k,
         min_confidence_sample=min_confidence_sample, full_confidence_sample=full_confidence_sample,
-        eval_start=eval_start, eval_end=eval_end,
+        eval_start=eval_start, eval_end=eval_end, floor=floor, recency_years=recency_years,
     )
     if len(out) == 0 or out["style_score"].std() == 0:
         corr = 0.0
@@ -251,6 +291,17 @@ def evaluate_config(
         "mean_confidence": float(out["confidence"].mean()) if len(out) else 0.0,
         "df": out,
     }
+
+
+def build_idx_for_config(consts: dict, window: int, halflife: float, layer: int = 2) -> pd.DataFrame:
+    """Build the (window, halflife, layer)-dependent matchup index ONCE, so callers that
+    need to evaluate the SAME fingerprint config across many eval windows (e.g. the
+    walk-forward folds, item #1 of this run) don't redo the fingerprint/injury/z-score
+    work per fold -- only run_search_inmemory (cheap relative to fingerprint building)
+    needs to be re-run per fold/eval-window."""
+    fp1 = build_fingerprints_inmemory(consts["raw"], window=window, halflife=halflife)
+    fp = apply_injury_deltas(fp1, consts["delta_lookup"]) if layer == 2 else fp1
+    return build_index_inmemory(fp, consts["games"])
 
 
 # ---------------------------------------------------------------------------
