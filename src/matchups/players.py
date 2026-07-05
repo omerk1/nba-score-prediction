@@ -23,10 +23,15 @@ import unicodedata
 from collections import defaultdict
 from datetime import date, timedelta
 
+import numpy as np
 import pandas as pd
 from nba_api.stats.static import players as nba_players
 
 from src.matchups.db import cache_conn, init_cache_db, injury_conn, nba_api_conn, table_exists
+
+# Item #1 (wrap-up round): player_importance has minutes_per_game/usage_rate, the
+# "how much" data classify_archetypes' clustering finding (see phase log, Phase 0)
+# said was missing from player_stats_cache's PPG/AST/REB/BLK/STL/FG% alone.
 
 logger = logging.getLogger(__name__)
 
@@ -161,8 +166,48 @@ def _date_to_season_str(d: str) -> str:
     return f"{year}-{str(year + 1)[2:]}"
 
 
+def _load_minutes_usage_season_stats() -> pd.DataFrame:
+    """player_importance (injury_features.sqlite, read-only) -> per-player-season averages
+    of minutes_per_game / usage_rate.
+
+    player_importance is a WEEKLY snapshot table (one row per player-team-as_of_date, ~281
+    distinct as_of_dates from 2018-10-22 through 2026-05-27 -- confirmed by inspection, not
+    per-game like player_stats_cache). Rather than a per-row nearest-date join against
+    player_stats_cache's per-game rows (which lacks a team_id column to join on and would
+    add join-ambiguity for no benefit, since the archetype classifier already operates at
+    player-season granularity, not per-game), this aggregates directly to the SAME
+    (player_id, season) grain classify_archetypes() uses: every player_importance row's
+    as_of_date is mapped to a season string (_date_to_season_str, identical function used
+    for player_stats_cache) and averaged within that season -- across team_id too, if a
+    player was traded mid-season, matching how PPG/AST/etc. are already season-pooled
+    regardless of team. This is a deliberate simplification of the literal "player_id +
+    team_id + nearest as_of_date" join description: it reaches the same season-level
+    granularity the rest of the pipeline already operates at, without inventing a
+    per-game join key that doesn't exist in player_stats_cache.
+
+    Coverage note: player_importance only goes back to 2018-10-22, so the 2016-17 and
+    2017-18 seasons (the earliest two of ~10 in the corpus) get NaN here -- those
+    player-seasons are simply excluded from the minutes/usage-aware clustering (Item #1)
+    but remain classifiable under the percentile taxonomy (which doesn't need these
+    columns).
+    """
+    with injury_conn() as conn:
+        df = pd.read_sql_query(
+            "SELECT player_id, as_of_date, minutes_per_game, usage_rate FROM player_importance", conn
+        )
+    df["season"] = df["as_of_date"].map(_date_to_season_str)
+    out = df.groupby(["player_id", "season"]).agg(
+        minutes_per_game=("minutes_per_game", "mean"),
+        usage_rate=("usage_rate", "mean"),
+        n_importance_snapshots=("as_of_date", "count"),
+    ).reset_index()
+    return out
+
+
 def _load_player_season_stats() -> pd.DataFrame:
-    """Long-format player_stats_cache -> per-player-season averages of PPG/AST/REB/BLK/STL."""
+    """Long-format player_stats_cache -> per-player-season averages of PPG/AST/REB/BLK/STL,
+    left-joined with minutes_per_game/usage_rate from player_importance (Item #1, wrap-up
+    round) -- NaN for the two earliest seasons player_importance doesn't cover."""
     with nba_api_conn() as conn:
         df = pd.read_sql_query(
             "SELECT player_id, game_date, stat_name, stat_value FROM player_stats_cache", conn
@@ -174,6 +219,9 @@ def _load_player_season_stats() -> pd.DataFrame:
     wide["n_games"] = df.groupby(["player_id", "season"]).size().reindex(
         pd.MultiIndex.from_frame(wide[["player_id", "season"]])
     ).values
+
+    usage = _load_minutes_usage_season_stats()
+    wide = wide.merge(usage, on=["player_id", "season"], how="left")
     return wide
 
 
@@ -201,6 +249,30 @@ def classify_archetypes(min_games: int = 20, percentiles: dict | None = None) ->
     stats["reb_pct"] = stats.groupby("season")["REB"].rank(pct=True)
     stats["stl_pct"] = stats.groupby("season")["STL"].rank(pct=True)
 
+    # Item #1 (wrap-up round): combo redefined using usage_rate + assist-RATE (per-minute
+    # AST, not raw accumulated AST) when minutes_per_game/usage_rate are available
+    # (2018-19 season onward -- see _load_minutes_usage_season_stats). This replaces the
+    # original v1 definition's "indirect high-threshold workaround" (ppg_pct/ast_pct both
+    # >=0.85, deliberately set high specifically to avoid re-selecting players who simply
+    # accumulate a lot of raw PPG/AST by virtue of playing heavy minutes) with a DIRECT
+    # measurement of the thing that workaround was approximating: genuine shot-creation
+    # usage + playmaking rate, independent of total minutes played. Empirically, at
+    # usage_pct>=0.80 & ast_rate_pct>=0.80 this reproduces almost exactly the same
+    # population size as the old 0.85/0.85 raw definition (377 vs 376 player-seasons,
+    # ~79% overlap, nearly identical mean usage_rate) -- see phase log -- so the switch
+    # is a conceptual cleanup, not a population-changing redefinition.
+    # Fallback: the 2016-17/2017-18 seasons predate player_importance's coverage (starts
+    # 2018-10-22), so minutes_per_game/usage_rate are NaN there -- those rows fall back to
+    # the original ppg_pct/ast_pct>=0.85 definition (still available in the percentiles
+    # config for exactly this reason).
+    has_usage = stats["minutes_per_game"].notna() & stats["usage_rate"].notna() & (stats["minutes_per_game"] >= 5.0)
+    stats["ast_per_min"] = stats["AST"] / stats["minutes_per_game"].where(has_usage)
+    stats["usage_pct"] = np.nan
+    stats["ast_rate_pct"] = np.nan
+    if has_usage.any():
+        stats.loc[has_usage, "usage_pct"] = stats.loc[has_usage].groupby("season")["usage_rate"].rank(pct=True)
+        stats.loc[has_usage, "ast_rate_pct"] = stats.loc[has_usage].groupby("season")["ast_per_min"].rank(pct=True)
+
     def classify(row) -> str | None:
         fac = percentiles["facilitator"]
         sco = percentiles["scorer"]
@@ -210,8 +282,12 @@ def classify_archetypes(min_games: int = 20, percentiles: dict | None = None) ->
         # combo (dual-threat playmaker-scorer) checked first: it is the one archetype
         # that can overlap with a loosened facilitator/scorer band at the margins,
         # and it's the more specific claim (both high) so it takes priority.
-        if combo and row["ppg_pct"] >= combo["ppg_pct"] and row["ast_pct"] >= combo["ast_pct"]:
-            return "combo"
+        if combo:
+            if pd.notna(row.get("usage_pct")) and pd.notna(row.get("ast_rate_pct")) and "usage_pct" in combo:
+                if row["usage_pct"] >= combo["usage_pct"] and row["ast_rate_pct"] >= combo["ast_rate_pct"]:
+                    return "combo"
+            elif row["ppg_pct"] >= combo["ppg_pct"] and row["ast_pct"] >= combo["ast_pct"]:
+                return "combo"
         if row["ast_pct"] >= fac["ast_pct"] and row["ppg_pct"] <= fac["ppg_pct"]:
             return "facilitator"
         if row["ppg_pct"] >= sco["ppg_pct"] and row["ast_pct"] <= sco["ast_pct"]:

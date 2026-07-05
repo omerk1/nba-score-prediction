@@ -117,6 +117,21 @@ style_matchup:
   low_confidence_fallback: h2h
   archetype_method: percentile
   injury_impact_calibrated: true  # values below are Phase-0 empirical deltas, not v1 guesses
+  # Item #1 (wrap-up round) recalibration: `combo` was redefined to use usage_rate +
+  # assist-RATE (see archetype_percentiles.combo above) instead of raw ppg_pct/ast_pct,
+  # which changes which players are classified combo vs. rim_protector/perimeter_specialist
+  # (classify_archetypes() checks combo first) -- so all archetypes' calibration deltas
+  # were re-derived against the new taxonomy. facilitator/scorer are numerically IDENTICAL
+  # to the previous calibration (unaffected -- their definitions didn't change and their
+  # populations don't overlap with combo). combo/rim_protector/perimeter_specialist shifted;
+  # OLD (previous taxonomy) values kept here as a comment for traceability:
+  #   combo:      pace_score=-1.1087, three_pt_reliance=-0.0047, paint_activity=0.0229,
+  #               defensive_rating=0.2746, assist_rate=-0.0051  (n_without games not logged)
+  #   rim_protector:        defensive_rating=0.5376, paint_activity=-0.2716 (n_without=3849)
+  #   perimeter_specialist: defensive_rating=-0.3131 (n_without=407)
+  # See docs/A7_PHASE_LOG.md item #1 / item #3 for the full old-vs-new comparison and the
+  # perimeter_specialist sign-flip investigation (sign is UNCHANGED by this recalibration --
+  # still negative -- but magnitude shrinks substantially, from -0.3131 to -0.0889).
   injury_impact:
     facilitator:
       assist_rate: -0.0066
@@ -125,13 +140,13 @@ style_matchup:
       three_pt_reliance: 0.0237
       paint_activity: 0.344
     combo:
-      pace_score: -1.1087
-      three_pt_reliance: -0.0047
-      paint_activity: 0.0229
-      defensive_rating: 0.2746
-      assist_rate: -0.0051
+      pace_score: -0.5963
+      three_pt_reliance: -0.0038
+      paint_activity: 0.078
+      defensive_rating: 0.561
+      assist_rate: -0.0056
     rim_protector:
-      defensive_rating: 0.5376
-      paint_activity: -0.2716
+      defensive_rating: 0.4687
+      paint_activity: -0.28
     perimeter_specialist:
-      defensive_rating: -0.3131
+      defensive_rating: -0.0889
