@@ -101,6 +101,26 @@ class InjuryFeaturesConfig(BaseModel):
     doubtful_weight: float
 
 
+class StyleMatchupConfig(BaseModel):
+    """A7 exploratory module (src/matchups/) — not yet read by feature_builder.py.
+    See docs/a7_style_matchup_design.md and docs/A7_PHASE_LOG.md for how these
+    values were chosen. injury_impact keys are archetype names; each maps to a
+    dict of {fingerprint_metric: delta}, so it's left as a plain nested dict
+    rather than a fixed per-archetype model."""
+    fingerprint_window: int
+    decay_halflife: float
+    encoding: str
+    similarity_method: str
+    similarity_threshold: float
+    knn_k: int
+    min_confidence_sample: int
+    full_confidence_sample: int
+    low_confidence_fallback: str
+    archetype_method: str
+    injury_impact_calibrated: bool
+    injury_impact: dict[str, dict[str, float]]
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -114,6 +134,7 @@ class Config(BaseModel):
     model: ModelConfig
     elo_features: Optional[EloFeaturesConfig] = None
     injury_features: Optional[InjuryFeaturesConfig] = None
+    style_matchup: Optional[StyleMatchupConfig] = None
 
 
 # --- Loader Functions ---
