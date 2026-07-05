@@ -36,17 +36,22 @@ the fold-scheme description; it is still recorded per fold below for completenes
 in case a future run adds a method that DOES need to fit something per fold (PCA/
 clustering/supervised walk-forward would need it).
 
-One caveat carried over unchanged from build_index_inmemory / build_matchup_index
-(NOT something this module changes): the z-score normalization used to build each
-config's matchup vectors is fit on the FULL fingerprint history (all rows, not just
-each fold's training window). This is the same choice the previous run's tuning.py
-and the original matchup_index.py both made ("normalize before concatenating" using
-global mean/std) -- it is a mild, pre-existing, project-wide simplification, not a
-new leakage introduced here. It is flagged again in the phase log for visibility, but
-not "fixed" this run, since the task's specific leakage-discipline requirement is about
-the similarity search's date-based exclusion (which is fully fold-respecting: the
-search corpus for any evaluated game is still strictly its own prior history), not
-about where the z-score statistics come from.
+**Item #7 fix (wrap-up round):** the paragraph above described a real leakage bug, not
+just a "mild simplification" -- confirmed as a genuine bug in discussion with the human
+coordinator. The z-score normalization used to build each config's matchup vectors was
+fit on the FULL fingerprint history (including rows dated AFTER a given fold's
+validation window), so a game evaluated in, say, fold 1 (2021-22) was normalized using
+mean/std statistics that include 2024-2026 data that did not exist yet at prediction
+time. This module now fits z-score stats PER FOLD, using only fingerprint rows strictly
+before that fold's `validation_start` (the fold's own expanding training window -- the
+natural, already-existing boundary from the fold scheme above, not an invented one) --
+mirroring exactly how `encoding_pca.py` already correctly fits its StandardScaler/PCA on
+TRAIN-split-only data. `run_walkforward(..., zscore_point_in_time=True)` (the new
+default) uses this corrected per-fold fit; `zscore_point_in_time=False` reproduces the
+OLD (leaky) global-stats behavior so the two can be compared side by side -- see the
+phase log for the actual corrected-vs-leaky numbers. The similarity search's OWN
+date-based candidate-pool exclusion was already fully fold-respecting before this fix
+and is unchanged.
 """
 
 import logging
@@ -56,7 +61,7 @@ import pandas as pd
 
 from src.matchups.hybrid_similarity import HYBRID_HALFLIFE, HYBRID_WINDOW
 from src.matchups.split import get_split_dates
-from src.matchups.tuning import build_idx_for_config, load_constants, run_search_inmemory
+from src.matchups.tuning import build_fp_for_config, build_index_inmemory, load_constants, run_search_inmemory
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +77,23 @@ FOLDS = [
     {"fold": 4, "season": "2024-25", "train_end": "2024-10-01",
      "validation_start": "2024-10-22", "validation_end": "2025-04-13"},
 ]
+
+# Item #8 (wrap-up round): a 5th fold using the 2025-26 season, already present in
+# nba_api.sqlite through 2026-05-24 (confirmed: 1225 regular-season games, 0 with a
+# null final score) but beyond the existing validation_end_date (2025-04-13) guardrail
+# boundary. Season start/regular-season-end derived with the SAME method as the four
+# FOLDS above (first game date in the Aug-Jul window = season start; day before the
+# largest March-May date gap = regular season end) -- start=2025-10-21 confirmed
+# directly from the game table; end=2026-04-12 confirmed as the date immediately before
+# the single largest gap in the March-May 2026 window (a 6-day gap before 2026-04-18,
+# where per-day game counts drop from 15/day to 2-4/day -- the regular-season-finale to
+# playoffs transition, same signature as every other season). Kept SEPARATE from FOLDS
+# (not appended in place) so existing code that specifically wants the original
+# 4-fold walk-forward-CV-run scheme is unaffected; FOLDS_WITH_FOLD5 is what item #8's
+# analysis passes to run_walkforward(folds=...).
+FOLD_5 = {"fold": 5, "season": "2025-26", "train_end": "2025-10-01",
+          "validation_start": "2025-10-21", "validation_end": "2026-04-12"}
+FOLDS_WITH_FOLD5 = FOLDS + [FOLD_5]
 
 # Fold 4's validation range must equal the existing guardrail split exactly (sanity
 # anchor -- checked at import time so a future edit to config.yaml's dates doesn't
@@ -109,19 +131,38 @@ REFERENCE_METHODS = {
 }
 
 
-def run_walkforward(recency_years: float | None = None) -> pd.DataFrame:
+def run_walkforward(
+    recency_years: float | None = None, zscore_point_in_time: bool = True,
+    folds: list[dict] | None = None,
+) -> pd.DataFrame:
     """Evaluates all three REFERENCE_METHODS on all four FOLDS. Returns a long
     DataFrame: one row per (method, fold) with corr/n_games/fallback_rate/mean_confidence.
 
     `recency_years` (item #3): if set, bounds every method's similarity-search corpus
     to this many years of prior history instead of the full unbounded history. Passed
     straight through to tuning.run_search_inmemory -- see that function's docstring.
+
+    `zscore_point_in_time` (item #7, wrap-up round): if True (the corrected default),
+    each fold's matchup-vector z-score stats are fit ONLY on fingerprint rows strictly
+    before that fold's validation_start (no look-ahead). If False, reproduces the OLD
+    (leaky) behavior -- one global fit across the full fingerprint history, shared by
+    every fold -- purely so the two can be compared side by side (see phase log).
+
+    `folds` (item #8): override the module-level FOLDS list, e.g. to add additional
+    folds built from newly-available 2025-26 data. Defaults to the original 4 FOLDS.
     """
     consts = load_constants()
+    fold_list = folds if folds is not None else FOLDS
     rows = []
     for method_name, cfg in REFERENCE_METHODS.items():
-        idx = build_idx_for_config(consts, window=cfg["window"], halflife=cfg["halflife"], layer=2)
-        for fold in FOLDS:
+        fp = build_fp_for_config(consts, window=cfg["window"], halflife=cfg["halflife"], layer=2)
+        # Global (leaky) index built once, reused for every fold when zscore_point_in_time=False.
+        idx_global = None if zscore_point_in_time else build_index_inmemory(fp, consts["games"])
+        for fold in fold_list:
+            if zscore_point_in_time:
+                idx = build_index_inmemory(fp, consts["games"], zscore_cutoff_date=fold["validation_start"])
+            else:
+                idx = idx_global
             out = run_search_inmemory(
                 idx, consts["h2h"], method=cfg["method"], threshold=cfg["threshold"], k=cfg["k"],
                 floor=cfg["floor"], min_confidence_sample=cfg["min_confidence_sample"],
@@ -137,13 +178,15 @@ def run_walkforward(recency_years: float | None = None) -> pd.DataFrame:
                 "validation_start": fold["validation_start"],
                 "validation_end": fold["validation_end"],
                 "recency_years": recency_years if recency_years is not None else "unbounded",
+                "zscore_point_in_time": zscore_point_in_time,
                 "n_games": len(out),
                 "corr": corr,
                 "fallback_rate": float(out["fallback_used"].mean()) if len(out) else 1.0,
                 "mean_confidence": float(out["confidence"].mean()) if len(out) else 0.0,
             })
             logger.info(
-                f"[{method_name}] fold={fold['fold']} ({fold['season']}) recency={recency_years}: "
+                f"[{method_name}] fold={fold['fold']} ({fold['season']}) recency={recency_years} "
+                f"zscore_pit={zscore_point_in_time}: "
                 f"corr={corr:.4f} n={len(out)} fallback_rate={rows[-1]['fallback_rate']:.3f}"
             )
     return pd.DataFrame(rows)

@@ -134,12 +134,21 @@ def apply_injury_deltas(fp1: pd.DataFrame, delta_lookup: pd.DataFrame) -> pd.Dat
     return fp2.drop(columns=["game_date_d"] + [f"delta_{m}" for m in FINGERPRINT_METRICS])
 
 
-def build_index_inmemory(fp: pd.DataFrame, games: pd.DataFrame) -> pd.DataFrame:
+def build_index_inmemory(
+    fp: pd.DataFrame, games: pd.DataFrame, zscore_cutoff_date: str | None = None,
+) -> pd.DataFrame:
     """Same z-score + concat logic as matchup_index.build_matchup_index, operating on
-    an in-memory fingerprint frame instead of reading matchup_fingerprints by layer."""
+    an in-memory fingerprint frame instead of reading matchup_fingerprints by layer.
+
+    Item #7 fix: `zscore_cutoff_date`, if given, restricts the z-score mean/std fit to
+    fingerprint rows strictly before this date -- point-in-time, matching how
+    encoding_pca.py already correctly fits its StandardScaler/PCA on TRAIN-split-only
+    data. Default None preserves the OLD global-stats behavior (all rows, including ones
+    dated after any given evaluation point) for any caller that doesn't pass a cutoff."""
+    fit_fp = fp[fp["game_date"] < zscore_cutoff_date] if zscore_cutoff_date is not None else fp
     stats = {}
     for m in FINGERPRINT_METRICS:
-        mu, sd = fp[m].mean(), fp[m].std()
+        mu, sd = fit_fp[m].mean(), fit_fp[m].std()
         stats[m] = (mu, sd if sd > 1e-9 else 1.0)
 
     fp_norm = fp.copy()
@@ -265,16 +274,23 @@ def evaluate_config(
     min_confidence_sample: int, full_confidence_sample: int,
     eval_start: str, eval_end: str, layer: int = 2,
     floor: float | None = None, recency_years: float | None = None,
+    zscore_cutoff_date: str | None = None,
 ) -> dict:
     """Full in-memory pipeline for one hyperparameter configuration. layer=2 (injury-
     adjusted) is the default and the one comparable to the established 0.281 baseline;
     layer=1 is available for explicit ablation only (see module docstring).
 
     `floor` (method="knn_floor") and `recency_years` (any method) are the two new
-    axes added this run -- see run_search_inmemory's docstring."""
+    axes added this run -- see run_search_inmemory's docstring.
+
+    `zscore_cutoff_date` (item #7, wrap-up round): if given, z-score mean/std for the
+    matchup vectors are fit only on fingerprint rows strictly before this date (no
+    look-ahead) -- see build_index_inmemory's docstring. Default None reproduces the
+    OLD (leaky) global-stats behavior, kept as the default so any existing caller that
+    doesn't explicitly opt in is unaffected."""
     fp1 = build_fingerprints_inmemory(consts["raw"], window=window, halflife=halflife)
     fp = apply_injury_deltas(fp1, consts["delta_lookup"]) if layer == 2 else fp1
-    idx = build_index_inmemory(fp, consts["games"])
+    idx = build_index_inmemory(fp, consts["games"], zscore_cutoff_date=zscore_cutoff_date)
     out = run_search_inmemory(
         idx, consts["h2h"], method=method, threshold=threshold, k=k,
         min_confidence_sample=min_confidence_sample, full_confidence_sample=full_confidence_sample,
@@ -293,15 +309,37 @@ def evaluate_config(
     }
 
 
-def build_idx_for_config(consts: dict, window: int, halflife: float, layer: int = 2) -> pd.DataFrame:
+def build_fp_for_config(consts: dict, window: int, halflife: float, layer: int = 2) -> pd.DataFrame:
+    """The (window, halflife, layer)-dependent fingerprint frame only -- the expensive,
+    zscore-cutoff-INDEPENDENT part of build_idx_for_config (rolling-window computation +
+    injury-delta application). Split out (item #7) so callers that need to evaluate the
+    SAME fingerprint config against MULTIPLE zscore_cutoff_date values (e.g. one per
+    walk-forward fold, each fold needing its own point-in-time z-score fit) can build
+    this ONCE and then call build_index_inmemory(fp, games, zscore_cutoff_date=...) per
+    fold/cutoff -- only the cheap z-score+concat step needs to be redone per fold, not
+    the rolling-window fingerprint math."""
+    fp1 = build_fingerprints_inmemory(consts["raw"], window=window, halflife=halflife)
+    return apply_injury_deltas(fp1, consts["delta_lookup"]) if layer == 2 else fp1
+
+
+def build_idx_for_config(
+    consts: dict, window: int, halflife: float, layer: int = 2,
+    zscore_cutoff_date: str | None = None,
+) -> pd.DataFrame:
     """Build the (window, halflife, layer)-dependent matchup index ONCE, so callers that
     need to evaluate the SAME fingerprint config across many eval windows (e.g. the
-    walk-forward folds, item #1 of this run) don't redo the fingerprint/injury/z-score
+    walk-forward folds, item #1 of the previous run) don't redo the fingerprint/injury
     work per fold -- only run_search_inmemory (cheap relative to fingerprint building)
-    needs to be re-run per fold/eval-window."""
-    fp1 = build_fingerprints_inmemory(consts["raw"], window=window, halflife=halflife)
-    fp = apply_injury_deltas(fp1, consts["delta_lookup"]) if layer == 2 else fp1
-    return build_index_inmemory(fp, consts["games"])
+    needs to be re-run per fold/eval-window.
+
+    `zscore_cutoff_date` (item #7, wrap-up round): passed straight through to
+    build_index_inmemory -- if given, z-score stats are fit only on rows strictly before
+    this date. NOTE: if a caller needs a DIFFERENT zscore_cutoff_date per fold (the
+    walk-forward harness does), call build_fp_for_config once and build_index_inmemory
+    per fold instead of calling this function repeatedly (it would otherwise redo the
+    expensive fingerprint computation for every fold)."""
+    fp = build_fp_for_config(consts, window=window, halflife=halflife, layer=layer)
+    return build_index_inmemory(fp, consts["games"], zscore_cutoff_date=zscore_cutoff_date)
 
 
 # ---------------------------------------------------------------------------
