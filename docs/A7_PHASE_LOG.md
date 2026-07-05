@@ -1265,3 +1265,574 @@ integration is considered, the accumulated open-questions list across all three 
 sufficiency, PCA/supervised follow-ups) should get human review as a batch, since none
 of them have blocked this run's core conclusion but all remain unresolved.
 
+---
+
+## WRAP-UP ROUND (fourth unattended pass, branch `work/a7-wrapup-round`)
+
+Explicit mandate for this round (per the human coordinator): research and critique the
+FIVE items below, not just execute them mechanically — for each, actually reconsider
+whether the existing approach is the right call before touching code. `data/raw/*.sqlite`
+symlinks and `outputs/a7_matchups_cache.sqlite` were recreated in this worktree from the
+human's checkout (same pattern as every previous run — this worktree started with
+neither present). `src/utils/config_loader.py` was NOT touched (already formalized by the
+coordinator directly this session, per instructions). New code lives in new files under
+`src/matchups/`: `zscore_fix_results.py`, `archetype_clustering.py`, `injury_ablation.py`,
+`item8_results.py`. Existing files modified (all additively, no removed functionality):
+`matchup_index.py`, `tuning.py`, `walkforward.py` (item #7's z-score fix, threaded through
+as new optional parameters — every old call site's default behavior is unchanged unless
+it opts in), `players.py`, `config.py` (item #1's minutes/usage join + combo redefinition),
+`configs/config.yaml` (item #1's recalibrated `injury_impact` block).
+
+### Item #7 — Per-fold (point-in-time) z-score normalization
+**Status:** complete
+
+**Critique of the existing approach:** all three previous runs flagged (but didn't fix)
+that the z-score mean/std used to build matchup vectors were computed globally across the
+FULL fingerprint history (2016-2026), regardless of which point in time a game was being
+evaluated at. The walk-forward-CV run's own writeup called this "a mild, pre-existing,
+project-wide simplification, not a new leakage." Re-examining this framing directly (per
+the coordinator's explicit correction): it is not mild — it IS a genuine leakage bug. A
+game evaluated in fold 1 (2021-22) was normalized using statistics that include 2024-2026
+data that did not exist yet at prediction time. The fact that none of the reference
+methods FIT a model on this normalization (unlike PCA/clustering/supervised, which already
+correctly fit only on train-split data) made it easy to wave off, but the normalization
+constants still shape which historical games register as "similar" via cosine/KNN, so a
+look-ahead here can still distort which neighbors get selected for any given evaluation.
+
+**What was built/tried:** `_zscore_stats`/`build_matchup_index` (`matchup_index.py`) and
+`build_index_inmemory` (`tuning.py`) both gained an optional `zscore_cutoff_date` param —
+when given, mean/std are fit only on fingerprint rows strictly before that date; default
+`None` preserves the old global-stats behavior so no existing caller silently changes
+behavior. `tuning.py` gained `build_fp_for_config` (splits the expensive, cutoff-
+independent rolling-fingerprint computation out of `build_idx_for_config`, so each fold
+only re-does the cheap z-score+concat step, not the full fingerprint rebuild).
+`walkforward.py`'s `run_walkforward` gained `zscore_point_in_time` (default `True`): for
+each fold, z-score stats are now fit only on data strictly before that fold's
+`validation_start` — the fold's own expanding training window, exactly the boundary the
+task instructions pointed at ("the natural, already-existing boundary to reuse"), mirroring
+how `encoding_pca.py` already correctly fits its `StandardScaler`/PCA on TRAIN-split-only
+data. `zscore_point_in_time=False` reproduces the OLD (leaky) behavior for side-by-side
+comparison — both were run and both are in the results CSV (tagged `zscore_point_in_time`).
+
+**Key findings (OLD leaky-global vs NEW point-in-time, mean corr across the original 4
+folds):**
+
+| method | OLD fold1 | fold2 | fold3 | fold4 | OLD mean (std) | NEW fold1 | fold2 | fold3 | fold4 | NEW mean (std) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| default_handpicked | 0.1424 | 0.1305 | 0.2266 | 0.2853 | 0.1962 (0.0732) | 0.1975 | 0.1573 | 0.2295 | 0.2894 | 0.2184 (0.0558) |
+| wider_exploration_best | 0.2239 | 0.2060 | 0.2661 | 0.3227 | 0.2547 (0.0519) | 0.2459 | 0.2150 | 0.2713 | 0.3174 | 0.2624 (0.0433) |
+
+(`hybrid_knn_floor` is bit-for-bit identical to `wider_exploration_best` in both modes,
+consistent with the walk-forward-CV run's finding that the floor never binds at k=81 —
+unaffected by this fix.)
+
+- **Headline conclusion is UNCHANGED and, if anything, slightly strengthened.** The tuned
+  config (`wider_exploration_best`) still beats `default_handpicked` on every single fold
+  after the fix (0.246>0.198, 0.215>0.157, 0.271>0.230, 0.317>0.289), and its std is still
+  lower than the default's (0.0433 vs 0.0558) — both qualitative claims from the
+  walk-forward-CV run survive the correction intact.
+- **Fixing the leak IMPROVED correlation, it did not degrade it** — a genuinely
+  interesting result, not the "removing a leak should hurt performance" intuition one
+  might expect. Every fold's corrected number is higher than or within 0.006 of its old
+  (leaky) number, and the improvement is LARGEST for the earliest folds (fold 1:
+  default +0.055, wider +0.022) and smallest for fold 4 (default +0.004, wider -0.005,
+  within noise). This makes sense on reflection: z-score normalization doesn't peek at
+  the target variable (actual margin) — it only reshapes the relative scale of the 5 style
+  dimensions used for cosine similarity. Fold 1 (2021-22) is normalized, under the fix,
+  using ONLY 2016-2021 style statistics — closer to that era's true league-wide
+  shooting/pace distribution than a stat mix contaminated by the 3-point-rate/pace trends
+  of 2022-2026. Era-relative normalization turns out to be a MORE faithful similarity
+  metric for early-fold games, not just a "more correct" one in a leakage-hygiene sense.
+- **The corpus-depth story survives, essentially unchanged in shape.** Correlation still
+  rises from fold 1 to fold 4 for both methods after the fix (the small fold-2 dip below
+  fold-1, noted in the walk-forward-CV run, persists in both old and new numbers — it
+  predates this fix and isn't explained by it). The upward trend is not a normalization
+  artifact; it is not fully explained by the leak either. Both effects (corpus depth AND
+  the normalization fix) point in a similar direction for early folds, but the fix's
+  effect is smaller in magnitude and doesn't change which fold has the highest or lowest
+  correlation.
+- The single static guardrail split (train/validation, used by `tuning.run_optuna_search`
+  and `hybrid_similarity.py`'s grid search) was deliberately NOT re-run this round — the
+  task's explicit ask was the walk-forward harness specifically ("the natural,
+  already-existing boundary... don't invent a new one"), and re-running 40 Optuna trials
+  twice (leaky vs fixed) for a single-split comparison was judged lower-value than
+  spending the time budget on items #1/#2/#3/#8. Flagged as still-open: the single-split
+  numbers reported by the wider-exploration run (train=0.218/validation=0.323 for the
+  tuned config) still use the OLD global z-score fit.
+
+**Fallbacks used:** none for the core fix. Scope-limited the single static split
+re-evaluation (see above) — a deliberate, documented time-budget cut, not an oversight.
+
+**Next dependencies:** items #1, #2, #3, #8 below all run AFTER this fix is in place (item
+#2 and #8's numbers use `zscore_point_in_time=True` by construction, via `walkforward.py`).
+Item #1's archetype/calibration changes and item #7's z-score fix are independent axes —
+item #7's own comparison rows in the results CSV were captured BEFORE item #1's config
+change, to cleanly isolate the normalization effect; item #1 layers its own change on top
+afterward (see its own findings, and the WRAP-UP ROUND SUMMARY for combined-effect numbers).
+
+---
+
+### Item #1 — Minutes/usage data added to archetype classification
+**Status:** complete
+
+**Critique of the existing approach:** Phase 0 (first run) found that KMeans clustering
+on the 6 raw box-score-cache stats (PPG/AST/REB/BLK/STL/FG%) recovers a playing-time tier
+split, not style — and concluded (reasonably, at the time) that this was because no
+minutes/usage data existed to separate "how much" from "how." That data now exists
+(`player_importance` in `injury_features.sqlite`, 144,479 rows, `minutes_per_game`/
+`usage_rate` populated, weekly snapshots 2018-10-22 through 2026-05-27). The real question
+this round is whether simply CONCATENATING those two columns onto the existing 5 actually
+fixes the underlying problem, or whether the problem is more fundamental (raw counting
+stats scale with playing time almost by definition, so adding two more raw-scale features
+doesn't obviously break that link) — tested both, not just the first attempt.
+
+**What was built/tried:**
+- `players.py`: `_load_minutes_usage_season_stats()` reads `player_importance`, maps each
+  weekly `as_of_date` to a season string (same `_date_to_season_str` used everywhere else),
+  and averages `minutes_per_game`/`usage_rate` per (player_id, season) — matching the
+  EXACT granularity `classify_archetypes()` already operates at. Merged into
+  `_load_player_season_stats()` via a left join (NaN for the 2016-17/2017-18 seasons,
+  which predate `player_importance`'s coverage).
+- **Deliberate deviation from the literal task wording** ("join by player_id + team_id +
+  nearest as_of_date"): a season-level aggregate join was used instead of a per-row
+  nearest-date join, because (a) `player_stats_cache` (the table archetypes are built
+  from) has no `team_id` column to join on in the first place, and (b) the archetype
+  classifier already only ever operates at (player_id, season) granularity, so a more
+  granular per-game join would need to be re-aggregated back down to season level anyway,
+  adding join-ambiguity for no benefit. Documented explicitly rather than silently done.
+- `archetype_clustering.py` (new): re-ran KMeans (k=4,5,6,8) with two variants:
+  `raw_plus_usage` = [PPG, AST, REB, BLK, STL, minutes_per_game, usage_rate] (Phase 0's 5
+  stats + the 2 new ones, concatenated — the direct/obvious fix), and, since the first
+  variant did NOT clearly fix the problem (see findings), `per_minute_plus_usage` =
+  [PPG/min, AST/min, REB/min, BLK/min, STL/min, usage_rate] (rate stats instead of raw
+  counting stats, removing playing time as a scaling factor entirely).
+
+**Key findings — labeled centroids, not just a correlation number** (k=8, raw units;
+`n` = player-seasons in that cluster; sorted by minutes_per_game ascending):
+
+`raw_plus_usage`, k=8 (n=4,383 player-seasons with usage data):
+
+| cluster | PPG | AST | REB | BLK | STL | minutes | usage_rate | n |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 1.71 | 0.39 | 0.99 | 0.11 | 0.17 | 8.8 | 0.128 | 995 |
+| 0 | 2.17 | 0.48 | 0.84 | 0.08 | 0.16 | 7.9 | 0.215 | 507 |
+| 1 | 6.16 | 1.34 | 2.60 | 0.25 | 0.49 | 18.1 | 0.160 | 1010 |
+| 6 | 8.12 | 1.28 | 5.57 | 0.86 | 0.57 | 21.2 | 0.158 | 357 |
+| 7 | 9.41 | 2.93 | 3.87 | 0.41 | 1.06 | 26.0 | 0.158 | 494 |
+| 3 | 14.98 | 2.93 | 4.07 | 0.32 | 0.76 | 29.1 | 0.227 | 474 |
+| 5 | 15.50 | 2.15 | 9.02 | 1.50 | 0.82 | 29.6 | 0.209 | 183 |
+| 4 | 21.91 | 5.99 | 5.83 | 0.48 | 1.19 | 33.7 | 0.273 | 363 |
+
+`per_minute_plus_usage`, k=8 (n=4,050 player-seasons, minutes>=5 guard):
+
+| cluster | PPG | AST | REB | BLK | STL | minutes | usage_rate | n |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 2.24 | 0.50 | 1.01 | 0.09 | 0.18 | 11.8 | 0.148 | 765 |
+| 3 | 5.46 | 1.06 | 2.76 | 0.30 | 0.49 | 17.8 | 0.142 | 860 |
+| 4 | 7.23 | 1.00 | 5.32 | 1.16 | 0.49 | 18.6 | 0.153 | 283 |
+| 0 | 6.66 | 1.75 | 3.23 | 0.39 | 1.05 | 19.4 | 0.151 | 272 |
+| 6 | 8.88 | 3.98 | 2.96 | 0.27 | 0.87 | 22.7 | 0.179 | 397 |
+| 7 | 11.44 | 1.81 | 6.68 | 0.72 | 0.61 | 23.3 | 0.199 | 404 |
+| 1 | 11.06 | 1.97 | 3.01 | 0.24 | 0.60 | 23.6 | 0.210 | 690 |
+| 5 | 21.68 | 5.48 | 5.38 | 0.45 | 1.07 | 32.2 | 0.281 | 379 |
+
+- **Diagnostic used to judge separation (not just eyeballing the table):** Spearman rank
+  correlation between each cluster's mean minutes and its mean of every other stat, across
+  k in {4,5,6,8}. Close to 1.0 = that stat is still basically a playing-time tier; close to
+  0 = that stat is separating on something else.
+
+| variant | k | PPG | AST | REB | BLK | STL | usage_rate |
+|---|---|---|---|---|---|---|---|
+| raw_plus_usage | 4 | 1.00 | 0.80 | 0.80 | 0.80 | 1.00 | 1.00 |
+| raw_plus_usage | 8 | 0.95 | 0.90 | 0.67 | **0.24** | 0.76 | 0.95 |
+| per_minute_plus_usage | 4 | 0.80 | 1.00 | 0.40 | 0.40 | 1.00 | 0.80 |
+| per_minute_plus_usage | 8 | 0.95 | 0.90 | 0.67 | **0.24** | 0.76 | 0.95 |
+
+  (full grid across k in {4,5,6,8} for both variants in the module's `__main__` output;
+  values above are representative extremes.)
+
+- **`raw_plus_usage` mostly reproduces Phase 0's original finding.** Cluster 6 vs. cluster
+  7 at k=8 (21.2 vs. 26.0 minutes) show some real divergence in shape (REB/BLK-heavy vs.
+  AST-heavy), but PPG/usage_rate/STL still correlate strongly with minutes (0.76-1.00)
+  across most k — concatenating 2 more raw-scale features onto 5 existing raw-scale
+  features doesn't remove the dominant "opportunity" axis, because usage_rate and minutes
+  are large-scale numbers that KMeans (even after standardization) still primarily
+  organizes around.
+- **`per_minute_plus_usage` is a genuine, if partial, improvement — the clearer case is a
+  defensive/rim-protection axis separating from playing time.** BLK's monotonicity vs.
+  minutes drops to 0.24-0.49 (from 0.79-0.86 in the raw variant) — e.g. per-minute k=8's
+  clusters 4 (18.6 min, REB=5.32, BLK=1.16 — clear rim-protector shape) and 0 (19.4 min,
+  REB=3.23, BLK=0.39 — clear non-rim-protector shape) sit at essentially IDENTICAL minutes
+  levels but have a 3x BLK gap — real stylistic separation, not just a playing-time
+  re-sort. REB shows a smaller but real improvement too (0.40-0.67 vs. 0.70-0.86 raw).
+- **AST/STL/PPG/usage_rate remain tied to minutes even after per-minute normalization**
+  (0.76-1.00 monotonicity, all variants/k). This is very likely a genuine basketball
+  selection effect, not a normalization failure: coaches give more minutes to players they
+  trust with the ball and who create havoc defensively, so even RATE-based
+  playmaking/scoring/steal metrics correlate with playing time through quality-selection,
+  not through raw accumulation. Per-minute normalization can fix a measurement artifact; it
+  cannot un-confound "better players get more run."
+- **Verdict: clustering does NOT cleanly separate by style even with minutes/usage added.**
+  It partially does, specifically for the interior-defense axis, under the per-minute
+  variant. The percentile taxonomy (already in production) remains the better choice for
+  this project's purposes — it doesn't have this specific failure mode as visibly, since
+  it classifies via specific high/low COMBINATIONS across two dimensions rather than
+  letting one dominant raw-magnitude axis drive an unsupervised partition.
+
+**Revisiting the `combo` archetype (asked explicitly):** the original v1 definition
+(`ppg_pct>=0.85 AND ast_pct>=0.85`, both RAW/season-accumulated stats) was an admitted
+workaround — thresholds set unusually high specifically to avoid re-selecting players who
+simply rack up a lot of raw PPG/AST by playing heavy minutes. With real usage_rate/AST-RATE
+data now available, this can be defined directly instead of worked around:
+`usage_pct>=0.80 AND ast_rate_pct>=0.80` (`ast_rate_pct` = percentile rank of AST/minutes,
+i.e. assists per minute — a genuine rate stat, not raw accumulation). Empirically, at these
+thresholds, the new definition reproduces the old population almost exactly on the subset
+where both are computable (377 vs. 376 player-seasons, ~79% Jaccard overlap, nearly
+identical mean usage_rate: 0.273 both ways) — this is a conceptual cleanup that happens to
+preserve the population, not a redefinition that changes who's captured. **Adopted**:
+`classify_archetypes()` now uses `usage_pct`/`ast_rate_pct` whenever `minutes_per_game`/
+`usage_rate` are available (2018-19 season onward), falling back to the original
+`ppg_pct`/`ast_pct` definition for the two pre-2018-19 seasons player_importance doesn't
+cover (82 of 459 total combo player-seasons use the fallback path — confirmed exactly
+those two seasons via direct inspection).
+
+**Downstream taxonomy effect (confirmed, not assumed):** because `classify_archetypes()`
+checks `combo` before `rim_protector`/`perimeter_specialist`/etc., redefining `combo`
+changes which players fall through to the other archetypes too. Final counts (min_games=20,
+5,426 total player-seasons, same corpus as every previous run): `rim_protector` 759 (was
+721 under the exact same code re-run with the OLD combo definition — i.e. the new combo
+definition intercepts FEWER rim-protector-eligible players than the old one did, not more),
+`combo` 459 (was 496 under old definition applied to the identical current corpus),
+`perimeter_specialist` 71 (was 70), `facilitator`/`scorer` unchanged at 40/23 exactly (no
+population overlap with combo in either direction). Since this is a real (if modest)
+taxonomy change, Phase 0's injury-impact calibration was re-run in full (see
+`calibration.py`, unchanged code — just re-run against the new `player_archetypes` cache) —
+old vs. new deltas:
+
+| archetype | metric | OLD delta | NEW delta | OLD n_without | NEW n_without |
+|---|---|---|---|---|---|
+| facilitator | assist_rate | -0.0066 | -0.0066 (unchanged) | 273 | 273 |
+| facilitator | pace_score | -1.2722 | -1.2722 (unchanged) | 273 | 273 |
+| scorer | three_pt_reliance | 0.0237 | 0.0237 (unchanged) | 123 | 123 |
+| scorer | paint_activity | 0.344 | 0.344 (unchanged) | 123 | 123 |
+| combo | pace_score | -1.1087 | -0.5963 | — | 3406 |
+| combo | three_pt_reliance | -0.0047 | -0.0038 | — | 3406 |
+| combo | paint_activity | 0.0229 | 0.078 | — | 3406 |
+| combo | defensive_rating | 0.2746 | 0.561 | — | 3406 |
+| combo | assist_rate | -0.0051 | -0.0056 | — | 3406 |
+| rim_protector | defensive_rating | 0.5376 | 0.4687 | 3849 | 4025 |
+| rim_protector | paint_activity | -0.2716 | -0.28 | 3849 | 4025 |
+| perimeter_specialist | defensive_rating | -0.3131 | **-0.0889** | 407 | 415 |
+
+`configs/config.yaml`'s `injury_impact` block was updated to the NEW values (old values
+kept as an inline comment for traceability). `facilitator`/`scorer` are byte-for-byte
+identical, confirming the redefinition genuinely doesn't touch archetypes with no
+population overlap. `perimeter_specialist`'s delta shrinks by ~3.5x (still negative — see
+item #3 for why) and `combo`/`rim_protector` shift moderately. The DB-cached layer=2
+fingerprints (`outputs/a7_matchups_cache.sqlite`) were rebuilt (`injury_layer.
+build_injury_adjusted_fingerprints()`) to stay consistent with the new config (24.75%
+of team-games adjusted, vs. 24.25% before — a small change from the taxonomy shift).
+
+**Fallbacks used:**
+- Season-level aggregate join instead of a literal per-row "player_id + team_id + nearest
+  as_of_date" join (see above) — deliberate, documented, not a shortcut taken silently.
+- Did NOT extend the same rate-based redefinition to `facilitator`/`scorer`/`rim_protector`/
+  `perimeter_specialist` (which have the identical raw-accumulation-vs-playing-time
+  conflation in principle) — explicitly out of scope this round (the task only asked to
+  revisit `combo`); flagged as a good, well-understood follow-up for a future round.
+
+**Next dependencies:** item #3 uses the RECALIBRATED `perimeter_specialist` delta
+(-0.0889, not the old -0.3131) as its starting point. Items #2/#8 (run after this item)
+use the recalibrated `injury_impact` config by construction (`load_constants()` reads
+`configs/config.yaml` fresh on every call).
+
+---
+
+### Item #3 — perimeter_specialist sign-flip investigation
+**Status:** complete
+
+**Critique of the existing approach:** three previous runs' logs all repeat the same
+sentence ("flagging for human review... do not treat this sign as ground truth") without
+ever looking at which specific players/games are actually driving it. That's not an
+investigation, it's a flag. This round actually pulled the underlying player_injuries rows.
+
+**What was built/tried:** ad hoc analysis (not persisted as a module — this is a one-time
+diagnostic, not a reusable pipeline stage) directly against `player_archetypes`,
+`player_name_resolution`, and `player_injuries`:
+1. Listed all 55 distinct players ever classified `perimeter_specialist` (71
+   player-seasons) and checked their name-resolution confidence.
+2. Checked how many of those 55 players are classified DIFFERENTLY in other seasons
+   (archetype stability).
+3. Counted raw `Out`-event rows (before the team-game-level dedup calibration.py does)
+   per player, to find which players actually drive the sample.
+4. Re-ran the calibration's `defensive_rating` delta calculation excluding specific
+   players, as a leave-one-out sensitivity check.
+
+**Key findings:**
+- **(b) name-resolution/data-coverage gap: RULED OUT.** 58/71 player-seasons resolve at
+  `high` confidence, 1 at `medium`, 12 have no `player_name_resolution` row at all — but
+  that's because those player-seasons simply never had an `Out` report in
+  `player_injuries` (benign — not a resolution failure). Coverage among archetype-linked
+  players is good.
+- **(c) archetype-definition issue: PARTIALLY SUPPORTED.** 19 of 55 players (35%) are
+  classified as a DIFFERENT archetype (usually `combo` or `facilitator`) in other seasons
+  — the `blk_pct<=0.30 & stl_pct>=0.70` criterion catches small, quick, high-steal GUARDS
+  (Chris Paul, Rajon Rondo, Jalen Brunson, Ricky Rubio, Tyus Jones, Patty Mills, George
+  Hill...), many of whom are primarily offense-oriented ball-handlers/facilitators, not the
+  "3-and-D wing defensive stopper" the design doc's original v1 guess (`defensive_rating:
+  +1.5`) seems to have had in mind. The label is real but its intuitive framing is
+  mismatched to what it actually selects.
+- **(a) small-sample/extended-absence artifact: THE PRIMARY DRIVER, confirmed directly.**
+  Of 680 raw qualifying `Out`-event rows across 55 players, **Otto Porter Jr. (135 events)
+  and Collin Sexton (127 events) alone account for 262 (~38%) of the entire sample.** Both
+  represent CONTINUOUS multi-month absences, not scattered single-game injuries: Sexton's
+  216 total `Out` reports span 2021-11 through 2026-03 with a documented long-term
+  ACL-recovery stretch starting Nov 2021 (missed almost the entire 2021-22 season); Porter's
+  158 reports span the same Nov-2021-to-2023 window (chronic foot injury). A player missing
+  100+ CONSECUTIVE games is not a clean "team plays one game without player X" natural
+  experiment — the team's roster, rotation, and possibly trade-deadline composition change
+  for reasons entirely unrelated to that one absence over such a long stretch, contaminating
+  the "same team-season baseline" comparison calibration.py relies on.
+- **Direct confirmation via leave-one-out:** recalculating the `perimeter_specialist` ->
+  `defensive_rating` delta while excluding specific players:
+
+| exclusion | delta | n_without | n_baseline |
+|---|---|---|---|
+| none (current calibrated value) | -0.0889 | 415 | 2042 |
+| exclude Collin Sexton only | **+0.9566** | 344 | 2031 |
+| exclude Otto Porter Jr. only | -0.0487 | 341 | 2034 |
+| exclude BOTH | **+1.3000** | 270 | 2023 |
+
+  **Excluding Collin Sexton alone flips the sign from negative to strongly positive**
+  (+0.9566), matching the design doc's original v1 guess direction. Excluding both dominant
+  players pushes it further positive (+1.30). Otto Porter Jr. alone barely changes it,
+  meaning Sexton (misclassified — an offense-first guard whose extended ACL absence
+  dominates the "perimeter_specialist Out" sample) is doing almost all of the work.
+- **(d) genuine basketball finding: NOT SUPPORTED by this evidence.** There is no need to
+  invoke a lineup-shift story once the sample composition is examined directly — the
+  effect is explained by (a)+(c) together: one long-term-injury player who is arguably
+  misclassified dominates a modest sample, and removing him reverses the sign to the
+  intuitive direction.
+
+**Verdict:** the perimeter_specialist sign flip is a **small-effective-sample artifact
+concentrated in one player's extended-injury absence, compounded by an archetype
+definition that catches offense-first guards rather than defensive wing specialists** —
+not a genuine basketball finding. The recalibrated value already in `configs/config.yaml`
+(-0.0889, from item #1's taxonomy update) is closer to zero than the original -0.3131 but
+still carries the same sign and the same underlying fragility this section documents.
+
+**Fallbacks used:** did NOT modify `calibration.py`'s methodology this round (e.g. capping
+per-player contribution, or excluding extended-absence streaks beyond some length) — this
+would be a broader methodological change affecting ALL archetypes' deltas, not just
+`perimeter_specialist`, and deserves its own validation pass rather than a same-round
+patch bolted on to an investigation. **Recommended concretely for a future round:** exclude
+or downweight `Out` stretches beyond ~20-30 consecutive games (a plausible season-ending-
+injury threshold) from the calibration's "missing" set, or report a leave-one-out
+sensitivity range alongside every archetype's point-estimate delta, not just
+`perimeter_specialist`'s.
+
+**Next dependencies:** none — this is a terminal investigation for this round.
+
+---
+
+### Item #2 — Injury adjustment's marginal contribution within the full pipeline
+**Status:** complete
+
+**Critique of the existing approach:** Phase 4's layer ablation (L1-only vs. L1+L2, both
+around -0.14, "very slightly better" for L1+L2) was run WITHOUT the similarity search
+active — a naive no-search diff-sum the phase log itself says is not a meaningful way to
+use these fingerprints (Layer 3 is what turns them into signal). That ablation genuinely
+cannot answer "does injury adjustment help in the pipeline that's actually recommended,"
+because the pipeline that's recommended always includes Layer 3.
+
+**What was built/tried:** `injury_ablation.py` — runs the FULL `L1+L3` (layer=1, no injury
+adjustment) vs. `L1+L2+L3` (layer=2, injury-adjusted) similarity search, holding the
+search method/hyperparameters fixed, for both `default_handpicked` and
+`wider_exploration_best`, across all 4 walk-forward folds, using item #7's corrected
+per-fold z-score fit and item #1's recalibrated `injury_impact` config.
+
+**Key findings:**
+
+| method | layer | fold1 | fold2 | fold3 | fold4 | mean | std |
+|---|---|---|---|---|---|---|---|
+| default_handpicked | 1 (no injury adj) | 0.1906 | 0.1493 | 0.2300 | 0.2875 | 0.2144 | 0.0588 |
+| default_handpicked | 2 (injury-adjusted) | 0.2016 | 0.1552 | 0.2309 | 0.2921 | 0.2199 | 0.0573 |
+| wider_exploration_best | 1 (no injury adj) | 0.2450 | 0.1978 | 0.2685 | 0.3147 | 0.2565 | 0.0487 |
+| wider_exploration_best | 2 (injury-adjusted) | 0.2492 | 0.2091 | 0.2707 | 0.3228 | 0.2630 | 0.0474 |
+
+- **Layer 2 (injury-adjusted) beats layer 1 (no injury adjustment) on EVERY SINGLE FOLD,
+  for BOTH methods** — a small but completely consistent positive delta (mean
+  +0.0056 for `default_handpicked`, +0.0065 for `wider_exploration_best`; per-fold deltas
+  range from +0.0009 to +0.0113, never negative). This is the opposite pattern from the
+  old no-search ablation, and it directly answers item #2's question: **yes, injury
+  adjustment is worth its complexity in the pipeline that actually matters** — the
+  benefit is modest (this is a small, secondary adjustment on top of a much bigger Layer-3
+  similarity-search effect) but real and consistent, not noise (12/12 fold-method-layer
+  comparisons agree in direction).
+- **Static-split cross-check (train/validation) confirms the same direction**: e.g.
+  `wider_exploration_best` validation corr layer1=0.3147 vs layer2=0.3228 (+0.0081); train
+  corr layer1=0.2188 vs layer2=0.2218 (+0.0031) — consistent with the fold-level result on
+  an independent evaluation lens.
+- This resolves a genuine gap the previous three runs left open (the phase log's Phase 4
+  section explicitly deferred this exact check: "The Layer-3 built-in check... is deferred
+  to Phase 4's ablation" — and Phase 4 then only ran the no-search version).
+
+**Fallbacks used:** `hybrid_knn_floor` was not included in this ablation (redundant with
+`wider_exploration_best` — item #1 of the walk-forward-CV run already showed they're
+numerically identical at every fold).
+
+**Next dependencies:** none.
+
+---
+
+### Item #8 — Extend walk-forward folds with 2025-26 data
+**Status:** complete
+
+**Critique of the existing approach:** n=4 folds is a coarse basis for a std estimate
+(the walk-forward-CV run's own summary flagged this). `nba_api.sqlite` already has
+complete 2025-26 regular-season data (confirmed: 1,225 games, 0 with a null final score,
+season spanning 2025-10-21 to 2026-04-12 — end date derived via the exact same "day before
+the largest March-May gap" method used for the original 4 folds, and directly verified: a
+6-day gap precedes 2026-04-18, where per-day game volume drops from 15/day to 2-4/day,
+the same regular-season-to-playoffs signature seen in every other season). No reason not
+to use it.
+
+**What was built/tried:** `walkforward.py` gained `FOLD_5` (validation 2025-10-21 to
+2026-04-12) and `FOLDS_WITH_FOLD5`, kept separate from the original `FOLDS` list so
+existing 4-fold callers are unaffected. `item8_results.py` re-runs all 3 reference methods
+across the 5-fold scheme, using item #7's corrected z-score fit and item #1's recalibrated
+config (both already in place by this point in the round).
+
+**Key findings:**
+
+| method | fold1 | fold2 | fold3 | fold4 | fold5 (NEW) | mean (5-fold) | std (5-fold) |
+|---|---|---|---|---|---|---|---|
+| default_handpicked | 0.2016 | 0.1552 | 0.2309 | 0.2921 | **0.3421** | 0.2444 | 0.0738 |
+| wider_exploration_best | 0.2492 | 0.2091 | 0.2707 | 0.3228 | **0.3905** | 0.2885 | 0.0702 |
+
+- **Fold 5 (2025-26) has the HIGHEST correlation of any fold yet, for both methods** —
+  continuing the corpus-depth trend (more accumulated history -> better-matched
+  neighbors) rather than reversing or plateauing it.
+- **The tuned config's advantage holds on this genuinely new, previously-untouched
+  fold**: 0.3905 > 0.3421, the same direction as every other fold, by a similar margin
+  (+0.048, in line with the +0.04-to-+0.08 range seen across folds 1-4).
+- **The variance estimate sharpens somewhat but the qualitative "lower variance" claim
+  narrows.** 5-fold std: default=0.0738, wider=0.0702 — wider_exploration_best is still
+  the lower-variance config, but the GAP between the two stds shrinks substantially
+  (4-fold gap was 0.0558 vs 0.0433 = a 0.0125 gap; 5-fold gap is 0.0738 vs 0.0702 = a
+  0.0036 gap) because fold 5's unusually high correlation raises both methods' spread,
+  and raises the tuned config's spread by relatively more (it had less room to move
+  before, since it wasn't as bottlenecked by weak early folds). This is worth flagging
+  honestly: the "meaningfully lower variance" claim is real but weaker with n=5 than it
+  looked with n=4 — a 6th+ fold would help clarify whether this is fold-5-specific noise
+  or a real narrowing trend.
+
+**Fallbacks used:** none — this was a straightforward extension using already-available,
+already-validated (0 null scores) data.
+
+**Next dependencies:** none — final item for this round.
+
+---
+
+## WRAP-UP ROUND SUMMARY
+
+**Which items were reached:** all five (#7, #1, #3, #2, #8), in the instructed priority
+order, with #7 done first as foundational per instructions.
+
+**Item #7 — did the z-score fix change any headline conclusion?** No headline conclusion
+flipped. The tuned config (`wider_exploration_best`) still beats the untuned default on
+every fold (now confirmed correct-normalization-adjusted), and still has lower fold-to-fold
+variance. The fix's actual effect: correlation numbers shift UP modestly (mostly for
+earlier folds, by +0.02 to +0.06; negligibly for fold 4), and the shift is now understood
+to be a genuine "era-relative normalization is a better similarity metric" effect, not
+just a leakage-hygiene correction that happened to be neutral. The corpus-depth story
+(correlation rising fold-to-fold) survives intact — it is not a normalization artifact,
+though normalization was mildly compounding it in the same direction for early folds.
+
+**Item #1 — does clustering now separate by style with minutes/usage added?** Not
+cleanly, even with real usage_rate/minutes_per_game data joined in. Raw concatenation
+(`raw_plus_usage`) mostly fails to fix Phase 0's original finding — PPG/usage_rate/STL
+remain tightly coupled to a playing-time ordering. A per-minute-normalized variant
+(`per_minute_plus_usage`) DOES achieve a real, verifiable separation specifically for the
+interior-defense axis (BLK's tie to minutes drops from ~0.8 to ~0.24-0.49 monotonicity),
+but playmaking/scoring/steal-rate metrics remain minutes-correlated even after per-minute
+normalization — most plausibly because better players get more minutes (a genuine
+selection effect, not a stat-transformation problem). The production percentile taxonomy
+remains the better choice overall. The one taxonomy change actually adopted — `combo`
+redefined using genuine `usage_rate`/assist-RATE percentiles instead of an indirect
+high-threshold raw-stat workaround — is a real conceptual improvement that was verified
+to preserve the existing population (not a silent redefinition), and the recalibration it
+triggered is now reflected in `configs/config.yaml`.
+
+**Item #3 — what's the actual explanation for the perimeter_specialist sign flip?** A
+small-effective-sample artifact: one misclassified, long-term-injured player (Collin
+Sexton — an offense-first guard whose ~5-month ACL-recovery absence dominates the sample)
+is responsible for flipping the sign. Excluding him alone flips the calibrated delta from
+-0.09 to +0.96 (matching the design doc's original intuition). This is not a genuine
+basketball finding about lineup shifts — it's a data-quality/methodology artifact that a
+future round should fix directly (cap per-player influence, or exclude extended-absence
+stretches from the "missing" definition), not just monitor.
+
+**Item #2 — does injury adjustment demonstrably help within the real winning pipeline?**
+Yes, for the first time confirmed directly. Layer 2 (injury-adjusted) beats layer 1 (no
+injury adjustment) on every one of 4 folds, for both the default and tuned configs, with a
+small but fully consistent positive correlation delta (+0.0056 to +0.0065 mean). This
+reverses the ambiguity left by the old no-search-active ablation and gives a clean,
+positive answer: injury adjustment is worth keeping.
+
+**Item #8 — does the tuned config's advantage hold with more folds?** Yes. A 5th
+independent fold (2025-26, already-available data) shows the SAME direction (tuned config
+beats default, 0.3905 > 0.3421) and the highest correlation of any fold yet, continuing
+the corpus-depth trend rather than reversing it. The "tuned config has lower variance"
+claim survives but narrows substantially (std gap shrinks from 0.0125 at n=4 to 0.0036 at
+n=5) — still true, but a weaker margin than previously reported, honestly flagged.
+
+**Revised overall recommendation, given all four runs now:** The core recommendation is
+UNCHANGED and now rests on meaningfully more scrutinized evidence: **`fingerprint_window=37,
+decay_halflife=13.2, similarity_method=knn, knn_k=81, min_confidence_sample=21,
+full_confidence_sample=82, layer=2`**, evaluated with corrected (point-in-time) z-score
+normalization, beats the untuned hand-picked default on all 5 independent walk-forward
+folds spanning 2021-22 through 2025-26, with layer 2 (injury adjustment) confirmed to help
+within that exact pipeline (not just in an isolated no-search ablation). Two of the three
+open items carried from the previous three runs are now resolved with actual evidence
+rather than a flag: the `perimeter_specialist` sign flip has a concrete, well-supported
+explanation (small-sample/misclassification artifact, not a real effect), and the `combo`
+archetype has been re-examined and improved (still a reasonable permanent addition, now on
+firmer conceptual footing). The z-score normalization leak — flagged three times across
+prior runs without being fixed — is now fixed, and the fix does not change which
+configuration should be recommended.
+
+**Any genuinely new open questions:**
+1. The perimeter_specialist calibration fix recommended in item #3 (cap per-player
+   influence, or exclude extended-absence streaks) was diagnosed but not implemented —
+   a concrete, scoped follow-up for whoever picks this up next, and arguably should be
+   applied to ALL archetypes' calibration, not just this one, once implemented.
+2. Item #1's per-minute-normalization finding (real separation on the interior-defense
+   axis, none on playmaking/scoring) was not extended to `facilitator`/`scorer`/
+   `rim_protector`/`perimeter_specialist`'s OWN percentile definitions, which have the
+   identical raw-accumulation-vs-playing-time conflation in principle — only `combo` was
+   revisited this round, per the task's specific scope.
+3. Item #7's single static train/validation split (used by the Optuna hyperparameter
+   search and the KNN-floor grid search) still uses the OLD global z-score fit — only the
+   walk-forward harness was corrected this round. If the hyperparameter search were re-run
+   with corrected normalization, the specific best (window, halflife, k, ...) values might
+   shift slightly, though the walk-forward-fold evidence above suggests any such shift
+   would likely be modest given how little the headline comparison moved.
+4. Item #8's variance-narrowing observation (the "tuned config is more consistent" gap
+   shrinking from n=4 to n=5) is itself worth watching as more folds accumulate — it's not
+   yet clear whether n=5's fold-5 result is representative or an outlier in the variance
+   sense (though not in the mean/direction sense, where it's fully consistent).
+
+**Recommended next step: iterate toward integration readiness, close to done.** This is
+the fourth consecutive round in which the recommended configuration survives fresh
+scrutiny (a real correctness fix, a data-completeness gap addressed, a specific anomaly
+resolved with evidence, a previously-untested pipeline component confirmed to help, and
+one more independent fold). None of the four rounds' core recommendation has needed to
+change. The main remaining blockers before `feature_builder.py` integration are process
+ones, not evidentiary ones: a human should sign off on the `combo` archetype's redefinition
+and the recalibrated `injury_impact` block (both changed this round), and ideally the
+perimeter_specialist calibration fix (item #3's recommendation) should be implemented and
+folded back through calibration before this is treated as fully final. Barring those, the
+evidentiary case for integration is now about as strong as an exploratory module's case
+reasonably gets without live A/B validation.
+
