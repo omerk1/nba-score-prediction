@@ -64,9 +64,17 @@ def _naive_baseline_metrics(features_df: pd.DataFrame, y_true: pd.DataFrame, win
     }
 
 
-def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_metrics: dict, n_features: int) -> None:
-    """Append one row to outputs/experiments.csv. Creates the file with headers if absent."""
-    out = Path("outputs/experiments.csv")
+def _save_experiment(
+    run_name: str, notes: str, config, val_metrics: dict, test_metrics: dict, n_features: int,
+    experiments_csv: str = "outputs/experiments.csv",
+) -> None:
+    """Append one row to `experiments_csv` (default outputs/experiments.csv, the
+    shared production log). Creates the file with headers if absent.
+
+    `experiments_csv` override (Round 7, A7 feature-integration test): lets
+    exploratory/throwaway runs log to a separate file instead of polluting the
+    shared history — see --experiments-csv below."""
+    out = Path(experiments_csv)
     out.parent.mkdir(parents=True, exist_ok=True)
 
     row = {
@@ -107,6 +115,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-name", required=True, help="Short name for this ablation run, e.g. 'baseline' or 'injury_v1'")
     parser.add_argument("--notes", default="", help="Optional free-text notes saved to experiments.csv")
+    parser.add_argument(
+        "--experiments-csv", default="outputs/experiments.csv",
+        help="Path to append this run's row to (default: outputs/experiments.csv, the shared "
+             "production log). Override for exploratory/throwaway runs that shouldn't land in "
+             "the shared history, e.g. --experiments-csv outputs/a7_integration_test_results.csv"
+    )
     args = parser.parse_args()
 
     logger.info(f"Training pipeline started at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
@@ -199,7 +213,7 @@ def main():
         )
     if naive_window in config.features.rolling_windows:
         baseline_run_name = f"naive_rolling_{naive_window}"
-        experiments_path = Path("outputs/experiments.csv")
+        experiments_path = Path(args.experiments_csv)
         already_logged = (
             experiments_path.exists()
             and baseline_run_name in experiments_path.read_text()
@@ -207,7 +221,7 @@ def main():
         if not already_logged:
             _save_experiment(
                 baseline_run_name, f"auto-generated baseline (rolling {naive_window}-game avg)",
-                config, baseline_val, baseline_test, 2
+                config, baseline_val, baseline_test, 2, experiments_csv=args.experiments_csv,
             )
 
     importance_df = predictor.get_feature_importance(top_n=20)
@@ -252,7 +266,10 @@ def main():
     with open(models_dir / "training_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2, default=str)
 
-    _save_experiment(args.run_name, args.notes, config, val_metrics, test_metrics, len(feature_cols))
+    _save_experiment(
+        args.run_name, args.notes, config, val_metrics, test_metrics, len(feature_cols),
+        experiments_csv=args.experiments_csv,
+    )
     logger.info(f"Test — diff_mae: {test_metrics['diff_mae']:.2f} | win_acc: {test_metrics['win_accuracy']:.1%}")
     logger.info(f"Model saved to {model_path}")
 

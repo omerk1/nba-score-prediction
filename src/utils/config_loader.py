@@ -102,11 +102,14 @@ class InjuryFeaturesConfig(BaseModel):
 
 
 class StyleMatchupConfig(BaseModel):
-    """A7 exploratory module (src/matchups/) — not yet read by feature_builder.py.
-    See docs/a7_style_matchup_design.md and docs/A7_PHASE_LOG.md for how these
-    values were chosen. injury_impact keys are archetype names; each maps to a
-    dict of {fingerprint_metric: delta}, so it's left as a plain nested dict
-    rather than a fixed per-archetype model."""
+    """A7 module (src/matchups/). See docs/a7_style_matchup_design.md and
+    docs/a7_phase_log.md for how these values were chosen. injury_impact keys
+    are archetype names; each maps to a dict of {fingerprint_metric: delta},
+    so it's left as a plain nested dict rather than a fixed per-archetype
+    model. `enabled` gates feature_builder.py's _add_style_matchup_features
+    (mirrors EloFeaturesConfig/InjuryFeaturesConfig's own `enabled` field) —
+    added in the Round 7 feature-integration test."""
+    enabled: bool
     fingerprint_window: int
     decay_halflife: float
     encoding: str

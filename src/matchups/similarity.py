@@ -32,8 +32,8 @@ from src.matchups.matchup_index import build_matchup_index
 logger = logging.getLogger(__name__)
 
 
-def _prep_sorted_index(layer: int) -> pd.DataFrame:
-    idx = build_matchup_index(layer=layer)
+def _prep_sorted_index(layer: int, zscore_cutoff_date: str | None = None) -> pd.DataFrame:
+    idx = build_matchup_index(layer=layer, zscore_cutoff_date=zscore_cutoff_date)
     idx = idx.sort_values("game_date").reset_index(drop=True)
     return idx
 
@@ -47,10 +47,19 @@ def run_similarity_search(
     full_confidence_sample: int = 50,
     eval_start_date: str | None = None,
     eval_end_date: str | None = None,
+    zscore_cutoff_date: str | None = None,
 ) -> pd.DataFrame:
     """Returns one row per evaluated game: style_score, confidence, n_similar,
-    fallback_used, plus h2h_score and actual_home_margin for comparison."""
-    idx = _prep_sorted_index(layer=layer)
+    fallback_used, plus h2h_score and actual_home_margin for comparison.
+
+    `zscore_cutoff_date` (Round 7, feature-integration test): if given, the
+    matchup-vector z-score mean/std are fit only on fingerprint rows strictly
+    before this date (point-in-time -- see matchup_index.py's docstring for
+    why this matters and walkforward.py's `zscore_point_in_time` for the
+    established precedent). Default None preserves the OLD global-stats
+    behavior for every existing caller (e.g. this module's own __main__
+    block), so nothing existing silently changes."""
+    idx = _prep_sorted_index(layer=layer, zscore_cutoff_date=zscore_cutoff_date)
     vector_cols = [c for c in idx.columns if c.startswith("home_") or c.startswith("away_")]
     V = idx[vector_cols].to_numpy(dtype=np.float64)
     norms = np.linalg.norm(V, axis=1)

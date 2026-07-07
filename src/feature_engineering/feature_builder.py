@@ -88,6 +88,7 @@ class FeatureBuilder:
         df = self._add_travel_features(df)
         df = self._add_elo_features(df)
         df = self._add_injury_features(df)
+        df = self._add_style_matchup_features(df)
 
         feature_cols = self._get_feature_columns(df)
         nan_games = df[feature_cols].isna().any(axis=1).sum()
@@ -642,6 +643,42 @@ class FeatureBuilder:
         dates_with_coverage = set(injury_df["game_date"])
         new_cols["has_injury_data"] = game_dates.isin(dates_with_coverage).astype(int)
 
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_style_matchup_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        A7 style-matchup score (src/matchups/) — precomputed offline by
+        src/matchups/precompute_scores.py into outputs/a7_matchups_cache.sqlite's
+        style_matchup_scores table (game_id -> style_matchup_score/confidence),
+        NOT computed live here: this method only left-joins the cached result
+        onto df by GAME_ID, keeping this diff small and reusing the
+        already-validated KNN similarity-search pipeline as-is (see
+        docs/a7_style_matchup_design.md / docs/a7_phase_log.md Round 7 for the
+        feature-integration test this wiring supports).
+        """
+        cfg = load_config()
+        if not cfg.style_matchup or not cfg.style_matchup.enabled:
+            return df
+
+        cache_db = Path("outputs/a7_matchups_cache.sqlite")
+        if not cache_db.exists():
+            logger.warning(f"Style matchup cache not found at {cache_db} — skipping style matchup features")
+            return df
+
+        with sqlite3.connect(f"file:{cache_db}?mode=ro", uri=True) as conn:
+            scores_df = pd.read_sql_query(
+                "SELECT game_id, style_matchup_score, confidence FROM style_matchup_scores",
+                conn,
+            )
+
+        merged = df[["GAME_ID"]].merge(
+            scores_df, left_on="GAME_ID", right_on="game_id", how="left"
+        )
+
+        new_cols = {
+            "style_matchup_score": merged["style_matchup_score"].values,
+            "style_matchup_confidence": merged["confidence"].values,
+        }
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _get_feature_columns(self, df: pd.DataFrame) -> list[str]:
