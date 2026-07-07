@@ -1,10 +1,12 @@
 # A7 Style Matchup — Phase Log
 
-Condensed record of what was built, tried, and found across seven work rounds (all
-seven now complete). Full historical detail (per-fold tables, centroid dumps, halflife
+Condensed record of what was built, tried, and found across eight work rounds (all
+eight now complete). Full historical detail (per-fold tables, centroid dumps, halflife
 grids) lived here in earlier drafts — trimmed for conciseness; the numbers that
-mattered are kept below. Core method lives in `src/matchups/`; Round 7 wired it into
-`src/feature_engineering/feature_builder.py` (gated off by default — see Round 7).
+mattered are kept below. Core method lives in `src/matchups/`; Round 7 wired the
+KNN-lookup score into `src/feature_engineering/feature_builder.py` (gated off by
+default); Round 8 added a second, independently-gated raw-components-plus-
+differentials feature set to the same file (also gated off by default — see Round 8).
 
 ---
 
@@ -21,6 +23,14 @@ tuning.
 real-model accuracy improvement** once wired into `feature_builder.py`/`train_model.py`
 alongside the existing feature set (rolling efficiency, Elo, H2H, injury deficit) —
 see Round 7 below. `style_matchup.enabled` stays `false` by default; not adopted.
+
+**Round 8 (raw components + explicit differentials, a redesign not a retune)**
+tried the structural fix Round 7's finding implied — expose the fingerprint's raw
+ingredients (plus a new `offensive_rating` quality metric) instead of one
+pre-aggregated KNN-average number. Result: real feature importance this time
+(top-2 overall features), but the signal sharpens `total_mae`, not `win_acc`/spread
+accuracy — mixed, not adopted by default either. See Round 8 below.
+`style_matchup.raw_features_enabled` also stays `false` by default.
 
 **Current recommended config** (`configs/config.yaml`'s `style_matchup` block):
 `fingerprint_window=37, decay_halflife=13.2, encoding=hand_picked, similarity_method=knn,
@@ -303,6 +313,129 @@ doesn't move accuracy).
 
 ---
 
+## Round 8 — Raw fingerprint components + explicit differentials (redesign, not a retune)
+
+Round 7's `style_matchup_score` is a pre-aggregated KNN-average "mini-prediction" —
+CatBoost never sees the ingredients, just one opaque number (29th of 109 features,
+confidence 0% importance). This round tests a structurally different alternative:
+expose the fingerprint's raw per-team components plus explicit home-vs-away
+differentials directly, mirroring `_add_matchup_features`'s existing pattern
+(`home_off_vs_away_def_L{window}` etc.) instead of another black-box lookup. No KNN
+involved at all. Additive, independently gated — old method/pipeline untouched.
+
+**Also fixed a real gap, not just a re-encoding:** 4 of the 5 original metrics
+(`pace_score`, `three_pt_reliance`, `paint_activity`, `assist_rate`) are volume/style
+metrics (*what* a team does), not quality (*how well*) — `defensive_rating` was the
+one exception. Added `offensive_rating` (`PTS/possessions*100`, same possessions
+estimate as `defensive_rating`) as a 6th `FINGERPRINT_METRICS` entry in
+`fingerprint.py`. **Layer 1 only** — no injury-adjustment delta calibrated for it
+(deliberate scope cut; a full Phase-0-style calibration is out of scope for this
+redesign round, candidate for later if this approach shows promise). Rebuilt
+layer=1/layer=2 fingerprint caches (25,436 team-games; 24.75% injury-adjusted,
+matching Round 7's coverage exactly); layer=2 passes `offensive_rating` through
+unmodified (verified 100% match vs layer=1). `db.py`'s `matchup_fingerprints` schema
+gained the column plus an `ALTER TABLE` migration for pre-existing cache DBs.
+
+**Built:** `FeatureBuilder._add_style_fingerprint_features` — reads
+`matchup_fingerprints` directly (no similarity search), layer=2 for the 5 calibrated
+metrics + layer=1 for `offensive_rating`, joined by `(game_id, team_id)` for both
+teams. Adds 18 columns: `home_style_{metric}` / `away_style_{metric}` (12 raw) +
+`style_{metric}_diff` (6, home−away). Gated by new `style_matchup.raw_features_enabled`
+(default `false`), independent of `style_matchup.enabled` — both can be toggled
+separately. `config_loader.py`'s `StyleMatchupConfig` gained the field (default
+`False` so any caller not yet passing it still works); `tests/test_h2h.py`'s mock
+config updated (same MagicMock-truthiness fix pattern as Round 7).
+
+**Blocker:** fresh worktree had no `data/raw/*.sqlite` symlinks and an empty
+`outputs/a7_matchups_cache.sqlite` (git-ignored data files, not carried over) — and
+the `work/a7-fingerprint-features` branch was already checked out in another,
+unmodified worktree, blocking checkout in this one. Fallback: symlinked
+`nba_api.sqlite`/`injury_features.sqlite`/`basketball.sqlite` from the human's
+working copy (read-only, matches `db.py`'s existing symlink convention), removed
+the stale unused worktree registration (clean, no lost work, confirmed via
+`git status`/`git diff` before removing), and rebuilt every cache table from
+scratch. Rebuilt coverage numbers (name resolution 90.95%, archetypes, 24.75%
+injury-adjusted) matched Round 7's documented values exactly, confirming the
+rebuild reproduced the same environment.
+
+**Experiment:** reran all three configs end-to-end (not reused from Round 7's CSV —
+having rebuilt the environment from empty, wanted freshly-generated, directly
+comparable full feature-importance tables for all three, which Round 7's artifacts
+never saved). `train_model.py` now also dumps the FULL per-feature importance table
+(not just top-20) to `outputs/a7_feature_importance_<run_name>.csv` — Round 7 only
+kept top-20 (print + gitignored `outputs/reports/`), losing the full ranking once the
+worktree was cleaned up.
+
+| metric | baseline (107 feat) | old KNN score (109 feat) | new raw+diff (125 feat) |
+|---|---|---|---|
+| val diff_mae | 11.162 | 11.133 | **11.117** |
+| test diff_mae | 11.572 | **11.558** | 11.603 |
+| val diff_within_5 | 0.2890 | 0.2906 | **0.2939** |
+| test diff_within_5 | **0.2939** | **0.2939** | 0.2857 |
+| val total_mae | 15.070 | 15.066 | **14.905** |
+| test total_mae | 15.654 | 15.631 | **15.410** |
+| val win_acc | 0.6531 | **0.6571** | 0.6514 |
+| test win_acc | 0.6735 | **0.6792** | 0.6637 |
+| val brier | **0.2129** | 0.2142 | **0.2129** |
+| test brier | **0.2108** | 0.2095 | 0.2113 |
+
+Baseline and old-KNN rows match Round 7's `a7_integration_test_results.csv` exactly
+(e.g. baseline val/test diff_mae 11.162/11.572 both rounds) — confirms unchanged
+environment/data despite the from-scratch rebuild. `style_matchup_score` still
+ranks 29th (~1% importance), confidence still 0% — Round 7's finding reconfirmed,
+unaffected by this round's additive changes.
+
+**Does the redesign get non-trivial importance? Yes, clearly** — unlike the old
+score's ~1%/0%. In the new run, `home_style_pace_score`/`away_style_pace_score` rank
+**#1 and #2 overall** (11.6 and 9.7, ahead of `elo_diff` at #3), ~17% of total
+importance between them. `style_offensive_rating_diff` ranks #14 (1.67) and
+`away_style_offensive_rating` #13 (1.70) — both clear top-15, **supporting the
+direction/magnitude hypothesis specifically**: the new quality metric is informative
+where several old volume-only metrics aren't (`home_style_three_pt_reliance` and
+`away_style_defensive_rating` get exactly zero importance; `style_assist_rate_diff`
+too). Of the 18 new columns, 3 get zero importance, most others land rank 30-104.
+
+**Does it translate into accuracy? Mixed, not a clean win.** `pace_score`'s dominance
+is a plausible artifact of what it measures — `PTS + OPP_PTS + TOV - FTA*0.44` is
+essentially a rolling proxy for *combined scoring level*, which the model
+(`MultiRMSE` over `PTS_home`/`PTS_away` jointly) can exploit directly for absolute
+score magnitude — consistent with `total_mae` improving clearly on both splits
+(val 14.905 vs 15.070 baseline; test 15.410 vs 15.654) — the biggest total_mae gain
+of any A7 variant tried. But that is a different thing from sharpening the
+home-minus-away *margin*: `diff_mae`/`win_acc` do not follow — val `diff_mae` is
+marginally best of the three (11.117), test `diff_mae` is marginally worst (11.603);
+`win_acc` is worse on both splits than baseline (65.14% vs 65.31% val, 66.37% vs
+67.35% test) and worse than the old KNN approach on both. Brier is a wash (val ties
+baseline, test slightly worse than both). Net: high feature importance this time —
+the redesign's core hypothesis (expose ingredients, let CatBoost learn interactions)
+is confirmed — but the *specific* new information the model latches onto
+(pace/scoring-level) sharpens total-points prediction, not the moneyline/spread
+markets the project cares about most.
+
+**Recommendation: do not adopt by default at this time**, but for a different reason
+than Round 7 — not "no signal" (there clearly is, and it's structurally the fix Round
+7's finding called for) but "the signal that emerged sharpens the wrong market."
+Two concrete follow-ups if revisited: (a) since `total_mae` improved substantially,
+consider whether a total-points-focused evaluation (or an over/under product
+surface) would find this variant worth adopting even though win_acc doesn't improve —
+out of scope to judge here, flagging for the coordinator; (b) if pursuing the
+moneyline/spread angle further, the zero-importance columns (`home_style_
+three_pt_reliance`, `away_style_defensive_rating`, `style_assist_rate_diff`) are
+candidates to drop, and the asymmetry between `home_style_offensive_rating` (rank
+102, ~0) and `away_style_offensive_rating` (rank 13) is worth a closer look before
+concluding the metric itself is the win — it may be specifically the *away* team's
+offensive quality relative to home defensive/rolling features already in the model
+that's informative, not offensive_rating symmetrically. Config defaults correctly
+left `false` for both `style_matchup.enabled` and `raw_features_enabled`;
+`predict_game.py` untouched, per instructions.
+
+Full rows: `outputs/a7_fingerprint_features_results.csv` (run names `a7r8_baseline` /
+`a7r8_old_knn_style_matchup` / `a7r8_raw_fingerprint_features`) — NOT
+`outputs/experiments.csv`. Full per-feature importance (all features, every run):
+`outputs/a7_feature_importance_<run_name>.csv`.
+
+---
+
 ## Known open items (not blockers, intentionally deferred)
 
 - **PCA `n_components` sweep, further supervised-model tuning** — both already lose to
@@ -312,6 +445,16 @@ doesn't move accuracy).
   metric set doesn't add real signal on top of the existing model, so this is now
   the more load-bearing open item, not just a nice-to-have.
 - **`config_loader.py` formalization** — done (`StyleMatchupConfig` added, 78 tests pass;
-  `enabled` field added Round 7).
-- **`feature_builder.py` integration** — done (Round 7). Result: no measurable
-  accuracy improvement; not adopted (`style_matchup.enabled` stays `false`).
+  `enabled` field added Round 7, `raw_features_enabled` added Round 8).
+- **`feature_builder.py` integration** — done (Round 7, KNN-lookup score: no measurable
+  accuracy improvement). Round 8 tried a structurally different raw+differential
+  redesign: gets real feature importance (unlike Round 7's ~1%/0%) but the signal it
+  captures sharpens total-points accuracy, not win_acc/spread accuracy — mixed result,
+  not adopted by default either. Both flags stay `false`.
+- **Offensive_rating injury-calibration** — deliberately deferred in Round 8 (Layer 1
+  only); a candidate full Phase-0-style calibration pass if the raw-features approach
+  is revisited.
+- **Total-points-focused evaluation** — Round 8 flagged that its redesign's `total_mae`
+  gain didn't show up in Round 7's original motivation (win_acc/spread), raising
+  whether a total/over-under-focused product surface would value this differently;
+  not evaluated here, coordinator call.
