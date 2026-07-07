@@ -46,9 +46,10 @@ import logging
 import pandas as pd
 
 from src.matchups.config import load_style_matchup_config
-from src.matchups.db import cache_conn
+from src.matchups.db import cache_conn, table_exists
 from src.matchups.fingerprint import build_fingerprint_cache
 from src.matchups.injury_layer import build_injury_adjusted_fingerprints
+from src.matchups.players import build_archetype_cache, build_name_resolution_cache
 from src.matchups.similarity import run_similarity_search
 from src.utils.config_loader import load_config
 
@@ -69,6 +70,30 @@ TABLE_DDL = """
 def precompute_and_cache() -> dict:
     main_cfg = load_config()
     sm_cfg = load_style_matchup_config()
+
+    # Prerequisites for Layer 2 (injury adjustment): player_name_resolution and
+    # player_archetypes are read by injury_layer.py's _out_players_with_reason but
+    # NOT built by it -- a fresh outputs/a7_matchups_cache.sqlite (e.g. a new
+    # worktree) starts with both tables empty, which silently makes Layer 2 a
+    # no-op (0 games adjusted) rather than erroring. Build them here if missing so
+    # this script is self-contained; skip if already populated (they're
+    # independent of fingerprint_window/decay_halflife, so no need to rebuild on
+    # every run once cached).
+    conn = cache_conn()
+    has_names = table_exists(conn, "player_name_resolution") and conn.execute(
+        "SELECT COUNT(*) FROM player_name_resolution"
+    ).fetchone()[0] > 0
+    has_archetypes = table_exists(conn, "player_archetypes") and conn.execute(
+        "SELECT COUNT(*) FROM player_archetypes"
+    ).fetchone()[0] > 0
+    conn.close()
+
+    if not has_names:
+        logger.info("player_name_resolution cache empty — building...")
+        logger.info(f"Name resolution: {build_name_resolution_cache()}")
+    if not has_archetypes:
+        logger.info("player_archetypes cache empty — building...")
+        logger.info(f"Archetype classification: {build_archetype_cache()}")
 
     logger.info(
         "Building layer=1 fingerprint cache (window=%s, halflife=%s)...",
