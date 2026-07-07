@@ -1,21 +1,26 @@
 # A7 Style Matchup — Phase Log
 
-Condensed record of what was built, tried, and found across six work rounds (all six
-now complete). Full historical detail (per-fold tables, centroid dumps, halflife grids)
-lived here in earlier drafts — trimmed for conciseness; the numbers that mattered are
-kept below. All code lives in `src/matchups/` (not imported by `feature_builder.py` —
-exploratory, not yet integrated).
+Condensed record of what was built, tried, and found across seven work rounds (all
+seven now complete). Full historical detail (per-fold tables, centroid dumps, halflife
+grids) lived here in earlier drafts — trimmed for conciseness; the numbers that
+mattered are kept below. Core method lives in `src/matchups/`; Round 7 wired it into
+`src/feature_engineering/feature_builder.py` (gated off by default — see Round 7).
 
 ---
 
 ## Status
 
-**Style signal robustly beats the A2 H2H baseline.** Confirmed via a single static
-split and a 5-fold walk-forward CV (not just one split): the tuned config wins on
-every fold, with lower variance than the untuned default. Two real bugs were found
-and fixed along the way (a z-score normalization leak, an injury-calibration
-sign-flip artifact) — not just parameter tuning. Not yet integrated into
-`feature_builder.py`; that's a separate future decision.
+**Style signal robustly beats the A2 H2H baseline in isolation** (correlation with
+actual margin). Confirmed via a single static split and a 5-fold walk-forward CV (not
+just one split): the tuned config wins on every fold, with lower variance than the
+untuned default. Two real bugs were found and fixed along the way (a z-score
+normalization leak, an injury-calibration sign-flip artifact) — not just parameter
+tuning.
+
+**Round 7 (feature-integration test) found this does not translate into a measurable
+real-model accuracy improvement** once wired into `feature_builder.py`/`train_model.py`
+alongside the existing feature set (rolling efficiency, Elo, H2H, injury deficit) —
+see Round 7 below. `style_matchup.enabled` stays `false` by default; not adopted.
 
 **Current recommended config** (`configs/config.yaml`'s `style_matchup` block):
 `fingerprint_window=37, decay_halflife=13.2, encoding=hand_picked, similarity_method=knn,
@@ -210,12 +215,103 @@ apples-to-apples table:**
 
 ---
 
+## Round 7 — Feature integration test
+
+The acid test: does A7 improve the actual trained model's real prediction accuracy,
+not just correlation-with-margin in isolation? Reversed two standing rules
+(`feature_builder.py` and `train_model.py` execution were previously off-limits) —
+both now in scope, per explicit instruction.
+
+**Built:**
+- `src/matchups/precompute_scores.py` — runs the validated pipeline (unchanged
+  hyperparameters) once over the full `game` table (~12.7k games) and caches
+  `style_matchup_score`/`confidence`/`fallback_used`/`n_similar` keyed by `game_id`
+  into `outputs/a7_matchups_cache.sqlite`'s new `style_matchup_scores` table.
+  Runs in ~50s (box scores, fingerprints, injury adjustment, KNN search all
+  included) — not the bottleneck. Also builds `player_name_resolution`/
+  `player_archetypes` if missing (a fresh cache DB, e.g. a new worktree, silently
+  no-ops Layer 2 otherwise — found and fixed: 0% team-games adjusted before the
+  fix, 24.75% after, matching the design doc's expectation).
+- Found and fixed en route: `configs/config.yaml`'s `style_matchup` block still had
+  the untuned Phase-0 defaults (window=20/halflife=5/cosine/k=30) — despite the
+  design doc and Round 2/6 both documenting window=37/halflife=13.2/knn/k=81 as the
+  validated winner, that config was never actually written into the yaml (only
+  hardcoded separately inside `tuning.py`/`walkforward.py`). Corrected as part of
+  this round (not a re-tune — using the already-identified winner).
+- `similarity.run_similarity_search` gained an optional `zscore_cutoff_date` param
+  (default `None`, backward compatible) so the precompute pass fits matchup-vector
+  z-score stats only on pre-`train_end_date` (2024-04-14) data — avoids a look-ahead
+  leak into val/test scores, reusing the exact mechanism validated in Round 6.
+- `FeatureBuilder._add_style_matchup_features` — left-joins the cache onto the
+  training dataframe by `GAME_ID`, gated by new `style_matchup.enabled` config flag
+  (mirrors the `elo_features`/`injury_features` gating pattern exactly). Left
+  `enabled: false` as the committed default.
+- `train_model.py` gained a `--experiments-csv` override (default unchanged) so
+  this round's two runs could log to `outputs/a7_integration_test_results.csv`
+  instead of the shared `outputs/experiments.csv` (coordinator correction
+  mid-run — the shared log should only get entries the coordinator has reviewed).
+
+**Experiment:** identical settings otherwise, only `style_matchup.enabled` toggled.
+
+| metric | baseline (107 feat) | +style_matchup (109 feat) | delta |
+|---|---|---|---|
+| val diff_mae | 11.162 | 11.133 | −0.029 |
+| test diff_mae | 11.572 | 11.558 | −0.014 |
+| val diff_within_5 | 0.2890 | 0.2906 | +0.0016 |
+| test diff_within_5 | 0.2939 | 0.2939 | 0.0000 |
+| val total_mae | 15.070 | 15.066 | −0.004 |
+| test total_mae | 15.654 | 15.631 | −0.023 |
+| val win_acc | 0.6531 | 0.6571 | +0.0040 |
+| test win_acc | 0.6735 | 0.6792 | +0.0057 |
+| val brier | 0.2129 | 0.2142 | +0.0013 (worse) |
+| test brier | 0.2108 | 0.2095 | −0.0013 (better) |
+
+Full rows: `outputs/a7_integration_test_results.csv` (run names
+`a7_integration_baseline` / `a7_integration_with_style_matchup`) — NOT
+`outputs/experiments.csv`, per coordinator correction (see above).
+
+`style_matchup_score` ranked 29th of 109 features by CatBoost importance (~1% of
+total importance, well below every rolling/Elo/venue feature); `style_matchup_confidence`
+had **zero** importance — the model never split on it.
+
+**Does it help? No measurable improvement.** Every delta above is within
+third-decimal noise (smaller than the run-to-run variation already visible between
+e.g. `elo_v1`→`elo_v2` in the real `experiments.csv`), and several metrics move in
+opposite directions (val brier worse, test brier better) — not a consistent signal
+in either direction. This is smaller than, not merely "less than," the 0.28–0.32
+standalone correlation would suggest: the isolated correlation measures how well
+the style score alone tracks margin; it says nothing about how much *new*
+information it adds once CatBoost already has rolling off/def efficiency (multiple
+windows), Elo, H2H, venue, and injury-deficit features. The low feature-importance
+rank plus near-zero accuracy delta together support one conclusion: **CatBoost's
+existing feature set already captures most of the signal A7 would add** — the
+design doc's own note that "combining A7+A2 barely beats A7 alone" (A7 subsumes A2)
+generalizes one step further here: the full existing feature set subsumes A7 too,
+in practice, even though A7 beats A2 alone in isolation.
+
+**Recommendation: does not help (as integrated) — do not adopt at this time.**
+Not a failure of the exploration (six rounds of rigorous validation stand), but a
+real, informative negative result for *this* integration path. Two paths forward if
+revisited: (a) richer style inputs (shot-chart data, already backlogged) might carry
+information the existing feature set genuinely lacks, where a correlation-with-margin
+edge would actually convert to accuracy; (b) `style_matchup_confidence`'s zero
+importance suggests it's dead weight even if `style_matchup_score` were kept — drop
+it rather than carry an unused column. Config default correctly left `false`;
+`predict_game.py`/live-prediction wiring was out of scope and untouched, consistent
+with this result (no reason to build a live-refresh pipeline for a feature that
+doesn't move accuracy).
+
+---
+
 ## Known open items (not blockers, intentionally deferred)
 
 - **PCA `n_components` sweep, further supervised-model tuning** — both already lose to
   hand-picked/lookup by a clear, CV-confirmed margin; low expected value.
 - **Richer/shot-chart style inputs** (`nba_api` shot-chart endpoints) — real scope
-  expansion, backlogged (`docs/backlog.md`).
-- **`config_loader.py` formalization** — done (`StyleMatchupConfig` added, 78 tests pass).
-- **Actual `feature_builder.py` integration** — a distinct future decision, not part of
-  this exploration.
+  expansion, backlogged (`docs/backlog.md`); Round 7 found the current hand-picked
+  metric set doesn't add real signal on top of the existing model, so this is now
+  the more load-bearing open item, not just a nice-to-have.
+- **`config_loader.py` formalization** — done (`StyleMatchupConfig` added, 78 tests pass;
+  `enabled` field added Round 7).
+- **`feature_builder.py` integration** — done (Round 7). Result: no measurable
+  accuracy improvement; not adopted (`style_matchup.enabled` stays `false`).

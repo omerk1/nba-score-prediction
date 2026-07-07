@@ -1,8 +1,11 @@
 # A7: Style Matchup Score — Architecture & Design (as-built)
 
 > **Status:** Validated across six work rounds (see `docs/a7_phase_log.md` for full
-> evidence trail). Not yet integrated into `feature_builder.py` — that's a separate
-> future decision.
+> evidence trail). Round 7 integrated it into `feature_builder.py` behind a
+> `style_matchup.enabled` config flag (default `false`) and ran a real train/val/test
+> comparison — result: no measurable accuracy improvement over the existing feature
+> set, so it is not enabled by default. See phase log Round 7 for the full comparison
+> and recommendation.
 
 ---
 
@@ -191,7 +194,8 @@ Full numbers, per-round detail, and every rejected alternative: `docs/a7_phase_l
 **Confirmed, no open items:** the hyperparameter search that chose the current config
 predated a later-fixed normalization bug; a rerun under the fix (phase log Round 6)
 found nothing better, confirming the config selection holds up. `feature_builder.py`
-integration itself is a separate, not-yet-made decision.
+integration itself was completed and tested in Round 7 — result: no measurable
+real-model accuracy improvement, not adopted by default (see phase log Round 7).
 
 ---
 
