@@ -24,6 +24,13 @@ was estimated as "this archetype was missing" (binary), so summing multiple
 instances would double-count. Different archetypes missing simultaneously DO
 stack additively (each archetype's config block targets its own metrics
 independently, matching the design doc's per-archetype injury_impact structure).
+
+Round 8: fingerprint.py's FINGERPRINT_METRICS gained a 6th metric,
+offensive_rating. No archetype's injury_impact config entry references it (a
+deliberate scope cut -- see fingerprint.py's docstring), so the adjustment loop
+below never touches it and it passes through from layer=1 to layer=2 unchanged.
+FeatureBuilder's new raw-features method reads offensive_rating from layer=1
+directly rather than relying on this pass-through, to make that explicit.
 """
 
 import logging
@@ -122,15 +129,15 @@ def build_injury_adjusted_fingerprints() -> dict:
         (
             r.game_id, int(r.team_id), r.game_date, 2,
             r.pace_score, r.three_pt_reliance, r.paint_activity,
-            r.defensive_rating, r.assist_rate, int(r.n_games_in_window),
+            r.defensive_rating, r.assist_rate, r.offensive_rating, int(r.n_games_in_window),
         )
         for r in fp2.itertuples(index=False)
     ]
     conn.executemany(
         """INSERT OR REPLACE INTO matchup_fingerprints
            (game_id, team_id, game_date, layer, pace_score, three_pt_reliance,
-            paint_activity, defensive_rating, assist_rate, n_games_in_window)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            paint_activity, defensive_rating, assist_rate, offensive_rating, n_games_in_window)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()

@@ -90,7 +90,7 @@ CACHE_SCHEMAS = {
             game_date TEXT,
             layer INTEGER NOT NULL,
             pace_score REAL, three_pt_reliance REAL, paint_activity REAL,
-            defensive_rating REAL, assist_rate REAL,
+            defensive_rating REAL, assist_rate REAL, offensive_rating REAL,
             n_games_in_window INTEGER,
             PRIMARY KEY (game_id, team_id, layer)
         )
@@ -103,5 +103,14 @@ def init_cache_db() -> None:
     for name, ddl in CACHE_SCHEMAS.items():
         if not table_exists(conn, name):
             conn.execute(ddl)
+    # Round 8 migration: matchup_fingerprints predates the offensive_rating metric
+    # (6th fingerprint metric, added in fingerprint.py this round). CREATE TABLE IF
+    # NOT EXISTS above is a no-op against an already-populated cache DB from an
+    # earlier round, so ALTER TABLE the column in rather than requiring a full
+    # from-empty rebuild of every existing outputs/a7_matchups_cache.sqlite.
+    if table_exists(conn, "matchup_fingerprints"):
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(matchup_fingerprints)").fetchall()}
+        if "offensive_rating" not in cols:
+            conn.execute("ALTER TABLE matchup_fingerprints ADD COLUMN offensive_rating REAL")
     conn.commit()
     conn.close()

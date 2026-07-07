@@ -15,6 +15,27 @@ Metrics (per design doc):
 
 possessions is estimated with the standard box-score formula:
     possessions = FGA - OREB + TOV + 0.44*FTA
+
+Round 8 addition -- offensive_rating (PTS / possessions * 100, same possessions
+estimate used for defensive_rating, just the team's own scoring instead of the
+opponent's). Motivation: 4 of the original 5 metrics are volume/style metrics
+(pace_score, three_pt_reliance, paint_activity, assist_rate) that describe *what*
+a team tends to do, not *how well* -- e.g. three_pt_reliance (3PA/FGA) can't tell
+a 40%-volume team shooting 40% from three apart from one shooting 28%.
+defensive_rating was already the one exception (captures quality, not just
+emphasis); offensive_rating adds the missing offensive-quality counterpart.
+
+Deliberate scope cut (Round 8): this is a Layer 1 (raw, uncalibrated) metric
+only. No injury-adjustment delta is calibrated for it this round -- doing so
+properly would require a full Phase-0-style calibration pass (per-archetype
+grid search across halflifes, sign-flip checks, etc., see docs/a7_phase_log.md
+Rounds 1/4/5) which is out of scope for this redesign round. Candidate for a
+future round if the raw-features approach shows promise. Layer 2 (injury_layer.py)
+therefore leaves offensive_rating untouched (no injury_impact config entry
+references it), so its layer=2 value is identical to its layer=1 value --
+FeatureBuilder's new _add_style_fingerprint_features reads it from layer=1
+directly rather than layer=2, to make that explicit rather than relying on a
+pass-through.
 """
 
 import logging
@@ -30,11 +51,12 @@ logger = logging.getLogger(__name__)
 
 FINGERPRINT_METRICS = [
     "pace_score", "three_pt_reliance", "paint_activity", "defensive_rating", "assist_rate",
+    "offensive_rating",
 ]
 
 
 def _load_raw_team_game_metrics() -> pd.DataFrame:
-    """One row per (game_id, team_id) with the 5 raw per-game style metrics + game_date."""
+    """One row per (game_id, team_id) with the 6 raw per-game style metrics + game_date."""
     conn = cache_conn()
     box = pd.read_sql_query("SELECT * FROM box_score_stats", conn)
     conn.close()
@@ -56,6 +78,8 @@ def _load_raw_team_game_metrics() -> pd.DataFrame:
     merged["paint_activity"] = merged["fta"]
     merged["defensive_rating"] = (merged["opp_pts"] / possessions * 100).fillna(0.0)
     merged["assist_rate"] = (merged["ast"] / merged["fgm"].replace(0, np.nan)).fillna(0.0)
+    # Round 8: offensive-quality counterpart to defensive_rating, same possessions estimate.
+    merged["offensive_rating"] = (merged["pts"] / possessions * 100).fillna(0.0)
 
     return merged[["game_id", "team_id", "game_date"] + FINGERPRINT_METRICS].sort_values(
         ["team_id", "game_date"]
@@ -131,15 +155,15 @@ def build_fingerprint_cache(layer: int = 1, min_games: int = 5) -> dict:
         (
             r.game_id, int(r.team_id), r.game_date, layer,
             r.pace_score, r.three_pt_reliance, r.paint_activity,
-            r.defensive_rating, r.assist_rate, int(r.n_games_in_window),
+            r.defensive_rating, r.assist_rate, r.offensive_rating, int(r.n_games_in_window),
         )
         for r in fp.itertuples(index=False)
     ]
     conn.executemany(
         """INSERT OR REPLACE INTO matchup_fingerprints
            (game_id, team_id, game_date, layer, pace_score, three_pt_reliance,
-            paint_activity, defensive_rating, assist_rate, n_games_in_window)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            paint_activity, defensive_rating, assist_rate, offensive_rating, n_games_in_window)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()
