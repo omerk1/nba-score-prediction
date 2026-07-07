@@ -231,6 +231,17 @@ def main():
     reports_dir.mkdir(exist_ok=True, parents=True)
     importance_df.to_csv(reports_dir / f"feature_importance_{args.run_name}.csv", index=False)
 
+    # A7 Round 8: outputs/reports/ is gitignored (and the model itself is gitignored
+    # too), so Round 7's artifacts lost the full per-feature importance ranking once
+    # the worktree was cleaned up -- only the top-20 above survived, print-only. Save
+    # the FULL table (every feature, not just A7's) to a non-gitignored path so the
+    # coordinator can see where H2H/Elo/rolling-stats/etc. rank alongside any new
+    # experimental features across runs.
+    full_importance_df = predictor.get_feature_importance(top_n=len(feature_cols))
+    full_importance_path = Path(f"outputs/a7_feature_importance_{args.run_name}.csv")
+    full_importance_df.to_csv(full_importance_path, index=False)
+    logger.info(f"Full feature importance ({len(full_importance_df)} features) saved -> {full_importance_path}")
+
     predictions = predictor.predict(X_test.head(10))
     examples_df = pd.DataFrame({
         'Date': test_features.head(10)['GAME_DATE'].values,

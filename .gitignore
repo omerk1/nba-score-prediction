@@ -13,6 +13,8 @@ data/processed/*
 !outputs/experiments.csv
 !outputs/a7_style_matchup_results.csv
 !outputs/a7_integration_test_results.csv
+!outputs/a7_fingerprint_features_results.csv
+!outputs/a7_feature_importance_*.csv
 
 # Python
 __pycache__/
