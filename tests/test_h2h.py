@@ -20,7 +20,7 @@ class TestH2HFeatures:
         mock_cfg = MagicMock()
         mock_cfg.elo_features = MagicMock(enabled=False)
         mock_cfg.injury_features = MagicMock(enabled=False)
-        mock_cfg.style_matchup = MagicMock(enabled=False)
+        mock_cfg.style_matchup = MagicMock(enabled=False, raw_features_enabled=False)
         mock_cfg.features.exclude = []
         return mock_cfg
 
@@ -143,7 +143,7 @@ class TestH2HFeatures:
         mock_cfg = MagicMock()
         mock_cfg.elo_features = MagicMock(enabled=False)
         mock_cfg.injury_features = MagicMock(enabled=False)
-        mock_cfg.style_matchup = MagicMock(enabled=False)
+        mock_cfg.style_matchup = MagicMock(enabled=False, raw_features_enabled=False)
         mock_cfg.features.exclude = []
         mock_config.return_value = mock_cfg
 

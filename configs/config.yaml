@@ -112,6 +112,13 @@ style_matchup:
   # of that test's outcome -- flipping this is the coordinator's decision, not
   # made unilaterally by that run. See docs/a7_phase_log.md Round 7.
   enabled: false
+  # `raw_features_enabled` gates the SEPARATE, independently-toggleable
+  # _add_style_fingerprint_features (Round 8 redesign: raw per-team fingerprint
+  # components + explicit home-vs-away differentials, mirroring
+  # _add_matchup_features's pattern -- no KNN similarity search at all, unlike
+  # `enabled` above). Left `false` as the committed default regardless of that
+  # round's outcome, same rule as `enabled`. See docs/a7_phase_log.md Round 8.
+  raw_features_enabled: false
   # Round 7 correction: fingerprint_window/decay_halflife/similarity_method/knn_k/
   # min_confidence_sample/full_confidence_sample below were the untuned Phase-0
   # defaults -- despite the design doc and phase log (Round 2/6) both documenting
