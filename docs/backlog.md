@@ -56,14 +56,15 @@
 ### A7: Style Matchup Score
 
 **Current Status:** Implemented and validated on branch `feature/a7-style-matchup` — Phases
-0-5 complete, plus four follow-up rounds: hyperparameter search + PCA/clustering/
+0-5 complete, plus five follow-up rounds: hyperparameter search + PCA/clustering/
 supervised-model comparison, a walk-forward CV robustness check (tuned config wins on
 every fold), a wrap-up round (fixed a z-score normalization leak, added minutes/usage data
-to archetype classification, isolated injury-adjustment's real marginal contribution), and
-a decay-weighted calibration fix (resolved the perimeter_specialist sign flip). A
-confirmatory hyperparameter-search rerun is in progress. Style signal robustly beats the A2
-H2H baseline across multiple independent validation folds. `style_matchup` is now a formally
-typed section of `configs/config.yaml` (`src/utils/config_loader.py`'s `StyleMatchupConfig`).
+to archetype classification, isolated injury-adjustment's real marginal contribution), a
+decay-weighted calibration fix (resolved the perimeter_specialist sign flip), and a
+confirmatory hyperparameter-search rerun (confirmed the standing config still wins under
+the normalization fix — no change). Style signal robustly beats the A2 H2H baseline across
+multiple independent validation folds. `style_matchup` is now a formally typed section of
+`configs/config.yaml` (`src/utils/config_loader.py`'s `StyleMatchupConfig`).
 Not yet integrated into `feature_builder.py`.
 
 All architecture decisions that used to be open here have been decided, implemented, and —

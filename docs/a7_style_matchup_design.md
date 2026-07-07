@@ -188,10 +188,10 @@ Full numbers, per-round detail, and every rejected alternative: `docs/a7_phase_l
 - Low-confidence fallback: H2H (confirmed).
 - Layer order: Layer 2 before Layer 3 (confirmed).
 
-**Open before integration:** the hyperparameter search that chose the current config
-predates a later-fixed normalization bug; a confirmatory rerun is in progress
-(phase log Round 6). `feature_builder.py` integration itself is a separate,
-not-yet-made decision.
+**Confirmed, no open items:** the hyperparameter search that chose the current config
+predated a later-fixed normalization bug; a rerun under the fix (phase log Round 6)
+found nothing better, confirming the config selection holds up. `feature_builder.py`
+integration itself is a separate, not-yet-made decision.
 
 ---
 
