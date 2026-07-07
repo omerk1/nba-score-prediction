@@ -48,7 +48,7 @@ import pandas as pd
 from src.matchups.config import PROJECT_ROOT
 from src.matchups.split import get_split_dates
 from src.matchups.tuning import evaluate_config, load_constants, run_optuna_search
-from src.matchups.wider_results import DEFAULT_HP_CONFIG, _full_row
+from src.matchups.experiments.wider_results import DEFAULT_HP_CONFIG, _full_row
 
 logger = logging.getLogger(__name__)
 

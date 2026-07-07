@@ -18,8 +18,8 @@ import numpy as np
 import pandas as pd
 
 from src.matchups.config import PROJECT_ROOT
-from src.matchups.hybrid_similarity import run_grid_search
-from src.matchups.recency_sweep import RECENCY_GRID, run_recency_sweep
+from src.matchups.experiments.hybrid_similarity import run_grid_search
+from src.matchups.experiments.recency_sweep import RECENCY_GRID, run_recency_sweep
 from src.matchups.tuning import build_idx_for_config, load_constants, run_search_inmemory
 from src.matchups.walkforward import FOLDS, REFERENCE_METHODS
 

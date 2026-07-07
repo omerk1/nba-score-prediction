@@ -19,11 +19,11 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from src.matchups.clustering import build_cluster_index
+from src.matchups.experiments.clustering import build_cluster_index
 from src.matchups.config import PROJECT_ROOT
-from src.matchups.encoding_pca import build_pca_matchup_index
+from src.matchups.experiments.encoding_pca import build_pca_matchup_index
 from src.matchups.split import get_split_dates
-from src.matchups.supervised import run_supervised_model
+from src.matchups.experiments.supervised import run_supervised_model
 from src.matchups.tuning import evaluate_config, load_constants, run_search_inmemory
 
 logger = logging.getLogger(__name__)

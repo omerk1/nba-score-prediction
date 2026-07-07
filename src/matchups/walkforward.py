@@ -59,7 +59,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from src.matchups.hybrid_similarity import HYBRID_HALFLIFE, HYBRID_WINDOW
+from src.matchups.experiments.hybrid_similarity import HYBRID_HALFLIFE, HYBRID_WINDOW
 from src.matchups.split import get_split_dates
 from src.matchups.tuning import build_fp_for_config, build_index_inmemory, load_constants, run_search_inmemory
 
