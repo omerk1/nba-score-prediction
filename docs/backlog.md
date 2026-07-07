@@ -53,117 +53,26 @@
 
 ## Phase 3: Feature Engineering Refinements
 
-### A7: Style Matchup Score (Architectural Review Needed)
+### A7: Style Matchup Score
 
-**Current Status:** Design doc complete, but flagged for architecture discussion
+**Current Status:** Implemented and validated on branch `feature/a7-style-matchup` — Phases
+0-5 complete, plus three follow-up rounds: a hyperparameter search + PCA/clustering/
+supervised-model comparison, a walk-forward CV robustness check (tuned config wins on
+every fold, not just one static split), and a wrap-up round (fixed a z-score normalization
+leak, added minutes/usage data to archetype classification, isolated injury-adjustment's
+real marginal contribution). Style signal robustly beats the A2 H2H baseline across
+multiple independent validation folds. `style_matchup` is now a formally typed section of
+`configs/config.yaml` (`src/utils/config_loader.py`'s `StyleMatchupConfig`). Not yet
+integrated into `feature_builder.py`.
 
-**User Concerns & Proposed Solutions:**
-
-#### 1. Player Archetypes — Replace Magic Numbers
-**Current:** Hard-coded thresholds
-```python
-"facilitator": {"ast": (3.5, inf), "ppg": (0, 14)}
-"scorer": {"ppg": (15, inf), "ast": (0, 4)}
-```
-
-**Options (to decide):**
-- **Option A:** Clustering (K-means on PPG, AST, REB, BLK, STL, FG%) — let data define 4-5 roles
-- **Option B:** Percentile-based (top 25% AST + bottom 25% PPG = facilitator) — scales with era
-- **Option C:** Team-relative archetypes (each team has own "scorer" definition)
-
-**Recommended:** Option B (percentile) — simpler than clustering, more robust than magic numbers
-
----
-
-#### 2. Injury Impact Shifts — Data-Driven Not Guessed
-**Current:** Hard-coded shifts per archetype
-```python
-"facilitator": {"assist_rate": -0.2, "pace_score": -0.1}
-```
-
-**Options (to decide):**
-- **Option A:** Empirical (query historical: for each player, measure actual team style shift when out vs in)
-- **Option B:** Regression (fit: team_style ~ archetype_availability + backup_availability)
-- **Option C:** Config + calibration (base values in config, tune on validation set)
-
-**Recommended:** Option A + store in config — empirical per-player-per-archetype shifts, calibrate from data
-
----
-
-#### 3. Similarity Metric — Fix Conceptual Gap
-**Current Issue:**
-```python
-similarity = cosine_similarity(normalized_home.values(), normalized_away.values())
-```
-Compares HOME style to AWAY style directly, but Layer 3 goal is to find similar *historical matchups* (home_style_then vs away_style_then ≈ home_style_now vs away_style_now).
-
-**Fix:** Concatenate into single vector
-```python
-current_matchup = [home_style_metrics] + [away_style_metrics]
-historical_matchup = [historical_home_metrics] + [historical_away_metrics]
-similarity = cosine_similarity(current_matchup, historical_matchup)
-```
-
----
-
-#### 4. Magic Numbers → Config
-**Move to config.yaml:**
-```yaml
-style_matchup:
-  fingerprint_window: 20           # games
-  decay_halflife: 5                # games
-  similarity_threshold: 0.80       # cosine
-  min_sample_size: 10              # games
-  archetype_method: "percentile"   # or "clustering", "hardcoded"
-  archetype_percentiles:
-    facilitator: {"ast_pct": 0.75, "ppg_pct": 0.25}
-    scorer: {"ppg_pct": 0.75, "ast_pct": 0.25}
-    # ... etc
-  injury_calibration: "empirical"  # or "static", "regression"
-```
-
-**Add:** Calibration script to tune thresholds on validation set
-
----
-
-#### 5. Known Infra Gaps (found during implementation planning)
-
-**Gap 1 — Phase 1 fingerprint inputs don't exist where expected.**
-`data/raw/nba_api.sqlite`'s `game` table only stores fg_pct/ft_pct/fg3_pct/ast/reb —
-no FGA, FGM, FTA, FG3A, TOV, which the pace/paint/3pt-reliance/assist-rate formulas
-need. `src/data_processing/fetch_data.py` already calls `nba_api.stats.endpoints.
-LeagueGameLog` for this table; that endpoint returns the missing columns too, they're
-just not selected/stored today.
-**Fix:** source raw box-score inputs from a fresh `LeagueGameLog` call (same
-convention as `fetch_data.py`), cached in a new additive table (not an `ALTER TABLE`
-on `game` — mirror the `player_stats_cache` pattern instead). Do **not** use
-`data/raw/basketball.sqlite` — a static one-time Kaggle dump (last touched
-2023-07-06), not part of the live pipeline, and not kept in sync.
-
-**Gap 2 — Phase 0 calibration needs player_id, injury records only have player_name.**
-`player_injuries` (in `data/raw/injury_features.sqlite`) stores `player_name` as free
-text with no `player_id`; `player_stats_cache` (needed for archetype classification)
-is keyed by `player_id`. No existing join key between them.
-**Fix:** resolve names via `nba_api.stats.static.players.get_players()` (same
-convention `src/news_scraping/pipeline.py:_resolve_team_id` already uses for teams
-via `nba_api.stats.static.teams`), disambiguating duplicate names using whichever
-candidate has `player_stats_cache` activity near the injury date. Track the overall
-resolution coverage rate — if low, Phase 0's calibration deltas are unreliable and
-that must be flagged, not silently ignored. Note: the doc's own Layer ablation
-(L1 only vs. L1+2 vs. L1+2+3) acts as a natural check here — if a bad join corrupts
-Layer 2, it'll show up as L1+2 correlating *worse* than L1 alone, not as a silently
-wrong "style signal works" conclusion.
-
----
-
-### A7 Decision Matrix
-
-| Item | Option A | Option B | Option C | Recommendation |
-|------|----------|----------|----------|---|
-| Archetypes | Clustering (complex) | Percentile (balanced) | Team-relative (overkill) | **B** |
-| Injury shifts | Empirical (data-driven) | Regression (model-based) | Config + tune (simpler) | **A + store in config** |
-| Similarity | Concat vectors | Separate metrics | Current (wrong) | **Concat vectors** |
-| Config | All hardcoded | All in config | Hybrid | **All in config** |
+All architecture decisions that used to be open here have been decided, implemented, and —
+where later questioned — re-validated with fresh scrutiny; see `docs/A7_PHASE_LOG.md` for
+what was actually built, tried, and found, rather than duplicating that detail here.
+`perimeter_specialist`'s injury-delta sign flip was traced to a small-sample/misclassification
+artifact (one player's long-term injury absence dominating the calibration sample) — a
+decay-weighted calibration fix for this is in progress as of this writing. The `combo`
+archetype was also redefined using real usage-rate data (previously a workaround); the
+recalibrated `injury_impact` values are already in `configs/config.yaml`.
 
 ---
 
@@ -190,17 +99,6 @@ hand-picked box-score-derived metrics (pace, 3pt reliance, paint activity, def r
 backfill time and rate-limit cost, bigger scope than the current box-score-only approach
 **Revisit when:** the current 5-metric encoding's ceiling looks limiting (e.g. Phase 2/PCA
 exploration plateaus below what richer inputs might unlock)
-
----
-
-## Decision Checklist for A7
-
-- [ ] Decide: Archetype method (percentile recommended)
-- [ ] Decide: Injury shift approach (empirical + config recommended)
-- [ ] Decide: Similarity metric fix (concat vectors)
-- [ ] Decide: Go with percentile implementation, empirical injury, config-everything approach?
-
-Once decided → implement in feature/a7-style-matchup
 
 ---
 
