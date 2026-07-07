@@ -56,21 +56,19 @@
 ### A7: Style Matchup Score
 
 **Current Status:** Implemented and validated on branch `feature/a7-style-matchup` — Phases
-0-5 complete, plus three follow-up rounds: a hyperparameter search + PCA/clustering/
+0-5 complete, plus four follow-up rounds: hyperparameter search + PCA/clustering/
 supervised-model comparison, a walk-forward CV robustness check (tuned config wins on
-every fold, not just one static split), and a wrap-up round (fixed a z-score normalization
-leak, added minutes/usage data to archetype classification, isolated injury-adjustment's
-real marginal contribution). Style signal robustly beats the A2 H2H baseline across
-multiple independent validation folds. `style_matchup` is now a formally typed section of
-`configs/config.yaml` (`src/utils/config_loader.py`'s `StyleMatchupConfig`). Not yet
-integrated into `feature_builder.py`.
+every fold), a wrap-up round (fixed a z-score normalization leak, added minutes/usage data
+to archetype classification, isolated injury-adjustment's real marginal contribution), and
+a decay-weighted calibration fix (resolved the perimeter_specialist sign flip). A
+confirmatory hyperparameter-search rerun is in progress. Style signal robustly beats the A2
+H2H baseline across multiple independent validation folds. `style_matchup` is now a formally
+typed section of `configs/config.yaml` (`src/utils/config_loader.py`'s `StyleMatchupConfig`).
+Not yet integrated into `feature_builder.py`.
 
 All architecture decisions that used to be open here have been decided, implemented, and —
-where later questioned — re-validated with fresh scrutiny; see `docs/A7_PHASE_LOG.md` for
-what was actually built, tried, and found, rather than duplicating that detail here.
-`perimeter_specialist`'s injury-delta sign flip was traced to a small-sample/misclassification
-artifact (one player's long-term injury absence dominating the calibration sample) — a
-decay-weighted calibration fix for this is in progress as of this writing. The `combo`
+where later questioned — re-validated with fresh scrutiny; see `docs/a7_phase_log.md` for
+what was actually built, tried, and found, rather than duplicating that detail here. The `combo`
 archetype was also redefined using real usage-rate data (previously a workaround); the
 recalibrated `injury_impact` values are already in `configs/config.yaml`.
 
