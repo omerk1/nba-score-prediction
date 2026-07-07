@@ -1836,3 +1836,170 @@ folded back through calibration before this is treated as fully final. Barring t
 evidentiary case for integration is now about as strong as an exploratory module's case
 reasonably gets without live A/B validation.
 
+---
+
+## DECAY-WEIGHTED CALIBRATION FIX ROUND (fifth unattended pass, branch `work/a7-decay-calibration`)
+
+### Decay-weighted injury-impact calibration (fixing item #3's flagged issue)
+**Status:** complete
+
+**Context:** the wrap-up round's item #3 diagnosed (but explicitly did NOT fix, as a
+documented scope cut) `perimeter_specialist`'s `defensive_rating` calibration sign flip
+(-0.0889, should be positive per basketball intuition and the design doc's original
+guess): of 680 qualifying `Out`-event rows, Collin Sexton's ~5-month continuous
+ACL-recovery absence alone contributed 127 rows; excluding his rows alone flips the delta
+to +0.9566. Root cause: calibration.py's Phase 0 empirical calibration treated every
+qualifying `Out` team-game identically regardless of how far into a continuous absence it
+fell, and a multi-month continuous absence is not a clean repeated natural experiment —
+deep into it, a team's roster/rotation/trades increasingly reflect adaptation, not the
+marginal effect of the one absence. This round implements the fix item #3 recommended
+investigating: decay-weight each `Out`-event by its position in its continuous absence
+streak, rather than a hard cutoff on absence length (an equally arbitrary, unexplored
+threshold the human coordinator explicitly asked to avoid in favor of a decay approach).
+
+**What was built:**
+1. `calibration.py`: `_out_events_by_player()` (player-granularity `Out` events, refactored
+   out of the pre-existing `_out_players_by_team_date()`, which now just collapses this to
+   the archetype-presence view it always produced); `_streak_positions()` reconstructs,
+   per (player_id, team_id), each event's position within its continuous absence streak
+   against that team's actual qualifying game schedule (1 = first game of the absence, 2 =
+   second consecutive game, ...; a qualifying team-game where the player was NOT reported
+   Out, or a gap in the team's qualifying schedule, ends the streak); `_archetype_event_weights()`
+   converts streak position to a decay weight per (game_date, team_id) key, taking the
+   LEAST-contaminated (max weight / min streak position) player when multiple same-archetype
+   players are Out simultaneously — mirrors the existing "max, not summed" convention
+   `injury_layer.py` already uses for severity multipliers in the identical situation.
+2. `fingerprint.py`: pulled the decay formula out of `_decayed_weighted_mean` into a new
+   `_decay_weight(position, halflife) = 0.5 ** (position / halflife)` function (pure
+   refactor, numerically identical for existing callers) so calibration.py's streak
+   weighting reuses the EXACT SAME mechanism as the fingerprint's rolling-window recency
+   weighting, per the task's explicit instruction, rather than reimplementing the math.
+3. `compute_deltas()` (refactored out of `run_calibration()`, shared with the exploration
+   script below): each archetype's delta is now `weighted_mean(missing_rows, weights) -
+   mean(baseline_rows)` — baseline games are never part of an absence streak, so the
+   baseline side stays an unweighted mean, exactly as specified.
+4. `decay_calibration_results.py` (new, exploration-only): tries a halflife grid and
+   reports every archetype's delta plus Collin Sexton's / Otto Porter Jr.'s weighted
+   contribution to the `perimeter_specialist` sample, reusing `prepare_calibration_inputs()`
+   / `compute_deltas()` so streak reconstruction (halflife-independent) runs once, not once
+   per grid value.
+5. `decay_calibration_sanity_check.py` (new): re-runs item #2's existing layer-ablation
+   harness (`injury_ablation.py`'s primitives, not rebuilt) for `wider_exploration_best`
+   post-fix, to confirm Layer 2 still helps.
+
+**Halflife grid explored:** 5, 10, 20, 40, and 10000 (a practically-no-decay reference —
+at streak position 200, weight = 0.5**(200/10000) = 0.986, i.e. no meaningful downweighting
+even for extreme streaks). All values are in consecutive QUALIFYING team-games (the same
+scraped-date-restricted universe calibration.py already uses), not calendar days.
+
+**Key findings — every archetype's delta by halflife:**
+
+| halflife | facilitator assist_rate | facilitator pace_score | scorer 3pt_reliance | scorer paint_activity | combo pace_score | combo 3pt_reliance | combo paint_activity | combo def_rating | combo assist_rate | rim_protector def_rating | rim_protector paint_activity | **perimeter_specialist def_rating** |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5 | -0.0186 | -3.2836 | 0.0042 | 0.7319 | -0.0755 | -0.0013 | 0.0148 | 0.6752 | -0.0039 | 0.3949 | -0.2827 | **+0.6858** |
+| 10 | -0.0150 | -2.7086 | 0.0086 | 0.5295 | -0.2704 | -0.0020 | 0.0206 | 0.6229 | -0.0044 | 0.4081 | -0.2747 | **+0.5122** |
+| **20 (chosen)** | -0.0118 | -2.1600 | 0.0139 | 0.3662 | -0.4059 | -0.0026 | 0.0367 | 0.5902 | -0.0048 | 0.4281 | -0.2729 | **+0.2948** |
+| 40 | -0.0095 | -1.7697 | 0.0182 | 0.3101 | -0.4910 | -0.0031 | 0.0528 | 0.5737 | -0.0052 | 0.4448 | -0.2745 | **+0.1231** |
+| 10000 (no decay) | -0.0067 | -1.2744 | 0.0236 | 0.3436 | -0.5958 | -0.0038 | 0.0778 | 0.5611 | -0.0056 | 0.4686 | -0.2800 | **-0.0880** |
+
+(10000-row values are numerically ~= the wrap-up round's -0.0889/etc — small differences
+are box-score-cache refresh noise between rounds, not a methodology change at this halflife.)
+
+- **`perimeter_specialist`'s sign flips positive between halflife=40 and halflife=20** and
+  gets progressively more positive as halflife shrinks further (+0.1231 at 40, +0.2948 at
+  20, +0.5122 at 10, +0.6858 at 5) — converging toward the leave-one-out
+  Sexton-excluded value (+0.9566) from item #3, as expected, since more aggressive decay
+  increasingly resembles excluding his rows outright.
+- **This is a general mechanism fix, not perimeter_specialist-specific — every other
+  archetype shifts too:** `combo`'s `pace_score` delta shrinks from -0.5958 (no decay) to
+  -0.0755 (halflife=5), an 87% reduction in magnitude at the most aggressive setting;
+  `facilitator`'s `pace_score` delta MORE than doubles in magnitude (-1.2744 -> -3.2836,
+  +157%) at halflife=5 — no sign flips for these, but genuinely material movement.
+  `rim_protector`'s `defensive_rating`/`paint_activity` are the most stable across the
+  whole grid (0.395-0.469 and -0.273 to -0.283 respectively) — consistent with it having
+  the largest, least single-player-concentrated sample (n_without=4025) and no diagnosed
+  contamination problem.
+- **Collin Sexton / Otto Porter Jr.'s weighted contribution to the `perimeter_specialist`
+  sample visibly shrinks as halflife decreases, as expected:**
+
+  | halflife | Sexton pct of sample weight | Porter pct of sample weight | combined |
+  |---|---|---|---|
+  | 5 | 13.41% | 15.47% | 28.9% |
+  | 10 | 13.69% | 15.76% | 29.4% |
+  | 20 | 14.75% | 16.70% | 31.5% |
+  | 40 | 16.12% | 17.85% | 34.0% |
+  | 10000 (no decay) | 18.77% | 19.96% | **38.7%** (matches item #3's raw-count finding of ~38%) |
+
+- **Effective (weighted) sample retention per archetype by halflife** (sum of weights /
+  number of qualifying team-game-archetype keys — how much of the raw sample survives
+  decay-weighting):
+
+  | halflife | facilitator | scorer | combo | rim_protector | perimeter_specialist |
+  |---|---|---|---|---|---|
+  | 5 | 0.681 | 0.587 | 0.724 | 0.732 | 0.612 |
+  | 10 | 0.793 | 0.675 | 0.828 | 0.839 | 0.714 |
+  | 20 | 0.876 | 0.763 | 0.899 | 0.909 | 0.803 |
+  | 40 | 0.931 | 0.847 | 0.944 | 0.951 | 0.877 |
+  | 10000 | 1.000 | 0.999 | 1.000 | 1.000 | 0.999 |
+
+**Halflife chosen: 20.** Reasoned criterion: the smallest grid value at which
+`perimeter_specialist`'s delta is UNAMBIGUOUSLY positive with real margin (+0.2948, not a
+razor-thin crossing like halflife=40's +0.1231, which is still small enough to look
+fragile in the same way -0.0889 did) while every OTHER archetype retains at least ~76% of
+its effective sample weight (worst case: `scorer` at 76.3%) — i.e. decay is not
+"discarding most of the effective sample" for archetypes that don't have this problem.
+Halflife=10 was considered and rejected: it strengthens `perimeter_specialist` further
+(+0.5122) but costs materially more effective sample for archetypes with no diagnosed
+issue (`scorer` drops to 67.5% retention, `facilitator`'s `pace_score` delta more than
+doubles in magnitude) for a benefit that's already resolved at halflife=20. This matches
+the criterion the task suggested nearly verbatim: smallest halflife that resolves the sign
+flip without discarding most of the effective sample elsewhere.
+
+**Config + cache updates:**
+- `configs/config.yaml`: added `style_matchup.injury_calibration_decay_halflife_games: 20`;
+  replaced `injury_impact` with the halflife=20 decay-weighted deltas above; kept the
+  halflife=10000 (no-decay) values as an inline comment for traceability, per this file's
+  existing convention.
+- Rebuilt `injury_layer.build_injury_adjusted_fingerprints()` (layer=2 cache) against the
+  new deltas: 6295/25436 (24.75%) team-games adjusted (same adjustment RATE as before — only
+  the archetype deltas changed, not which team-games qualify for adjustment).
+
+**Walk-forward CV sanity check (layer=2 vs layer=1, `wider_exploration_best`, reusing
+`injury_ablation.py`'s harness unmodified):**
+
+| fold | layer1 (no injury adj) | layer2 POST-fix (halflife=20) | layer2 PRE-fix (item #2) |
+|---|---|---|---|
+| 1 (2021-22) | 0.2450 | 0.2544 | 0.2492 |
+| 2 (2022-23) | 0.1978 | 0.2089 | 0.2091 |
+| 3 (2023-24) | 0.2685 | 0.2673 | 0.2707 |
+| 4 (2024-25) | 0.3147 | 0.3223 | 0.3228 |
+| **mean** | **0.2565** | **0.2632** | **0.2630** |
+
+Layer 2 still beats Layer 1 on mean corr post-fix (+0.0067 vs. the pre-fix +0.0065 — the
+decay-weighting fix left the headline benefit essentially unchanged). Fold 3 is the one
+exception: layer2 is now marginally BELOW layer1 (0.2673 vs 0.2685, -0.0012) where it was
+marginally above pre-fix (+0.0022) — an immaterial sign flip on a already-tiny per-fold
+delta, not a regression in the aggregate. **Conclusion: Layer 2 still helps after the fix;
+no regression in what was previously validated.**
+
+**Fallbacks used:**
+- Streak reconstruction uses the fingerprint table's own (scraped-date-restricted,
+  min_games-filtered) team-game universe as each team's "qualifying schedule" rather than
+  the team's full raw game log, since that's the exact universe `compute_deltas()` draws
+  `missing_rows`/`baseline_rows` from anyway — consistent by construction, documented
+  in `_streak_positions()`'s docstring rather than treated as a silent simplification.
+- When multiple same-archetype players are Out simultaneously (rare), the archetype-level
+  weight uses the min streak position (max weight) among them rather than combining
+  weights — an explicit modeling choice (mirrors `injury_layer.py`'s existing severity-
+  multiplier convention for the same situation), not a fallback under time pressure.
+- `decay_calibration_sanity_check.py` only re-ran `wider_exploration_best` (the "tuned
+  winning config" the task named), not `default_handpicked` — item #2's original ablation
+  already covers both, and re-confirming the untuned reference wasn't necessary for this
+  fix's sanity check.
+
+**Recommended next step:** integrate. This closes the last open methodological objection
+(item #3) from the wrap-up round without needing a hard, unexplored cutoff — the decay
+mechanism resolves the flagged sign-flip artifact, generalizes correctly to every
+archetype (not just the one that motivated it), and the walk-forward sanity check confirms
+Layer 2's previously-validated benefit survives the fix intact.
+

@@ -62,12 +62,23 @@ def _load_raw_team_game_metrics() -> pd.DataFrame:
     )
 
 
+def _decay_weight(position, halflife: float):
+    """weight = 0.5 ** (position / halflife). Pulled out as its own function so the
+    identical decay math can be reused elsewhere in the project rather than reimplemented
+    -- e.g. calibration.py's decay-weighted injury-impact calibration reuses this directly
+    for down-weighting Out-events by their position in a continuous absence streak (see
+    docs/A7_PHASE_LOG.md "Decay-weighted injury-impact calibration"). Accepts a scalar or
+    an array; `position` here is "age" (0 = most recent) for the rolling-window use below,
+    or "streak index" (1 = first game of an absence) for calibration.py's use."""
+    return 0.5 ** (np.asarray(position, dtype=float) / halflife)
+
+
 def _decayed_weighted_mean(values: np.ndarray, halflife: float) -> float:
     n = len(values)
     if n == 0:
         return np.nan
     age = np.arange(n - 1, -1, -1)  # most recent -> age 0
-    weights = 0.5 ** (age / halflife)
+    weights = _decay_weight(age, halflife)
     mask = ~np.isnan(values)
     if not mask.any():
         return np.nan

@@ -108,6 +108,11 @@ style_matchup:
   # docs/A7_PHASE_LOG.md for how these values were chosen.
   fingerprint_window: 20
   decay_halflife: 5
+  # Halflife (consecutive qualifying team-games) for calibration.py's decay-weighted
+  # injury-impact calibration -- see the injury_impact block below + this run's phase-log
+  # section ("Decay-weighted injury-impact calibration") for the halflife grid explored
+  # (5/10/20/40/10000-as-no-decay-reference) and why 20 was chosen.
+  injury_calibration_decay_halflife_games: 20
   encoding: hand_picked
   similarity_method: cosine   # cosine | knn -- see Phase 3 findings in phase log
   similarity_threshold: 0.70
@@ -132,21 +137,44 @@ style_matchup:
   # See docs/A7_PHASE_LOG.md item #1 / item #3 for the full old-vs-new comparison and the
   # perimeter_specialist sign-flip investigation (sign is UNCHANGED by this recalibration --
   # still negative -- but magnitude shrinks substantially, from -0.3131 to -0.0889).
+  #
+  # "Decay-weighted injury-impact calibration" round (this run): item #3's finding traced
+  # the -0.0889 sign flip almost entirely to Collin Sexton's ~5-month continuous
+  # ACL-recovery absence (127 of 680 qualifying perimeter_specialist event-rows) --
+  # excluding his rows alone flips the sign to +0.9566. Rather than a hard cutoff on
+  # absence length, calibration.py now down-weights each qualifying Out-event by an
+  # exponential decay on its position within its continuous absence streak (1 = first
+  # game of the absence, ...), halflife = injury_calibration_decay_halflife_games above
+  # (=20), using the same weight = 0.5**(position/halflife) mechanism fingerprint.py's
+  # rolling-window recency weighting already uses. All 5 archetypes' deltas below are now
+  # DECAY-WEIGHTED (not just perimeter_specialist -- this is a general mechanism change).
+  # PRE-DECAY (halflife=10000, i.e. no meaningful decay -- numerically ~= the previous
+  # values above, small differences are box-score-cache refresh noise) values kept here
+  # for traceability:
+  #   facilitator: assist_rate=-0.0067, pace_score=-1.2744
+  #   scorer:      three_pt_reliance=0.0236, paint_activity=0.3436
+  #   combo:       pace_score=-0.5958, three_pt_reliance=-0.0038, paint_activity=0.0778,
+  #                defensive_rating=0.5611, assist_rate=-0.0056
+  #   rim_protector:        defensive_rating=0.4686, paint_activity=-0.28
+  #   perimeter_specialist: defensive_rating=-0.0880 (SIGN FLIPPED positive by the fix below)
+  # See docs/A7_PHASE_LOG.md "Decay-weighted injury-impact calibration" for the full
+  # per-halflife table (5/10/20/40/10000) across every archetype and the Sexton/Porter
+  # contribution-shrinkage numbers that justified halflife=20.
   injury_impact:
     facilitator:
-      assist_rate: -0.0066
-      pace_score: -1.2722
+      assist_rate: -0.0118
+      pace_score: -2.16
     scorer:
-      three_pt_reliance: 0.0237
-      paint_activity: 0.344
+      three_pt_reliance: 0.0139
+      paint_activity: 0.3662
     combo:
-      pace_score: -0.5963
-      three_pt_reliance: -0.0038
-      paint_activity: 0.078
-      defensive_rating: 0.561
-      assist_rate: -0.0056
+      pace_score: -0.4059
+      three_pt_reliance: -0.0026
+      paint_activity: 0.0367
+      defensive_rating: 0.5902
+      assist_rate: -0.0048
     rim_protector:
-      defensive_rating: 0.4687
-      paint_activity: -0.28
+      defensive_rating: 0.4281
+      paint_activity: -0.2729
     perimeter_specialist:
-      defensive_rating: -0.0889
+      defensive_rating: 0.2948

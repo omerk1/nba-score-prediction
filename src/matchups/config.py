@@ -29,6 +29,13 @@ CACHE_DB = str(PROJECT_ROOT / "outputs" / "a7_matchups_cache.sqlite")
 DEFAULT_STYLE_MATCHUP_CONFIG: dict[str, Any] = {
     "fingerprint_window": 20,
     "decay_halflife": 5,
+    # Halflife (in consecutive qualifying team-games) for calibration.py's decay-weighted
+    # injury-impact calibration -- down-weights Out-events by their position in a
+    # continuous absence streak (fix for the perimeter_specialist sign-flip artifact
+    # caused by long single-player absences dominating the sample). See
+    # calibration.py's DEFAULT_DECAY_HALFLIFE_GAMES and docs/A7_PHASE_LOG.md
+    # "Decay-weighted injury-impact calibration" for the halflife grid explored.
+    "injury_calibration_decay_halflife_games": 20,
     "encoding": "hand_picked",
     "pca_n_components": 5,
     "similarity_method": "cosine",
