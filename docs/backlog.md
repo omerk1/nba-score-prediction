@@ -49,6 +49,38 @@
 **Output:** DataFrame with game_id, spread, over_under, implied_probability, timestamp
 **Note:** Lower priority until data source identified
 
+### B4: Season Motivation Signal (revised from an earlier "tanking/playoff status" idea)
+**Status:** Planned — revised before building, original spec was too rigid
+**Original idea (dropped, found in earlier session history):** hard seed-range cutoffs
+(bottom-4 = tanking, top-4 = secure, 8-14 = playoff race, 8-10 = playin) producing binary
+`home_team_tanking`/`home_team_playoff_race` (0/1) columns.
+**Why revised:** both the seed cutoffs and the 0/1 output are exactly the kind of
+unexplored magic numbers A7's work found repeatedly costly — hardcoded thresholds
+guessed upfront rather than derived from data, and a binary flag throws away information
+a continuous signal would preserve.
+**Revised goal:** a continuous "how much is this team playing to win" signal instead of a
+hardcoded seed-bucket flag. Two data-driven ingredients to explore, not assume:
+  - Standings-based: distance from the playoff line computed dynamically from actual
+    current standings, not a fixed seed range.
+  - **Roster-quality-based (new idea):** compare the quality of the players actually in a
+    given game's rotation (using A3 player projections/stats) against that team's
+    season-long "full-strength" rotation quality. A team resting good, healthy players is
+    a more direct tanking signal than a seed threshold, and reuses A3/B1/B2 infrastructure
+    already planned rather than needing new data.
+**Data sources:** A3 (player quality), standings data, B1/B2 (roster availability).
+**Output:** a continuous score (not a 0/1 flag) — if any bucketing is used at all, treat
+the cutoffs as a tuned/explored parameter, not a guess.
+
+### B5: Playoff Seed Already Clinched (split off from the same original idea)
+**Status:** Planned — split out because it's a genuinely different signal from B4
+**Goal:** whether a team's playoff seed (or lottery position band) is already
+mathematically locked at the time of a given game, computed cleanly from standings +
+remaining schedule — distinct from B4's motivation signal, since a team can have nothing
+left to play for without it being "tanking" (e.g. seed locked in with weeks to go).
+**Data sources:** standings + remaining schedule (games left, other teams' records).
+**Output:** a continuous proxy (e.g. games until mathematically clinched) preferred over
+a binary flag, same reasoning as B4.
+
 ---
 
 ## Phase 3: Feature Engineering Refinements
