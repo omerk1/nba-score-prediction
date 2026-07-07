@@ -346,13 +346,27 @@ def build_idx_for_config(
 # Optuna search (item #1)
 # ---------------------------------------------------------------------------
 
-def run_optuna_search(n_trials: int = 40, layer: int = 2, seed: int = 42) -> dict:
+def run_optuna_search(
+    n_trials: int = 40, layer: int = 2, seed: int = 42, zscore_point_in_time: bool = False,
+) -> dict:
+    """`zscore_point_in_time` (hyperparameter-search recheck, post z-score-fix
+    confirmation): if True, the z-score mean/std used to build matchup vectors are
+    fit only on fingerprint rows strictly before `train_end` (the static guardrail
+    split's own train/validation boundary) -- applied consistently to both the
+    train (selection) and validation (report) evaluation windows, and to the
+    hand-picked default's re-evaluation on the same splits. Mirrors exactly how
+    walkforward.py's `zscore_point_in_time` fits each fold's stats on data strictly
+    before that fold's `validation_start` -- same mechanism (item #7's
+    `zscore_cutoff_date`), just applied to this single static split instead of
+    per-fold. Default False preserves the OLD (leaky, global-stats) behavior this
+    function has always had, so no existing caller silently changes behavior."""
     import optuna
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     consts = load_constants()
     splits = get_split_dates()
     train_start, train_end = splits["train_start"], splits["train_end"]
+    zscore_cutoff = train_end if zscore_point_in_time else None
 
     def objective(trial: "optuna.Trial") -> float:
         window = trial.suggest_int("fingerprint_window", 10, 40)
@@ -367,6 +381,7 @@ def run_optuna_search(n_trials: int = 40, layer: int = 2, seed: int = 42) -> dic
             consts, window=window, halflife=halflife, method=method,
             threshold=threshold, k=k, min_confidence_sample=min_conf, full_confidence_sample=full_conf,
             eval_start=train_start, eval_end=train_end, layer=layer,
+            zscore_cutoff_date=zscore_cutoff,
         )
         return result["corr"]
 
@@ -388,6 +403,7 @@ def run_optuna_search(n_trials: int = 40, layer: int = 2, seed: int = 42) -> dic
         k=best_params["knn_k"], min_confidence_sample=best_params["min_confidence_sample"],
         full_confidence_sample=best_params["full_confidence_sample"],
         eval_start=train_start, eval_end=train_end, layer=layer,
+        zscore_cutoff_date=zscore_cutoff,
     )
     val_eval = evaluate_config(
         consts, window=best_params["fingerprint_window"], halflife=best_params["decay_halflife"],
@@ -395,6 +411,7 @@ def run_optuna_search(n_trials: int = 40, layer: int = 2, seed: int = 42) -> dic
         k=best_params["knn_k"], min_confidence_sample=best_params["min_confidence_sample"],
         full_confidence_sample=best_params["full_confidence_sample"],
         eval_start=splits["validation_start"], eval_end=splits["validation_end"], layer=layer,
+        zscore_cutoff_date=zscore_cutoff,
     )
 
     # Also evaluate the PREVIOUS run's hand-picked default (window=20, halflife=5,
@@ -404,11 +421,31 @@ def run_optuna_search(n_trials: int = 40, layer: int = 2, seed: int = 42) -> dic
         consts, window=20, halflife=5.0, method="cosine", threshold=0.70, k=30,
         min_confidence_sample=10, full_confidence_sample=50,
         eval_start=train_start, eval_end=train_end, layer=layer,
+        zscore_cutoff_date=zscore_cutoff,
     )
     default_val = evaluate_config(
         consts, window=20, halflife=5.0, method="cosine", threshold=0.70, k=30,
         min_confidence_sample=10, full_confidence_sample=50,
         eval_start=splits["validation_start"], eval_end=splits["validation_end"], layer=layer,
+        zscore_cutoff_date=zscore_cutoff,
+    )
+
+    # Also evaluate the OLD wider-exploration-run winning config (window=37,
+    # halflife=13.2, knn k=81, min/full_confidence=21/82) on these exact same
+    # splits under the SAME normalization as everything else here -- this is the
+    # fair apples-to-apples "old config, corrected normalization" comparison point
+    # (its previously-reported 0.218/0.323 numbers used the OLD leaky global fit).
+    old_best_train = evaluate_config(
+        consts, window=37, halflife=13.199390932957819, method="knn", threshold=0.7, k=81,
+        min_confidence_sample=21, full_confidence_sample=82,
+        eval_start=train_start, eval_end=train_end, layer=layer,
+        zscore_cutoff_date=zscore_cutoff,
+    )
+    old_best_val = evaluate_config(
+        consts, window=37, halflife=13.199390932957819, method="knn", threshold=0.7, k=81,
+        min_confidence_sample=21, full_confidence_sample=82,
+        eval_start=splits["validation_start"], eval_end=splits["validation_end"], layer=layer,
+        zscore_cutoff_date=zscore_cutoff,
     )
 
     summary = {
@@ -420,8 +457,11 @@ def run_optuna_search(n_trials: int = 40, layer: int = 2, seed: int = 42) -> dic
         "validation_n_games": val_eval["n_games"],
         "default_train_corr": default_train["corr"],
         "default_validation_corr": default_val["corr"],
+        "old_best_train_corr": old_best_train["corr"],
+        "old_best_validation_corr": old_best_val["corr"],
         "n_trials": n_trials,
         "layer": layer,
+        "zscore_point_in_time": zscore_point_in_time,
     }
     logger.info(f"Optuna search summary: {summary}")
     return summary

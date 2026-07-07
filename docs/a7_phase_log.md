@@ -1,10 +1,10 @@
 # A7 Style Matchup — Phase Log
 
-Condensed record of what was built, tried, and found across six work rounds (five
-complete, one in progress). Full historical detail (per-fold tables, centroid dumps,
-halflife grids) lived here in earlier drafts — trimmed for conciseness; the numbers
-that mattered are kept below. All code lives in `src/matchups/` (not imported by
-`feature_builder.py` — exploratory, not yet integrated).
+Condensed record of what was built, tried, and found across six work rounds (all six
+now complete). Full historical detail (per-fold tables, centroid dumps, halflife grids)
+lived here in earlier drafts — trimmed for conciseness; the numbers that mattered are
+kept below. All code lives in `src/matchups/` (not imported by `feature_builder.py` —
+exploratory, not yet integrated).
 
 ---
 
@@ -22,10 +22,13 @@ sign-flip artifact) — not just parameter tuning. Not yet integrated into
 knn_k=81, min_confidence_sample=21, full_confidence_sample=82, layer=2 (injury-adjusted),
 injury_calibration_decay_halflife_games=20`.
 
-**One open item, low risk:** the hyperparameter search that found this config ran
-before the z-score fix. The fix was confirmed not to change which config wins (walk-
-forward CV), but the search itself was never rerun under corrected normalization — a
-confirmatory rerun is in progress (Round 6).
+**Round 6 closed the last open item.** The hyperparameter search that found this config
+ran before the z-score fix; Round 4 confirmed the fix didn't change which config wins
+(walk-forward CV) but never reran the search itself under corrected normalization.
+Round 6 reran it (identical search space/trials/seed) — the corrected-normalization
+search's own best config does not beat the standing recommendation above (re-evaluated
+under the same corrected normalization: 0.220 train / 0.321 validation vs. the new
+search's 0.208 train / 0.319 validation). No config change.
 
 ---
 
@@ -170,11 +173,40 @@ regression.
 
 ---
 
-## Round 6 — Hyperparameter search recheck (in progress)
+## Round 6 — Hyperparameter search recheck
 
-Rerunning the Round 2 Optuna search under the Round 4 z-score fix, to close the one
-residual gap above. Narrow scope: confirm the existing config still wins, or find and
-CV-validate a genuinely better one. Not yet complete — results to be appended here.
+Reran the Round 2 Optuna search (`tuning.run_optuna_search`, identical search space,
+40 trials, TPE, seed=42) under Round 4's z-score fix — the one residual gap Round 4
+explicitly flagged and left open (the fix was verified against the walk-forward harness,
+never against the search that originally produced this config). New
+`zscore_point_in_time` flag on `run_optuna_search` reuses the existing
+`zscore_cutoff_date` mechanism, fit once at `train_end_date` (2024-04-14) and applied to
+both the train (selection) and validation (report) windows — same principle as the
+per-fold fix, just for one static cutoff instead of five.
+
+**All four numbers below use identical corrected normalization — a genuine
+apples-to-apples table:**
+
+| config | train corr | validation corr |
+|---|---|---|
+| untuned default (window=20/halflife=5/cosine@0.70) | 0.176 | 0.288 |
+| new search's best (window=40/halflife=7.56/knn k=103/min_conf=26/full_conf=84) | 0.208 | 0.319 |
+| **standing config** (window=37/halflife=13.2/knn k=81/min_conf=21/full_conf=82) | **0.220** | **0.321** |
+
+- The standing config's own numbers barely moved from its originally-reported
+  (leaky-normalization) 0.218/0.323 — confirms Round 4's general finding that this fix
+  doesn't differentially affect already-tuned configs.
+- **The fresh 40-trial search did not find anything better — its own best config scores
+  *below* the standing config on both splits**, under the identical metric it was
+  selecting on. The new config is a minor variation in the same neighborhood (large
+  window, KNN, large k), not a different regime; the shortfall is small (~0.01-0.02, well
+  within the ~0.05-0.07 fold-to-fold noise seen elsewhere in this project) and most
+  plausibly reflects ordinary TPE search variance (observed objective values shift under
+  corrected normalization, so even a fixed seed's trial trajectory diverges from the
+  original run).
+- **Conclusion: the original config selection holds up.** This is the expected,
+  hoped-for outcome — no config change, no further validation spend (per instructed
+  scope, a "reconfirms" result doesn't trigger a walk-forward CV re-check).
 
 ---
 
