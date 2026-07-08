@@ -1,11 +1,13 @@
 """
-Item #7 of the wrap-up round: per-fold (point-in-time) z-score normalization fix.
+Part of the Critique & Bug-Fix Pass: per-fold (point-in-time) z-score normalization
+fix.
 
 Writes a side-by-side OLD (leaky global z-score) vs NEW (corrected, point-in-time
 per-fold z-score) comparison into outputs/a7_style_matchup_results.csv, extending the
 schema with one new column (`zscore_point_in_time`, True/False/blank) rather than
 overloading any existing column -- old rows get a blank value for this column via the
-generic column-union append logic below (mirrors walkforward_results.py's approach).
+generic column-union append logic below (mirrors walkforward_4fold_results.py's
+approach).
 
 See matchup_index.py / tuning.py / walkforward.py docstrings for the actual fix; this
 module only re-runs the walk-forward harness in both modes and records the comparison.
@@ -139,7 +141,7 @@ def build_and_write_rows() -> dict:
             }
 
     _append_rows_generic(rows)
-    logger.info(f"Item #7 comparison: {comparison}")
+    logger.info(f"Z-score normalization fix comparison: {comparison}")
     return comparison
 
 

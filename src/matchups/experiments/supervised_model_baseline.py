@@ -1,7 +1,7 @@
 """
-Item #3: a genuinely different paradigm -- a small supervised model trained
-directly on the concatenated matchup vector to predict actual_home_margin,
-instead of "look up similar historical games and average their margins."
+A genuinely different paradigm -- a small supervised model trained directly on
+the concatenated matchup vector to predict actual_home_margin, instead of "look
+up similar historical games and average their margins."
 
 Uses CatBoost (already a project dependency, same usage convention as
 train_model.py -- CatBoostRegressor, not a from-scratch implementation) on the
@@ -15,8 +15,8 @@ no additional leakage risk is introduced by fitting a model on top, since the
 model only ever sees pre-game vectors and the target itself is next.
 
 Hyperparameter selection: NOT run through the full Optuna joint search (out of
-scope per the instructions -- item #3's ask is "does this paradigm beat lookup",
-not "what's the optimal catboost config for this paradigm"). Instead a small,
+scope -- the question here is "does this paradigm beat lookup", not "what's the
+optimal catboost config for this paradigm"). Instead a small,
 fixed, reasonable config is used (depth=4, learning_rate=0.05, iterations=300,
 early stopping on an internal chronological dev slice carved out of the tail of
 the TRAIN split -- never touching the true validation split during fitting/early-

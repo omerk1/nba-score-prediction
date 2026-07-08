@@ -1,5 +1,6 @@
 """
-Item #2 of the walk-forward-CV run: the KNN-with-similarity-floor hybrid method.
+The KNN-with-similarity-floor hybrid method, tested as part of the Walk-Forward CV
+Check stage.
 
 Motivation (reviewer's concern, restated): plain KNN as implemented in similarity.py/
 tuning.py always forces exactly `k` neighbors once enough history exists, regardless
@@ -15,8 +16,9 @@ was needed; this is exactly how the pipeline already behaves for cosine, just fe
 different n_similar computation.
 
 Search protocol: this module performs a real 2D grid search over (k, floor_threshold),
-NOT a hand-picked pair, using the SAME guardrail train/validation split as item #1's
-Optuna search (src/matchups/split.py) -- selected on TRAIN, reported on validation.
+NOT a hand-picked pair, using the SAME guardrail train/validation split as the
+Hyperparameter Search stage's Optuna search (src/matchups/split.py) -- selected on
+TRAIN, reported on validation.
 Grid (not Optuna) was chosen for this 2D search because (a) it's only 2 knobs, so a
 modest grid (6 x 6 = 36 combos) covers the space about as well as an equivalent Optuna
 budget would, or a bit better since it's non-adaptive, and (b) it makes the full
@@ -30,10 +32,12 @@ KNN configuration (knn_k=81, layer=2, on that same window/halflife) -- the most 
 question is "does adding a floor improve on the already-best KNN setup," not "does it
 improve on an untuned baseline nobody would deploy with KNN anyway." The resulting best
 (k, floor) is then carried into walkforward.py as the fixed "hybrid" reference config
-for the fold evaluation (item #1), using this SAME window=37/halflife=13.2 fingerprint.
+for the Walk-Forward CV Check's fold evaluation, using this SAME
+window=37/halflife=13.2 fingerprint.
 
 k range: 10-150, matching the exact range explored for plain KNN in both previous runs
-(Phase 3's sweep, item #1's Optuna search) so results are comparable.
+(design doc's Phase 3 sweep, the Hyperparameter Search's Optuna search) so results
+are comparable.
 floor range: chosen empirically -- a sample of cosine similarities in this 10-dim
 z-scored matchup-vector space (window=37/halflife=13.2, layer=2) has median ~0.0,
 p90 ~0.47, p99 ~0.76, min/max roughly [-0.95, 0.98] (see phase log for the exact sample
@@ -63,7 +67,7 @@ FLOOR_GRID = [-1.0, 0.0, 0.2, 0.4, 0.5, 0.6, 0.7]
 
 # min/full confidence sample also carried over from the wider-exploration winner,
 # since they were tuned jointly with knn_k=81 as part of that same config and are not
-# being re-searched here (this run's item #2 is specifically about k/floor).
+# being re-searched here (this module is specifically about the k/floor knobs).
 MIN_CONFIDENCE_SAMPLE = 21
 FULL_CONFIDENCE_SAMPLE = 82
 

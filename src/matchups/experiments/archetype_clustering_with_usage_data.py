@@ -1,8 +1,8 @@
 """
-Item #1 (wrap-up round): re-run the player-archetype KMeans clustering exploration
-(originally done ad hoc in Phase 0, not persisted as a module -- see phase log) now
-that minutes_per_game/usage_rate (from player_importance, injury_features.sqlite) are
-joined into players._load_player_season_stats().
+Re-runs the player-archetype KMeans clustering exploration (originally done ad hoc
+in Phase 0, not persisted as a module -- see phase log's Critique & Bug-Fix Pass
+section) now that minutes_per_game/usage_rate (from player_importance,
+injury_features.sqlite) are joined into players._load_player_season_stats().
 
 Phase 0's finding: clustering on [PPG, AST, REB, BLK, STL, FG%] alone mostly recovered
 a playing-time/usage tier split (a monotonic "more of everything" axis), not stylistic

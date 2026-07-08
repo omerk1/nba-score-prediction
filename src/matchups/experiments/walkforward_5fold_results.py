@@ -1,7 +1,8 @@
 """
-Item #8 (wrap-up round): write the 5-fold (2021-22 through 2025-26) walk-forward
-comparison into outputs/a7_style_matchup_results.csv, extending the fold count from
-the previous run's n=4 using the item #7 corrected (point-in-time) z-score fit.
+Writes the 5-fold (2021-22 through 2025-26) walk-forward comparison into
+outputs/a7_style_matchup_results.csv, extending the fold count from
+walkforward_4fold_results.py's n=4 using the Critique & Bug-Fix Pass's corrected
+(point-in-time) z-score fit.
 """
 
 import logging

@@ -1,7 +1,9 @@
 """
-Orchestrates the wider-exploration run's four items and writes their results into
-outputs/a7_style_matchup_results.csv, extending its schema (per instructions: add
-new columns for new information rather than overload existing ones) with:
+Orchestrates the Hyperparameter Search & Alternative Methods stage's four
+comparisons (Optuna hyperparameter search, cluster-bucket search, PCA encoding,
+supervised model) and writes their results into outputs/a7_style_matchup_results.csv,
+extending its schema (add new columns for new information rather than overload
+existing ones) with:
     method_family        - lookup-cosine | lookup-knn | lookup-cluster |
                             encoding-pca | supervised-model
     split                - train | validation
@@ -19,11 +21,11 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from src.matchups.experiments.clustering import build_cluster_index
+from src.matchups.experiments.cluster_bucket_similarity_search import build_cluster_index
 from src.matchups.config import PROJECT_ROOT
 from src.matchups.experiments.encoding_pca import build_pca_matchup_index
 from src.matchups.split import get_split_dates
-from src.matchups.experiments.supervised import run_supervised_model
+from src.matchups.experiments.supervised_model_baseline import run_supervised_model
 from src.matchups.tuning import evaluate_config, load_constants, run_search_inmemory
 
 logger = logging.getLogger(__name__)
@@ -142,7 +144,7 @@ def build_all_rows() -> list[dict]:
     }
     rows = []
 
-    # --- Item #1: hyperparameter search — default vs. Optuna-found best, both splits ---
+    # --- Hyperparameter search comparison: default vs. Optuna-found best, both splits ---
     for label, cfg, family in [
         ("hpsearch_default", DEFAULT_HP_CONFIG, f"lookup-{DEFAULT_HP_CONFIG['similarity_method']}"),
         ("hpsearch_best", BEST_HP_CONFIG, f"lookup-{BEST_HP_CONFIG['similarity_method']}"),
@@ -170,7 +172,7 @@ def build_all_rows() -> list[dict]:
                 decay_halflife=round(cfg["decay_halflife"], 4), notes=notes,
             ))
 
-    # --- Item #2a: PCA encoding, default similarity params (window=20, halflife=5), both splits ---
+    # --- PCA encoding, default similarity params (window=20, halflife=5), both splits ---
     pca_built = build_pca_matchup_index(window=20, halflife=5.0, layer=2)
     pca_idx = pca_built["idx"]
     for split_name, (s, e) in split_ranges.items():
@@ -190,7 +192,7 @@ def build_all_rows() -> list[dict]:
             layers_enabled="L1+L2+L3", fingerprint_window=20, decay_halflife=5.0, notes=notes,
         ))
 
-    # --- Item #2b: clustering bucket-lookup (k=8), default window/halflife, both splits ---
+    # --- Clustering bucket-lookup (k=8), default window/halflife, both splits ---
     cluster_built = build_cluster_index(window=20, halflife=5.0, layer=2, n_clusters=8)
     cluster_df = cluster_built["df"]
     for split_name, (s, e) in split_ranges.items():
@@ -208,7 +210,7 @@ def build_all_rows() -> list[dict]:
             layers_enabled="L1+L2+L3(bucket)", fingerprint_window=20, decay_halflife=5.0, notes=notes,
         ))
 
-    # --- Item #3: supervised catboost model on the 10-dim matchup vector, both splits ---
+    # --- Supervised catboost model on the 10-dim matchup vector, both splits ---
     sup = run_supervised_model(window=20, halflife=5.0, layer=2)
     for split_name, df in [("train", sup["train_pred_df"]), ("validation", sup["val_pred_df"])]:
         notes = (

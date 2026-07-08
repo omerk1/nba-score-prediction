@@ -1,12 +1,13 @@
 """
 Decay-weighted injury-impact calibration -- post-fix walk-forward CV sanity check.
 
-After picking decay_halflife_games=20 (see decay_calibration_results.py + phase log) and
-rebuilding the layer=2 (injury-adjusted) fingerprint cache, this re-runs item #2's
-existing layer-ablation harness (injury_ablation.run_layer_ablation(), NOT rebuilt --
-same tuning.py primitives, same 4 walk-forward folds, same item #7 per-fold z-score fit)
-for the tuned winning config (`wider_exploration_best`) only, to confirm the decay-weight
-fix doesn't regress Layer 2's previously-validated benefit over Layer 1.
+After picking decay_halflife_games=20 (see injury_calibration_halflife_sweep.py +
+phase log) and rebuilding the layer=2 (injury-adjusted) fingerprint cache, this
+re-runs the existing layer-ablation harness (injury_ablation.run_layer_ablation(),
+NOT rebuilt -- same tuning.py primitives, same 4 walk-forward folds, same per-fold
+z-score fit from the Critique & Bug-Fix Pass) for the tuned winning config
+(`wider_exploration_best`) only, to confirm the decay-weight fix doesn't regress
+Layer 2's previously-validated benefit over Layer 1.
 """
 
 import logging

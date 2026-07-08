@@ -8,8 +8,8 @@ split. One split cannot distinguish "this config is robustly better" from "this 
 fits the specific calendar quirks of one validation window." This module builds
 multiple chronological folds instead and evaluates the SAME three reference methods on
 every fold: (a) the untuned hand-picked default, (b) the wider-exploration run's
-winning config, (c) the new KNN-with-similarity-floor hybrid (see hybrid_similarity.py
-for how its (k, floor) was itself selected).
+winning config, (c) the new KNN-with-similarity-floor hybrid (see
+knn_similarity_floor_hybrid.py for how its (k, floor) was itself selected).
 
 Fold scheme: validate on each NBA REGULAR SEASON from 2021-22 through 2024-25 (four
 folds), training on everything before that season's start -- ending with the existing
@@ -59,7 +59,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from src.matchups.experiments.hybrid_similarity import HYBRID_HALFLIFE, HYBRID_WINDOW
+from src.matchups.experiments.knn_similarity_floor_hybrid import HYBRID_HALFLIFE, HYBRID_WINDOW
 from src.matchups.split import get_split_dates
 from src.matchups.tuning import build_fp_for_config, build_index_inmemory, load_constants, run_search_inmemory
 
@@ -119,8 +119,8 @@ REFERENCE_METHODS = {
         "floor": None, "min_confidence_sample": 21, "full_confidence_sample": 82,
     },
     "hybrid_knn_floor": {
-        # (k=81, floor=0.4) chosen by hybrid_similarity.py's grid search -- see that
-        # module's docstring/phase-log entry for the full grid and the finding that
+        # (k=81, floor=0.4) chosen by knn_similarity_floor_hybrid.py's grid search --
+        # see that module's docstring/phase-log entry for the full grid and the finding that
         # floor <=0.4 is a near-exact tie with plain KNN at k=81 on this fingerprint
         # config (floor doesn't meaningfully bind until ~0.6-0.7, where it starts
         # hurting). floor=0.4 was picked over the technically-tied floor=0.0/0.2 so

@@ -472,7 +472,7 @@ applies the same rigor to the full trained model: reuses `walkforward.py`'s exac
 season), but instead of evaluating A7's standalone lookup per fold, builds real
 features via `FeatureBuilder.create_all_features` and trains the actual CatBoost model
 per fold — reusing `train_model.py`'s data-loading/feature-building/training/metric
-flow and hyperparameters as-is (`src/matchups/experiments/round9_modelcv.py`; kept in
+flow and hyperparameters as-is (`src/matchups/experiments/expanding_window_model_cv.py`; kept in
 this directory despite training the full model, since its entire purpose is checking
 an A7 finding's robustness and it reuses `walkforward.py`'s fold scheme directly). No
 re-tuning of anything. `style_matchup.enabled`/`raw_features_enabled` toggled via an

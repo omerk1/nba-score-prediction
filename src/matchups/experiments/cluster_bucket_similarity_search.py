@@ -1,9 +1,8 @@
 """
-Item #2b: team-style clustering as an alternative SEARCH method (design doc
-Encoding Phase 3), tried unconditionally this run alongside cosine/KNN lookup and
-PCA encoding -- not gated behind "only if cosine/KNN return thin samples" (they
-don't; fallback rate is ~0%), because the instructions ask for a genuine method
-comparison, not just an escape hatch.
+Team-style clustering as an alternative SEARCH method (design doc Encoding Phase 3),
+tried unconditionally alongside cosine/KNN lookup and PCA encoding -- not gated
+behind "only if cosine/KNN return thin samples" (they don't; fallback rate is ~0%),
+because the goal is a genuine method comparison, not just an escape hatch.
 
 Method: fit KMeans (k=8, per the design doc's example) on the injury-adjusted
 (layer=2, per coordinator clarification -- must be comparable to the 0.281

@@ -1,11 +1,13 @@
 """
-Writes this run's (walk-forward CV) results into outputs/a7_style_matchup_results.csv,
-extending its schema (per instructions: add columns for new information rather than
-overload existing ones) with:
+Writes the Walk-Forward CV Check's results into outputs/a7_style_matchup_results.csv,
+extending its schema (add columns for new information rather than overload existing
+ones) with:
     fold             - 1-4 for a per-fold row, "summary" for a mean/std-across-folds
                         row, or "" for a hybrid-grid-search row (not fold-specific)
-    recency_years    - the recency-cutoff value used ("unbounded" or a float), item #3
-    floor_threshold  - the knn_floor hybrid method's floor (item #2 only, else blank)
+    recency_years    - the recency-cutoff value used ("unbounded" or a float), from
+                        recency_cutoff_sweep.py
+    floor_threshold  - the knn_floor hybrid method's floor (from
+                        knn_similarity_floor_hybrid.py only, else blank)
 
 Existing rows from both previous runs are preserved as-is; this module only ADDS the
 new columns (blank for old rows) and appends new rows.
@@ -18,8 +20,8 @@ import numpy as np
 import pandas as pd
 
 from src.matchups.config import PROJECT_ROOT
-from src.matchups.experiments.hybrid_similarity import run_grid_search
-from src.matchups.experiments.recency_sweep import RECENCY_GRID, run_recency_sweep
+from src.matchups.experiments.knn_similarity_floor_hybrid import run_grid_search
+from src.matchups.experiments.recency_cutoff_sweep import RECENCY_GRID, run_recency_sweep
 from src.matchups.tuning import build_idx_for_config, load_constants, run_search_inmemory
 from src.matchups.walkforward import FOLDS, REFERENCE_METHODS
 
@@ -105,7 +107,7 @@ def _append_rows(rows: list[dict]) -> None:
 
 
 def build_item1_rows(consts: dict) -> list[dict]:
-    """Per-fold rows (item #1) for all 3 reference methods, plus a mean/std summary
+    """Per-fold walk-forward rows for all 3 reference methods, plus a mean/std summary
     row per method."""
     rows = []
     for method_name, cfg in REFERENCE_METHODS.items():
@@ -169,7 +171,7 @@ def build_item1_rows(consts: dict) -> list[dict]:
 
 
 def build_item2_rows(grid_result: dict) -> list[dict]:
-    """Full (k, floor) grid rows (item #2) from hybrid_similarity.run_grid_search's
+    """Full (k, floor) grid rows from knn_similarity_floor_hybrid.run_grid_search's
     TRAIN-split selection grid, plus the best config's validation-split confirmation row."""
     rows = []
     grid_df = grid_result["grid_df"]
@@ -233,8 +235,8 @@ def build_item2_rows(grid_result: dict) -> list[dict]:
 
 
 def build_item3_rows(recency_df: pd.DataFrame) -> list[dict]:
-    """Summary (mean/std across folds) rows per (method, recency_years) from the
-    recency-cutoff sweep (item #3)."""
+    """Summary (mean/std across folds) rows per (method, recency_years) from
+    recency_cutoff_sweep.py."""
     rows = []
     summary = recency_df.groupby(["method", "recency_years"], dropna=False)["corr"].agg(
         ["mean", "std", "min", "max"]
@@ -275,17 +277,17 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     consts = load_constants()
 
-    logger.info("Building item #1 rows (walk-forward folds, 3 reference methods)...")
+    logger.info("Building walk-forward-fold rows (3 reference methods)...")
     item1_rows = build_item1_rows(consts)
 
-    logger.info("Building item #2 rows (hybrid grid search)...")
+    logger.info("Building hybrid grid-search rows...")
     grid_result = run_grid_search()
     item2_rows = build_item2_rows(grid_result)
 
-    logger.info("Building item #3 rows (recency-cutoff sweep)...")
+    logger.info("Building recency-cutoff sweep rows...")
     recency_df = run_recency_sweep()
     item3_rows = build_item3_rows(recency_df)
 
     all_rows = item1_rows + item2_rows + item3_rows
     _append_rows(all_rows)
-    logger.info(f"Done. Wrote {len(item1_rows)} item#1 + {len(item2_rows)} item#2 + {len(item3_rows)} item#3 rows.")
+    logger.info(f"Done. Wrote {len(item1_rows)} walk-forward-fold + {len(item2_rows)} hybrid-grid + {len(item3_rows)} recency-sweep rows.")

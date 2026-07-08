@@ -1,7 +1,7 @@
 """
-Item #2a: PCA encoding (design doc Encoding Phase 2), tried unconditionally this
-run (not gated behind "only if hand-picked is weak" -- it wasn't weak, per Phase 4,
-but this run's instructions ask for the comparison regardless).
+PCA encoding (design doc Encoding Phase 2), tried unconditionally (not gated behind
+"only if hand-picked is weak" -- it wasn't weak, per the design doc's Phase 4
+validation, but the goal is a genuine comparison regardless).
 
 Scope note: the design doc's Phase 2 raw-metric list includes several shot-chart/
 play-type-derived metrics (second_chance_rate, fast_break_rate, avg_shot_distance,

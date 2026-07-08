@@ -1,6 +1,6 @@
 """
-Item #2 (wrap-up round): isolate injury-adjustment's (Layer 2) marginal contribution
-WITHIN the actual full L1+L2+L3 pipeline that's recommended, not in isolation.
+Isolates injury-adjustment's (Layer 2) marginal contribution WITHIN the actual full
+L1+L2+L3 pipeline that's recommended, not in isolation.
 
 The original Phase 4 layer ablation (see phase log) only compared L1-only vs L1+L2
 WITHOUT the similarity search active (both were strongly negative and nearly
@@ -13,8 +13,9 @@ This module adds the missing comparison: run the FULL similarity search (both th
 untuned default_handpicked config and the tuned wider_exploration_best config) with
 layer=1 (no injury adjustment) vs layer=2 (injury-adjusted), holding the search
 method/hyperparameters identical, using the SAME walk-forward fold harness and the
-item #7 corrected (point-in-time, per-fold) z-score normalization -- so this
-comparison benefits from the same leakage fix as everything else this round.
+Critique & Bug-Fix Pass's corrected (point-in-time, per-fold) z-score normalization
+-- so this comparison benefits from the same leakage fix as everything else from
+that stage.
 """
 
 import logging
@@ -37,9 +38,9 @@ def run_layer_ablation(folds: list[dict] | None = None) -> pd.DataFrame:
     """For each of the two REFERENCE_METHODS (default_handpicked, wider_exploration_best),
     evaluate layer=1 (no injury adjustment) vs layer=2 (injury-adjusted) on every
     walk-forward fold, holding window/halflife/similarity-method/hyperparameters fixed.
-    hybrid_knn_floor is skipped here (item #1 already showed it's numerically identical
-    to wider_exploration_best at every fold -- see phase log -- so it would add nothing
-    to this specific comparison)."""
+    hybrid_knn_floor is skipped here (the Walk-Forward CV Check already showed it's
+    numerically identical to wider_exploration_best at every fold -- see phase log --
+    so it would add nothing to this specific comparison)."""
     consts = load_constants()
     fold_list = folds if folds is not None else FOLDS
     rows = []

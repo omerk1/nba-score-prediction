@@ -1,13 +1,14 @@
 """
 Decay-weighted injury-impact calibration -- halflife exploration.
 
-Fixes the wrap-up round's item #3 finding: calibration.py's Phase 0 empirical
-calibration treated every qualifying Out team-game identically regardless of how far
-into a continuous absence streak it fell, which let Collin Sexton's ~5-month
-ACL-recovery absence (127 of 680 qualifying event-rows for perimeter_specialist alone)
-dominate the sample and flip perimeter_specialist's defensive_rating delta to the wrong
-sign (-0.0889; excluding Sexton alone flips it to +0.9566). See docs/A7_PHASE_LOG.md
-item #3 for the full diagnosis.
+Fixes the issue found by the Critique & Bug-Fix Pass: calibration.py's Phase 0
+empirical calibration treated every qualifying Out team-game identically regardless
+of how far into a continuous absence streak it fell, which let Collin Sexton's
+~5-month ACL-recovery absence (127 of 680 qualifying event-rows for
+perimeter_specialist alone) dominate the sample and flip perimeter_specialist's
+defensive_rating delta to the wrong sign (-0.0889; excluding Sexton alone flips it
+to +0.9566). See docs/a7_phase_log.md's Critique & Bug-Fix Pass section for the
+full diagnosis.
 
 This module tries a grid of `decay_halflife_games` values (see HALFLIFE_GRID) with
 calibration.py's new decay-weighted delta computation and reports, per halflife:
