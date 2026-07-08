@@ -88,6 +88,8 @@ class FeatureBuilder:
         df = self._add_travel_features(df)
         df = self._add_elo_features(df)
         df = self._add_injury_features(df)
+        df = self._add_style_matchup_features(df)
+        df = self._add_style_fingerprint_features(df)
 
         feature_cols = self._get_feature_columns(df)
         nan_games = df[feature_cols].isna().any(axis=1).sum()
@@ -641,6 +643,133 @@ class FeatureBuilder:
 
         dates_with_coverage = set(injury_df["game_date"])
         new_cols["has_injury_data"] = game_dates.isin(dates_with_coverage).astype(int)
+
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_style_matchup_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        A7 style-matchup score (src/matchups/) — precomputed offline by
+        src/matchups/precompute_scores.py into outputs/a7_matchups_cache.sqlite's
+        style_matchup_scores table (game_id -> style_matchup_score/confidence),
+        NOT computed live here: this method only left-joins the cached result
+        onto df by GAME_ID, keeping this diff small and reusing the
+        already-validated KNN similarity-search pipeline as-is (see
+        docs/a7_style_matchup_design.md / docs/a7_phase_log.md's KNN-Score
+        Integration Test section for the feature-integration test this wiring
+        supports).
+        """
+        cfg = load_config()
+        if not cfg.style_matchup or not cfg.style_matchup.enabled:
+            return df
+
+        cache_db = Path("outputs/a7_matchups_cache.sqlite")
+        if not cache_db.exists():
+            logger.warning(f"Style matchup cache not found at {cache_db} — skipping style matchup features")
+            return df
+
+        with sqlite3.connect(f"file:{cache_db}?mode=ro", uri=True) as conn:
+            scores_df = pd.read_sql_query(
+                "SELECT game_id, style_matchup_score, confidence FROM style_matchup_scores",
+                conn,
+            )
+
+        merged = df[["GAME_ID"]].merge(
+            scores_df, left_on="GAME_ID", right_on="game_id", how="left"
+        )
+
+        new_cols = {
+            "style_matchup_score": merged["style_matchup_score"].values,
+            "style_matchup_confidence": merged["confidence"].values,
+        }
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    # Metrics with a calibrated (Layer 2, injury-adjusted) value already validated
+    # across A7's early stages -- see docs/a7_phase_log.md.
+    _RAW_STYLE_CALIBRATED_METRICS = [
+        "pace_score", "three_pt_reliance", "paint_activity", "defensive_rating", "assist_rate",
+    ]
+    # Added by the raw-fingerprint feature redesign -- offensive-quality counterpart
+    # to defensive_rating. Layer 1 (uncalibrated) only, a deliberate scope cut -- see
+    # fingerprint.py's docstring. Read from layer=1 explicitly rather than layer=2
+    # (where it would be numerically identical, since no injury delta touches it --
+    # see injury_layer.py).
+    _RAW_STYLE_UNCALIBRATED_METRIC = "offensive_rating"
+
+    def _add_style_fingerprint_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        A7's raw-fingerprint feature redesign — raw per-team style-fingerprint
+        components plus explicit home-vs-away differentials, mirroring
+        `_add_matchup_features`'s existing pattern (home_off_vs_away_def_L{window},
+        etc.) instead of `_add_style_matchup_features`'s KNN-similarity-search
+        lookup above.
+
+        Motivation (see docs/a7_phase_log.md's Raw-Fingerprint Feature Redesign /
+        KNN-Score Integration Test sections): the KNN-score integration test found
+        `style_matchup_score` — a pre-aggregated KNN-average "mini-prediction" —
+        added essentially zero value to the trained model (29th of 109 features,
+        confidence had zero importance) despite a decent standalone correlation.
+        CatBoost never saw the ingredients that produced that one opaque number.
+        This method exposes the raw ingredients directly instead, so CatBoost can
+        learn which specific stylistic clashes matter on its own, the same way it
+        already does for `_add_matchup_features`'s rolling-efficiency differentials.
+
+        No KNN/similarity search is involved at all — this reads directly from
+        the already-existing `matchup_fingerprints` cache table (built offline by
+        src/matchups/fingerprint.py + src/matchups/injury_layer.py), joined by
+        (game_id, team_id) for both home and away teams: layer=2 (injury-adjusted,
+        calibrated) for the five original hand-picked metrics, layer=1
+        (uncalibrated — no injury delta calibrated for it this round, a deliberate
+        scope cut) for the new `offensive_rating` metric.
+
+        Gated independently from `_add_style_matchup_features` via the separate
+        `style_matchup.raw_features_enabled` flag (default false) — both methods
+        can be toggled independently for a clean three-way comparison (baseline /
+        old KNN-lookup approach / this new raw+differential approach).
+
+        Adds, for each of the 6 metrics: two raw columns (home_style_{metric},
+        away_style_{metric}) and one differential column (style_{metric}_diff,
+        home - away) — 18 new columns total.
+        """
+        cfg = load_config()
+        if not cfg.style_matchup or not cfg.style_matchup.raw_features_enabled:
+            return df
+
+        cache_db = Path("outputs/a7_matchups_cache.sqlite")
+        if not cache_db.exists():
+            logger.warning(f"Style matchup cache not found at {cache_db} — skipping style fingerprint features")
+            return df
+
+        calibrated = self._RAW_STYLE_CALIBRATED_METRICS
+        uncalibrated = self._RAW_STYLE_UNCALIBRATED_METRIC
+        all_metrics = calibrated + [uncalibrated]
+
+        with sqlite3.connect(f"file:{cache_db}?mode=ro", uri=True) as conn:
+            layer2 = pd.read_sql_query(
+                "SELECT game_id, team_id, " + ", ".join(calibrated) +
+                " FROM matchup_fingerprints WHERE layer = 2",
+                conn,
+            )
+            layer1_uncalibrated = pd.read_sql_query(
+                f"SELECT game_id, team_id, {uncalibrated} FROM matchup_fingerprints WHERE layer = 1",
+                conn,
+            )
+
+        fingerprints = layer2.merge(layer1_uncalibrated, on=["game_id", "team_id"], how="left")
+
+        new_cols = {}
+        side_values = {}
+        for team_col, side in [("HOME_TEAM_ID", "home"), ("AWAY_TEAM_ID", "away")]:
+            lookup = pd.DataFrame({
+                "game_id": df["GAME_ID"].values,
+                "team_id": df[team_col].values,
+            })
+            merged = lookup.merge(fingerprints, on=["game_id", "team_id"], how="left")
+            side_values[side] = {metric: merged[metric].values for metric in all_metrics}
+            for metric in all_metrics:
+                new_cols[f"{side}_style_{metric}"] = side_values[side][metric]
+
+        for metric in all_metrics:
+            new_cols[f"style_{metric}_diff"] = side_values["home"][metric] - side_values["away"][metric]
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

@@ -64,9 +64,17 @@ def _naive_baseline_metrics(features_df: pd.DataFrame, y_true: pd.DataFrame, win
     }
 
 
-def _save_experiment(run_name: str, notes: str, config, val_metrics: dict, test_metrics: dict, n_features: int) -> None:
-    """Append one row to outputs/experiments.csv. Creates the file with headers if absent."""
-    out = Path("outputs/experiments.csv")
+def _save_experiment(
+    run_name: str, notes: str, config, val_metrics: dict, test_metrics: dict, n_features: int,
+    experiments_csv: str = "outputs/experiments.csv",
+) -> None:
+    """Append one row to `experiments_csv` (default outputs/experiments.csv, the
+    shared production log). Creates the file with headers if absent.
+
+    `experiments_csv` override (added for A7's KNN-score integration test): lets
+    exploratory/throwaway runs log to a separate file instead of polluting the
+    shared history — see --experiments-csv below."""
+    out = Path(experiments_csv)
     out.parent.mkdir(parents=True, exist_ok=True)
 
     row = {
@@ -107,6 +115,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-name", required=True, help="Short name for this ablation run, e.g. 'baseline' or 'injury_v1'")
     parser.add_argument("--notes", default="", help="Optional free-text notes saved to experiments.csv")
+    parser.add_argument(
+        "--experiments-csv", default="outputs/experiments.csv",
+        help="Path to append this run's row to (default: outputs/experiments.csv, the shared "
+             "production log). Override for exploratory/throwaway runs that shouldn't land in "
+             "the shared history, e.g. --experiments-csv outputs/a7_integration_test_results.csv"
+    )
     args = parser.parse_args()
 
     logger.info(f"Training pipeline started at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
@@ -199,7 +213,7 @@ def main():
         )
     if naive_window in config.features.rolling_windows:
         baseline_run_name = f"naive_rolling_{naive_window}"
-        experiments_path = Path("outputs/experiments.csv")
+        experiments_path = Path(args.experiments_csv)
         already_logged = (
             experiments_path.exists()
             and baseline_run_name in experiments_path.read_text()
@@ -207,7 +221,7 @@ def main():
         if not already_logged:
             _save_experiment(
                 baseline_run_name, f"auto-generated baseline (rolling {naive_window}-game avg)",
-                config, baseline_val, baseline_test, 2
+                config, baseline_val, baseline_test, 2, experiments_csv=args.experiments_csv,
             )
 
     importance_df = predictor.get_feature_importance(top_n=20)
@@ -216,6 +230,18 @@ def main():
     reports_dir = Path("outputs/reports")
     reports_dir.mkdir(exist_ok=True, parents=True)
     importance_df.to_csv(reports_dir / f"feature_importance_{args.run_name}.csv", index=False)
+
+    # Added by the raw-fingerprint feature redesign: outputs/reports/ is gitignored
+    # (and the model itself is gitignored too), so the KNN-score integration test's
+    # artifacts lost the full per-feature importance ranking once the worktree was
+    # cleaned up -- only the top-20 above survived, print-only. Save
+    # the FULL table (every feature, not just A7's) to a non-gitignored path so the
+    # coordinator can see where H2H/Elo/rolling-stats/etc. rank alongside any new
+    # experimental features across runs.
+    full_importance_df = predictor.get_feature_importance(top_n=len(feature_cols))
+    full_importance_path = Path(f"outputs/a7_feature_importance_{args.run_name}.csv")
+    full_importance_df.to_csv(full_importance_path, index=False)
+    logger.info(f"Full feature importance ({len(full_importance_df)} features) saved -> {full_importance_path}")
 
     predictions = predictor.predict(X_test.head(10))
     examples_df = pd.DataFrame({
@@ -252,7 +278,10 @@ def main():
     with open(models_dir / "training_metadata.json", 'w') as f:
         json.dump(metadata, f, indent=2, default=str)
 
-    _save_experiment(args.run_name, args.notes, config, val_metrics, test_metrics, len(feature_cols))
+    _save_experiment(
+        args.run_name, args.notes, config, val_metrics, test_metrics, len(feature_cols),
+        experiments_csv=args.experiments_csv,
+    )
     logger.info(f"Test — diff_mae: {test_metrics['diff_mae']:.2f} | win_acc: {test_metrics['win_accuracy']:.1%}")
     logger.info(f"Model saved to {model_path}")
 

@@ -101,6 +101,35 @@ class InjuryFeaturesConfig(BaseModel):
     doubtful_weight: float
 
 
+class StyleMatchupConfig(BaseModel):
+    """A7 module (src/matchups/). See docs/a7_style_matchup_design.md and
+    docs/a7_phase_log.md for how these values were chosen. injury_impact keys
+    are archetype names; each maps to a dict of {fingerprint_metric: delta},
+    so it's left as a plain nested dict rather than a fixed per-archetype
+    model. `enabled` gates feature_builder.py's _add_style_matchup_features
+    (mirrors EloFeaturesConfig/InjuryFeaturesConfig's own `enabled` field) —
+    added by the KNN-score integration test. `raw_features_enabled` gates
+    the separate, independently-toggleable _add_style_fingerprint_features
+    (added by the raw-fingerprint feature redesign: raw per-team fingerprint
+    components + explicit home-vs-away differentials, no KNN similarity search
+    involved — a different feature set from `enabled`'s KNN-lookup score, not a
+    replacement for it)."""
+    enabled: bool
+    raw_features_enabled: bool = False
+    fingerprint_window: int
+    decay_halflife: float
+    encoding: str
+    similarity_method: str
+    similarity_threshold: float
+    knn_k: int
+    min_confidence_sample: int
+    full_confidence_sample: int
+    low_confidence_fallback: str
+    archetype_method: str
+    injury_impact_calibrated: bool
+    injury_impact: dict[str, dict[str, float]]
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -114,6 +143,7 @@ class Config(BaseModel):
     model: ModelConfig
     elo_features: Optional[EloFeaturesConfig] = None
     injury_features: Optional[InjuryFeaturesConfig] = None
+    style_matchup: Optional[StyleMatchupConfig] = None
 
 
 # --- Loader Functions ---

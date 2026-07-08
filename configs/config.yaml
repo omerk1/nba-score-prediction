@@ -100,3 +100,111 @@ injury_features:
     moderate: 0.6  # Sprain, strain, bone bruise
     minor: 0.3     # Soreness, illness, injury recovery, unknown
   doubtful_weight: 0.8  # Fraction of Out severity applied to Doubtful players
+
+style_matchup:
+  # A7 module (src/matchups/), formally read by config_loader.py's Config schema
+  # (StyleMatchupConfig) AND parsed directly (raw dict) by src/matchups/config.py.
+  # See docs/a7_style_matchup_design.md and docs/a7_phase_log.md for how these
+  # values were chosen.
+  #
+  # `enabled` gates feature_builder.py's _add_style_matchup_features (added by the
+  # KNN-score integration test). Left `false` as the committed default regardless
+  # of that test's outcome -- flipping this is the coordinator's decision, not
+  # made unilaterally by that run. See docs/a7_phase_log.md's KNN-Score
+  # Integration Test section.
+  enabled: false
+  # `raw_features_enabled` gates the SEPARATE, independently-toggleable
+  # _add_style_fingerprint_features (added by the raw-fingerprint feature
+  # redesign: raw per-team fingerprint components + explicit home-vs-away
+  # differentials, mirroring _add_matchup_features's pattern -- no KNN
+  # similarity search at all, unlike `enabled` above). Left `false` as the
+  # committed default regardless of that redesign's outcome, same rule as
+  # `enabled`. See docs/a7_phase_log.md's Raw-Fingerprint Feature Redesign
+  # section.
+  raw_features_enabled: false
+  # Correction made during the KNN-score integration test:
+  # fingerprint_window/decay_halflife/similarity_method/knn_k/
+  # min_confidence_sample/full_confidence_sample below were the untuned Phase-0
+  # defaults -- despite the design doc and phase log (Hyperparameter Search /
+  # Post-Fix Hyperparameter Recheck sections) both documenting
+  # window=37/halflife=13.2/knn/k=81/min_conf=21/full_conf=82 as the validated,
+  # winning config, that config was never actually written into this yaml block
+  # (src/matchups/tuning.py and walkforward.py's REFERENCE_METHODS hardcode it
+  # separately as "wider_exploration_best" / "old_best_*" instead of reading it
+  # from here). Corrected here so the precompute script (src/matchups/
+  # precompute_scores.py) -- which reads this block via
+  # src/matchups/config.py:load_style_matchup_config() -- actually uses the
+  # validated config, per that run's explicit instruction not to re-tune.
+  fingerprint_window: 37
+  decay_halflife: 13.199390932957819
+  # Halflife (consecutive qualifying team-games) for calibration.py's decay-weighted
+  # injury-impact calibration -- see the injury_impact block below + this run's phase-log
+  # section ("Decay-weighted injury-impact calibration") for the halflife grid explored
+  # (5/10/20/40/10000-as-no-decay-reference) and why 20 was chosen.
+  injury_calibration_decay_halflife_games: 20
+  encoding: hand_picked
+  similarity_method: knn   # cosine | knn -- knn wins once properly tuned, see phase log's Hyperparameter Search section
+  similarity_threshold: 0.70   # unused when similarity_method=knn; kept for the cosine code path
+  knn_k: 81
+  min_confidence_sample: 21
+  full_confidence_sample: 82
+  low_confidence_fallback: h2h
+  archetype_method: percentile
+  injury_impact_calibrated: true  # values below are Phase-0 empirical deltas, not v1 guesses
+  # Critique & Bug-Fix Pass recalibration: `combo` was redefined to use usage_rate +
+  # assist-RATE (see archetype_percentiles.combo above) instead of raw ppg_pct/ast_pct,
+  # which changes which players are classified combo vs. rim_protector/perimeter_specialist
+  # (classify_archetypes() checks combo first) -- so all archetypes' calibration deltas
+  # were re-derived against the new taxonomy. facilitator/scorer are numerically IDENTICAL
+  # to the previous calibration (unaffected -- their definitions didn't change and their
+  # populations don't overlap with combo). combo/rim_protector/perimeter_specialist shifted;
+  # OLD (previous taxonomy) values kept here as a comment for traceability:
+  #   combo:      pace_score=-1.1087, three_pt_reliance=-0.0047, paint_activity=0.0229,
+  #               defensive_rating=0.2746, assist_rate=-0.0051  (n_without games not logged)
+  #   rim_protector:        defensive_rating=0.5376, paint_activity=-0.2716 (n_without=3849)
+  #   perimeter_specialist: defensive_rating=-0.3131 (n_without=407)
+  # See docs/a7_phase_log.md's Critique & Bug-Fix Pass section for the full
+  # old-vs-new comparison and the perimeter_specialist sign-flip investigation (sign
+  # is UNCHANGED by this recalibration -- still negative -- but magnitude shrinks
+  # substantially, from -0.3131 to -0.0889).
+  #
+  # Injury-Calibration Decay Fix: traced the -0.0889 sign flip almost entirely to
+  # Collin Sexton's ~5-month continuous
+  # ACL-recovery absence (127 of 680 qualifying perimeter_specialist event-rows) --
+  # excluding his rows alone flips the sign to +0.9566. Rather than a hard cutoff on
+  # absence length, calibration.py now down-weights each qualifying Out-event by an
+  # exponential decay on its position within its continuous absence streak (1 = first
+  # game of the absence, ...), halflife = injury_calibration_decay_halflife_games above
+  # (=20), using the same weight = 0.5**(position/halflife) mechanism fingerprint.py's
+  # rolling-window recency weighting already uses. All 5 archetypes' deltas below are now
+  # DECAY-WEIGHTED (not just perimeter_specialist -- this is a general mechanism change).
+  # PRE-DECAY (halflife=10000, i.e. no meaningful decay -- numerically ~= the previous
+  # values above, small differences are box-score-cache refresh noise) values kept here
+  # for traceability:
+  #   facilitator: assist_rate=-0.0067, pace_score=-1.2744
+  #   scorer:      three_pt_reliance=0.0236, paint_activity=0.3436
+  #   combo:       pace_score=-0.5958, three_pt_reliance=-0.0038, paint_activity=0.0778,
+  #                defensive_rating=0.5611, assist_rate=-0.0056
+  #   rim_protector:        defensive_rating=0.4686, paint_activity=-0.28
+  #   perimeter_specialist: defensive_rating=-0.0880 (SIGN FLIPPED positive by the fix below)
+  # See docs/A7_PHASE_LOG.md "Decay-weighted injury-impact calibration" for the full
+  # per-halflife table (5/10/20/40/10000) across every archetype and the Sexton/Porter
+  # contribution-shrinkage numbers that justified halflife=20.
+  injury_impact:
+    facilitator:
+      assist_rate: -0.0118
+      pace_score: -2.16
+    scorer:
+      three_pt_reliance: 0.0139
+      paint_activity: 0.3662
+    combo:
+      pace_score: -0.4059
+      three_pt_reliance: -0.0026
+      paint_activity: 0.0367
+      defensive_rating: 0.5902
+      assist_rate: -0.0048
+    rim_protector:
+      defensive_rating: 0.4281
+      paint_activity: -0.2729
+    perimeter_specialist:
+      defensive_rating: 0.2948
