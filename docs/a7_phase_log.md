@@ -296,9 +296,10 @@ both now in scope, per explicit instruction.
 | val brier | 0.2129 | 0.2142 | +0.0013 (worse) |
 | test brier | 0.2108 | 0.2095 | −0.0013 (better) |
 
-Full rows: `outputs/a7_integration_test_results.csv` (run names
-`a7_integration_baseline` / `a7_integration_with_style_matchup`) — NOT
-`outputs/experiments.csv`, per coordinator correction (see above).
+(Logged at the time to `outputs/a7_integration_test_results.csv`, not
+`outputs/experiments.csv`, per coordinator correction above — the table here is
+the retained record; the CSV itself was a research artifact and wasn't carried
+into the final merged tree.)
 
 `style_matchup_score` ranked 29th of 109 features by CatBoost importance (~1% of
 total importance, well below every rolling/Elo/venue feature); `style_matchup_confidence`
@@ -454,10 +455,11 @@ symmetrically. Config defaults correctly left `false` for both
 `style_matchup.enabled` and `raw_features_enabled`; `predict_game.py` untouched, per
 instructions.
 
-Full rows: `outputs/a7_fingerprint_features_results.csv` (run names `a7r8_baseline` /
-`a7r8_old_knn_style_matchup` / `a7r8_raw_fingerprint_features`) — NOT
-`outputs/experiments.csv`. Full per-feature importance (all features, every run):
-`outputs/a7_feature_importance_<run_name>.csv`.
+(Logged at the time to `outputs/a7_fingerprint_features_results.csv` (run names
+`a7r8_baseline` / `a7r8_old_knn_style_matchup` / `a7r8_raw_fingerprint_features`),
+not `outputs/experiments.csv`, plus a full per-feature importance dump per run —
+the tables above are the retained record; those CSVs were research artifacts and
+weren't carried into the final merged tree.)
 
 ---
 
@@ -472,10 +474,9 @@ applies the same rigor to the full trained model: reuses `walkforward.py`'s exac
 season), but instead of evaluating A7's standalone lookup per fold, builds real
 features via `FeatureBuilder.create_all_features` and trains the actual CatBoost model
 per fold — reusing `train_model.py`'s data-loading/feature-building/training/metric
-flow and hyperparameters as-is (`src/matchups/experiments/expanding_window_model_cv.py`; kept in
-this directory despite training the full model, since its entire purpose is checking
-an A7 finding's robustness and it reuses `walkforward.py`'s fold scheme directly). No
-re-tuning of anything. `style_matchup.enabled`/`raw_features_enabled` toggled via an
+flow and hyperparameters as-is (a dedicated harness script, not carried into the
+final merged tree since its purpose was checking this one finding's robustness, not
+ongoing production use). No re-tuning of anything. `style_matchup.enabled`/`raw_features_enabled` toggled via an
 in-memory `model_copy(update=...)` monkeypatch of `feature_builder.load_config` —
 reversible per-process, the committed `config.yaml` is never touched. No third split
 per fold (`walkforward.py`'s own scheme is train/validate only), so — per
@@ -504,9 +505,10 @@ like the single-split table above.
 | baseline | 11.063 ± 0.487 | 0.2953 ± 0.0068 | 15.294 ± 0.298 | 0.6505 ± 0.0157 | 0.2178 ± 0.0084 |
 | raw_features | 11.022 ± 0.490 | 0.2961 ± 0.0076 | **15.066 ± 0.210** | 0.6525 ± 0.0178 | 0.2169 ± 0.0087 |
 
-Full rows: `outputs/a7_round9_modelcv_results.csv` — NOT `outputs/experiments.csv`.
-Full per-feature importance, every fold × config:
-`outputs/a7_round9_feature_importance_fold{1-5}_{baseline,raw_features}.csv`.
+(Logged at the time to `outputs/a7_round9_modelcv_results.csv`, not
+`outputs/experiments.csv`, plus a full per-feature importance dump per fold ×
+config — the tables above are the retained record; those CSVs were research
+artifacts and weren't carried into the final merged tree.)
 
 **Does the Raw-Fingerprint Feature Redesign's pattern hold consistently across folds?
 Partially — total_mae robustly holds, win_acc does not.**

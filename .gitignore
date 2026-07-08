@@ -11,12 +11,6 @@ data/processed/*
 
 # Keep ablation logs
 !outputs/experiments.csv
-!outputs/a7_style_matchup_results.csv
-!outputs/a7_integration_test_results.csv
-!outputs/a7_fingerprint_features_results.csv
-!outputs/a7_feature_importance_*.csv
-!outputs/a7_round9_modelcv_results.csv
-!outputs/a7_round9_feature_importance_*.csv
 
 # Python
 __pycache__/

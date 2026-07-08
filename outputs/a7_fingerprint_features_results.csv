@@ -1,5 +1,0 @@
-timestamp,run_name,val_diff_mae,test_diff_mae,val_diff_within_5,test_diff_within_5,val_total_mae,test_total_mae,val_win_acc,test_win_acc,val_brier,test_brier,n_features,injury_enabled,rolling_windows,notes
-2026-07-07 15:29 UTC,naive_rolling_10,nan,nan,0.2596,0.2098,nan,nan,0.5976,0.542,nan,nan,2,True,"5,10,20",auto-generated baseline (rolling 10-game avg)
-2026-07-07 15:29 UTC,a7r8_baseline,11.162,11.572,0.289,0.2939,15.07,15.654,0.6531,0.6735,0.2129,0.2108,107,True,"5,10,20","Round 8: baseline, both style_matchup.enabled and raw_features_enabled false"
-2026-07-07 15:34 UTC,a7r8_old_knn_style_matchup,11.133,11.558,0.2906,0.2939,15.066,15.631,0.6571,0.6792,0.2142,0.2095,109,True,"5,10,20","Round 8: old approach reused for comparison, style_matchup.enabled=true, raw_features_enabled=false"
-2026-07-07 17:17 UTC,a7r8_raw_fingerprint_features,11.117,11.603,0.2939,0.2857,14.905,15.41,0.6514,0.6637,0.2129,0.2113,125,True,"5,10,20","Round 8: new approach, raw fingerprint components + explicit differentials, style_matchup.enabled=false raw_features_enabled=true"

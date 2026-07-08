@@ -59,7 +59,6 @@ import logging
 import numpy as np
 import pandas as pd
 
-from src.matchups.experiments.knn_similarity_floor_hybrid import HYBRID_HALFLIFE, HYBRID_WINDOW
 from src.matchups.split import get_split_dates
 from src.matchups.tuning import build_fp_for_config, build_index_inmemory, load_constants, run_search_inmemory
 
@@ -119,13 +118,14 @@ REFERENCE_METHODS = {
         "floor": None, "min_confidence_sample": 21, "full_confidence_sample": 82,
     },
     "hybrid_knn_floor": {
-        # (k=81, floor=0.4) chosen by knn_similarity_floor_hybrid.py's grid search --
-        # see that module's docstring/phase-log entry for the full grid and the finding that
-        # floor <=0.4 is a near-exact tie with plain KNN at k=81 on this fingerprint
-        # config (floor doesn't meaningfully bind until ~0.6-0.7, where it starts
-        # hurting). floor=0.4 was picked over the technically-tied floor=0.0/0.2 so
-        # the "hybrid" reference config actually exercises a non-degenerate floor.
-        "window": HYBRID_WINDOW, "halflife": HYBRID_HALFLIFE, "method": "knn_floor", "threshold": 0.7,
+        # (k=81, floor=0.4) chosen by a grid search over the same window=37/
+        # halflife=13.2 fingerprint as wider_exploration_best above -- floor <=0.4 is
+        # a near-exact tie with plain KNN at k=81 on this fingerprint (floor doesn't
+        # meaningfully bind until ~0.6-0.7, where it starts hurting). floor=0.4 was
+        # picked over the technically-tied floor=0.0/0.2 so the "hybrid" reference
+        # config actually exercises a non-degenerate floor. See docs/a7_phase_log.md's
+        # Walk-Forward CV Check section for the full grid.
+        "window": 37, "halflife": 13.199390932957819, "method": "knn_floor", "threshold": 0.7,
         "k": 81, "floor": 0.4, "min_confidence_sample": 21, "full_confidence_sample": 82,
     },
 }
