@@ -12,13 +12,13 @@ data/processed/*
 # Keep ablation logs
 !outputs/experiments.csv
 
-# Keep the polymarket_comeback small-scale checkpoint dataset (5-game test;
-# data/polymarket_comeback/raw/* stays ignored per the data/raw/* rule below -
+# Keep the polymarket_prices small-scale checkpoint dataset (5-game test;
+# data/polymarket_prices/raw/* stays ignored per the data/raw/* rule below -
 # only the summary CSV + the per-game series parquets are small enough / meant
 # to be reviewed in git)
-data/polymarket_comeback/raw/*
-!data/polymarket_comeback/games.csv
-!data/polymarket_comeback/series/*.parquet
+data/polymarket_prices/raw/*
+!data/polymarket_prices/games.csv
+!data/polymarket_prices/series/*.parquet
 
 # Python
 __pycache__/

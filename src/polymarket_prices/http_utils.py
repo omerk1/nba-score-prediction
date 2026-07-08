@@ -1,5 +1,5 @@
 """
-Shared HTTP helpers for the Polymarket comeback-analysis pipeline.
+Shared HTTP helpers for the Polymarket price-history pipeline.
 
 Standalone module — independent of src/data_processing/polymarket_collector.py
 (the earlier "A5" pre-game-odds collector). Provides:

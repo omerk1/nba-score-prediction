@@ -3,9 +3,9 @@ Orchestration: given a list of NBA game slugs, run discovery -> trade
 download -> series construction -> per-game summary -> pre-game snapshot,
 and write:
 
-- data/polymarket_comeback/raw/                cached raw API responses (via http_utils/data_api)
-- data/polymarket_comeback/games.csv           one row per game (Step 3 + Step 3b columns)
-- data/polymarket_comeback/series/{slug}.parquet   full per-game unified price series
+- data/polymarket_prices/raw/                cached raw API responses (via http_utils/data_api)
+- data/polymarket_prices/games.csv           one row per game (Step 3 + Step 3b columns)
+- data/polymarket_prices/series/{slug}.parquet   full per-game unified price series
 
 Resumable: if a game's row is already present in games.csv AND its series
 parquet exists, it is skipped (unless force_refresh=True). Raw API responses

@@ -1,13 +1,13 @@
 """
 Comeback threshold analysis.
 
-Given data/polymarket_comeback/games.csv (produced by run_polymarket_comeback.py),
+Given data/polymarket_prices/games.csv (produced by fetch_polymarket_prices.py),
 print, for each threshold p in [0.01, 0.02, 0.03, 0.05, 0.10, 0.15, 0.20], the
 number and percent of games where the eventual winner's in-game (robust) min
 price was <= p, plus a list of the most extreme comebacks with Polymarket links.
 
 Usage:
-    python analyze_polymarket_comebacks.py [--games-csv data/polymarket_comeback/games.csv]
+    python analyze_polymarket_comebacks.py [--games-csv data/polymarket_prices/games.csv]
 """
 
 import argparse
@@ -19,7 +19,7 @@ THRESHOLDS = [0.01, 0.02, 0.03, 0.05, 0.10, 0.15, 0.20]
 
 def main():
     parser = argparse.ArgumentParser(description="Comeback threshold analysis over games.csv")
-    parser.add_argument("--games-csv", default="data/polymarket_comeback/games.csv")
+    parser.add_argument("--games-csv", default="data/polymarket_prices/games.csv")
     parser.add_argument("--top-n", type=int, default=10, help="How many most-extreme comebacks to list")
     args = parser.parse_args()
 
