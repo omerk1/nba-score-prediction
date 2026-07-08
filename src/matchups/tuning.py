@@ -1,6 +1,6 @@
 """
-Item #1 (real hyperparameter search) + the in-memory pipeline both item #1 and
-items #2/#3 build on.
+The Hyperparameter Search & Alternative Methods stage's real hyperparameter search,
+plus the in-memory pipeline that stage and the Walk-Forward CV Check both build on.
 
 IMPORTANT (per coordinator clarification): the established baseline this whole
 run compares against (corr_a7_alone = 0.281, Phase 3/4 in the phase log) uses
@@ -140,11 +140,13 @@ def build_index_inmemory(
     """Same z-score + concat logic as matchup_index.build_matchup_index, operating on
     an in-memory fingerprint frame instead of reading matchup_fingerprints by layer.
 
-    Item #7 fix: `zscore_cutoff_date`, if given, restricts the z-score mean/std fit to
-    fingerprint rows strictly before this date -- point-in-time, matching how
-    encoding_pca.py already correctly fits its StandardScaler/PCA on TRAIN-split-only
-    data. Default None preserves the OLD global-stats behavior (all rows, including ones
-    dated after any given evaluation point) for any caller that doesn't pass a cutoff."""
+    Fix from the Critique & Bug-Fix Pass: `zscore_cutoff_date`, if given, restricts
+    the z-score mean/std fit to fingerprint rows strictly before this date --
+    point-in-time, the same "fit on the past" discipline the Hyperparameter Search &
+    Alternative Methods stage's PCA comparison used for its StandardScaler/PCA on
+    TRAIN-split-only data. Default None preserves the OLD global-stats behavior (all
+    rows, including ones dated after any given evaluation point) for any caller that
+    doesn't pass a cutoff."""
     fit_fp = fp[fp["game_date"] < zscore_cutoff_date] if zscore_cutoff_date is not None else fp
     stats = {}
     for m in FINGERPRINT_METRICS:
@@ -183,17 +185,18 @@ def run_search_inmemory(
     """Identical leakage-guard/search logic to similarity.run_similarity_search,
     operating on an in-memory idx built by build_index_inmemory (no DB read).
 
-    Extended this run (walk-forward CV) with two new, backward-compatible axes:
-      method="knn_floor" -- the hybrid method (item #2): up to `k` nearest neighbors
-        by cosine similarity, but ONLY those that also clear `floor` (a minimum
-        cosine similarity). If fewer than `k` games clear the floor, fewer are used
-        (never padded with dissimilar games to force the count) -- this is what lets
-        n_similar shrink naturally in thin/mismatched periods, which flows straight
-        into the existing confidence/fallback mechanism unchanged.
-      recency_years -- (item #3) if set, the search corpus for a target game is
-        further restricted to prior games within `recency_years` of the target's
-        date (in addition to the existing strict "before this date" exclusion).
-        None (default) preserves the original unbounded-history behavior.
+    Extended by the Walk-Forward CV Check with two new, backward-compatible axes:
+      method="knn_floor" -- the KNN-with-similarity-floor hybrid method: up to `k`
+        nearest neighbors by cosine similarity, but ONLY those that also clear
+        `floor` (a minimum cosine similarity). If fewer than `k` games clear the
+        floor, fewer are used (never padded with dissimilar games to force the
+        count) -- this is what lets n_similar shrink naturally in thin/mismatched
+        periods, which flows straight into the existing confidence/fallback
+        mechanism unchanged.
+      recency_years -- if set, the search corpus for a target game is further
+        restricted to prior games within `recency_years` of the target's date (in
+        addition to the existing strict "before this date" exclusion). None
+        (default) preserves the original unbounded-history behavior.
 
     Leakage discipline unchanged: dates are converted to datetime64 (from the
     date-sorted idx) and both the upper bound (strictly before target date, via
@@ -283,11 +286,11 @@ def evaluate_config(
     `floor` (method="knn_floor") and `recency_years` (any method) are the two new
     axes added this run -- see run_search_inmemory's docstring.
 
-    `zscore_cutoff_date` (item #7, wrap-up round): if given, z-score mean/std for the
-    matchup vectors are fit only on fingerprint rows strictly before this date (no
-    look-ahead) -- see build_index_inmemory's docstring. Default None reproduces the
-    OLD (leaky) global-stats behavior, kept as the default so any existing caller that
-    doesn't explicitly opt in is unaffected."""
+    `zscore_cutoff_date` (added by the Critique & Bug-Fix Pass): if given, z-score
+    mean/std for the matchup vectors are fit only on fingerprint rows strictly before
+    this date (no look-ahead) -- see build_index_inmemory's docstring. Default None
+    reproduces the OLD (leaky) global-stats behavior, kept as the default so any
+    existing caller that doesn't explicitly opt in is unaffected."""
     fp1 = build_fingerprints_inmemory(consts["raw"], window=window, halflife=halflife)
     fp = apply_injury_deltas(fp1, consts["delta_lookup"]) if layer == 2 else fp1
     idx = build_index_inmemory(fp, consts["games"], zscore_cutoff_date=zscore_cutoff_date)
@@ -312,12 +315,13 @@ def evaluate_config(
 def build_fp_for_config(consts: dict, window: int, halflife: float, layer: int = 2) -> pd.DataFrame:
     """The (window, halflife, layer)-dependent fingerprint frame only -- the expensive,
     zscore-cutoff-INDEPENDENT part of build_idx_for_config (rolling-window computation +
-    injury-delta application). Split out (item #7) so callers that need to evaluate the
-    SAME fingerprint config against MULTIPLE zscore_cutoff_date values (e.g. one per
-    walk-forward fold, each fold needing its own point-in-time z-score fit) can build
-    this ONCE and then call build_index_inmemory(fp, games, zscore_cutoff_date=...) per
-    fold/cutoff -- only the cheap z-score+concat step needs to be redone per fold, not
-    the rolling-window fingerprint math."""
+    injury-delta application). Split out by the Critique & Bug-Fix Pass so callers
+    that need to evaluate the SAME fingerprint config against MULTIPLE
+    zscore_cutoff_date values (e.g. one per walk-forward fold, each fold needing its
+    own point-in-time z-score fit) can build this ONCE and then call
+    build_index_inmemory(fp, games, zscore_cutoff_date=...) per fold/cutoff -- only
+    the cheap z-score+concat step needs to be redone per fold, not the rolling-window
+    fingerprint math."""
     fp1 = build_fingerprints_inmemory(consts["raw"], window=window, halflife=halflife)
     return apply_injury_deltas(fp1, consts["delta_lookup"]) if layer == 2 else fp1
 
@@ -328,11 +332,11 @@ def build_idx_for_config(
 ) -> pd.DataFrame:
     """Build the (window, halflife, layer)-dependent matchup index ONCE, so callers that
     need to evaluate the SAME fingerprint config across many eval windows (e.g. the
-    walk-forward folds, item #1 of the previous run) don't redo the fingerprint/injury
-    work per fold -- only run_search_inmemory (cheap relative to fingerprint building)
-    needs to be re-run per fold/eval-window.
+    Walk-Forward CV Check's folds) don't redo the fingerprint/injury work per fold --
+    only run_search_inmemory (cheap relative to fingerprint building) needs to be
+    re-run per fold/eval-window.
 
-    `zscore_cutoff_date` (item #7, wrap-up round): passed straight through to
+    `zscore_cutoff_date` (added by the Critique & Bug-Fix Pass): passed straight through to
     build_index_inmemory -- if given, z-score stats are fit only on rows strictly before
     this date. NOTE: if a caller needs a DIFFERENT zscore_cutoff_date per fold (the
     walk-forward harness does), call build_fp_for_config once and build_index_inmemory
@@ -343,7 +347,7 @@ def build_idx_for_config(
 
 
 # ---------------------------------------------------------------------------
-# Optuna search (item #1)
+# Optuna hyperparameter search
 # ---------------------------------------------------------------------------
 
 def run_optuna_search(
@@ -356,9 +360,10 @@ def run_optuna_search(
     train (selection) and validation (report) evaluation windows, and to the
     hand-picked default's re-evaluation on the same splits. Mirrors exactly how
     walkforward.py's `zscore_point_in_time` fits each fold's stats on data strictly
-    before that fold's `validation_start` -- same mechanism (item #7's
-    `zscore_cutoff_date`), just applied to this single static split instead of
-    per-fold. Default False preserves the OLD (leaky, global-stats) behavior this
+    before that fold's `validation_start` -- same mechanism (the Critique &
+    Bug-Fix Pass's `zscore_cutoff_date`), just applied to this single static split
+    instead of per-fold. Default False preserves the OLD (leaky, global-stats)
+    behavior this
     function has always had, so no existing caller silently changes behavior."""
     import optuna
     optuna.logging.set_verbosity(optuna.logging.WARNING)

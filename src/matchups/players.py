@@ -29,9 +29,10 @@ from nba_api.stats.static import players as nba_players
 
 from src.matchups.db import cache_conn, init_cache_db, injury_conn, nba_api_conn, table_exists
 
-# Item #1 (wrap-up round): player_importance has minutes_per_game/usage_rate, the
-# "how much" data classify_archetypes' clustering finding (see phase log, Phase 0)
-# said was missing from player_stats_cache's PPG/AST/REB/BLK/STL/FG% alone.
+# Added by the Critique & Bug-Fix Pass: player_importance has minutes_per_game/
+# usage_rate, the "how much" data classify_archetypes' clustering finding (see
+# phase log's Initial Build section) said was missing from player_stats_cache's
+# PPG/AST/REB/BLK/STL/FG% alone.
 
 logger = logging.getLogger(__name__)
 
@@ -187,9 +188,9 @@ def _load_minutes_usage_season_stats() -> pd.DataFrame:
 
     Coverage note: player_importance only goes back to 2018-10-22, so the 2016-17 and
     2017-18 seasons (the earliest two of ~10 in the corpus) get NaN here -- those
-    player-seasons are simply excluded from the minutes/usage-aware clustering (Item #1)
-    but remain classifiable under the percentile taxonomy (which doesn't need these
-    columns).
+    player-seasons are simply excluded from the minutes/usage-aware clustering (added
+    by the Critique & Bug-Fix Pass) but remain classifiable under the percentile
+    taxonomy (which doesn't need these columns).
     """
     with injury_conn() as conn:
         df = pd.read_sql_query(
@@ -206,8 +207,9 @@ def _load_minutes_usage_season_stats() -> pd.DataFrame:
 
 def _load_player_season_stats() -> pd.DataFrame:
     """Long-format player_stats_cache -> per-player-season averages of PPG/AST/REB/BLK/STL,
-    left-joined with minutes_per_game/usage_rate from player_importance (Item #1, wrap-up
-    round) -- NaN for the two earliest seasons player_importance doesn't cover."""
+    left-joined with minutes_per_game/usage_rate from player_importance (added by the
+    Critique & Bug-Fix Pass) -- NaN for the two earliest seasons player_importance
+    doesn't cover."""
     with nba_api_conn() as conn:
         df = pd.read_sql_query(
             "SELECT player_id, game_date, stat_name, stat_value FROM player_stats_cache", conn
@@ -249,10 +251,11 @@ def classify_archetypes(min_games: int = 20, percentiles: dict | None = None) ->
     stats["reb_pct"] = stats.groupby("season")["REB"].rank(pct=True)
     stats["stl_pct"] = stats.groupby("season")["STL"].rank(pct=True)
 
-    # Item #1 (wrap-up round): combo redefined using usage_rate + assist-RATE (per-minute
-    # AST, not raw accumulated AST) when minutes_per_game/usage_rate are available
-    # (2018-19 season onward -- see _load_minutes_usage_season_stats). This replaces the
-    # original v1 definition's "indirect high-threshold workaround" (ppg_pct/ast_pct both
+    # Added by the Critique & Bug-Fix Pass: combo redefined using usage_rate +
+    # assist-RATE (per-minute AST, not raw accumulated AST) when minutes_per_game/
+    # usage_rate are available (2018-19 season onward -- see
+    # _load_minutes_usage_season_stats). This replaces the original v1 definition's
+    # "indirect high-threshold workaround" (ppg_pct/ast_pct both
     # >=0.85, deliberately set high specifically to avoid re-selecting players who simply
     # accumulate a lot of raw PPG/AST by virtue of playing heavy minutes) with a DIRECT
     # measurement of the thing that workaround was approximating: genuine shot-creation

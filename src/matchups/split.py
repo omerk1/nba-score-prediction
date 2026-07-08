@@ -1,6 +1,7 @@
 """
-Guardrail (item #4 of the wider-exploration run): a real chronological train/
-validation split for A7 hyperparameter search and method comparison.
+Guardrail added by the Hyperparameter Search & Alternative Methods stage: a real
+chronological train/validation split for A7 hyperparameter search and method
+comparison.
 
 Reuses configs/config.yaml's EXISTING datasets_loading date ranges
 (train_start_date/train_end_date/validation_start_date/validation_end_date) —

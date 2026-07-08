@@ -12,14 +12,15 @@ Scope is restricted to game_dates present in scrape_log (source='pdf') so that
 "no rows in player_injuries for this team/date" reliably means "confirmed no one
 out" rather than "not scraped that day".
 
-**Decay-weighted "missing" sample (fix for the wrap-up round's item #3 finding):**
-a continuous multi-month absence (e.g. Collin Sexton's ~5-month ACL-recovery
-stretch) is not a clean repeated natural experiment — deep into a long absence, a
-team's roster/rotation/trades increasingly reflect "a team that has adapted," not
-"the marginal effect of missing this player," so treating every qualifying Out
-team-game identically let one long-absence player dominate and flip
-perimeter_specialist's sign (see docs/A7_PHASE_LOG.md item #3 and the "Decay-weighted
-injury-impact calibration" section). Instead of a hard cutoff on absence length (an
+**Decay-weighted "missing" sample (fix for the perimeter_specialist sign-flip found
+by the Critique & Bug-Fix Pass):** a continuous multi-month absence (e.g. Collin
+Sexton's ~5-month ACL-recovery stretch) is not a clean repeated natural experiment —
+deep into a long absence, a team's roster/rotation/trades increasingly reflect "a
+team that has adapted," not "the marginal effect of missing this player," so
+treating every qualifying Out team-game identically let one long-absence player
+dominate and flip perimeter_specialist's sign (see docs/a7_phase_log.md's Critique &
+Bug-Fix Pass and Injury-Calibration Decay Fix sections). Instead of a hard cutoff on
+absence length (an
 equally arbitrary, unexplored threshold), each Out-event is down-weighted by an
 exponential decay on its position within its continuous absence streak (1 = first
 game of the absence, 2 = second consecutive game, ...), using the SAME decay

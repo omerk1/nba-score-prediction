@@ -72,7 +72,7 @@ DEFAULT_STYLE_MATCHUP_CONFIG: dict[str, Any] = {
     "archetype_percentiles": {
         "facilitator": {"ast_pct": 0.65, "ppg_pct": 0.35},
         "scorer": {"ppg_pct": 0.65, "ast_pct": 0.35},
-        # combo: item #1 (wrap-up round) redefined this using usage_rate + assist-RATE
+        # combo: the Critique & Bug-Fix Pass redefined this using usage_rate + assist-RATE
         # (usage_pct/ast_rate_pct, from player_importance's minutes_per_game/usage_rate,
         # available 2018-19 onward) as the PRIMARY definition -- a direct measurement of
         # "high-usage dual-threat playmaker", replacing the original v1 workaround (raw

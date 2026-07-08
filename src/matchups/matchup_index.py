@@ -14,15 +14,16 @@ z-score was chosen over min-max because cosine similarity is invariant to per-di
 scale differences primarily through variance, and min-max is more sensitive to outlier
 games early in a team's rolling window (small n_games_in_window -> noisier extremes).
 
-**Item #7 (wrap-up round) fix:** the z-score mean/std were previously always computed
-across the FULL fingerprint history (including rows dated after any given evaluation
-point) — a genuine data-leakage bug: a game evaluated in, say, 2022 was normalized using
-statistics that include 2024-2026 data it could not have known about yet. `_zscore_stats`
-and `build_matchup_index` now accept an optional `zscore_cutoff_date`: when given, the
-mean/std are computed using only fingerprint rows with `game_date < zscore_cutoff_date`
-(mirrors exactly how `encoding_pca.py` already correctly fits its `StandardScaler`/`PCA`
-on TRAIN-split-only data — the same "fit on the past, transform everything" discipline,
-now applied to this simpler hand-picked z-score step too). Default `None` preserves the
+**Fix from the Critique & Bug-Fix Pass:** the z-score mean/std were previously always
+computed across the FULL fingerprint history (including rows dated after any given
+evaluation point) — a genuine data-leakage bug: a game evaluated in, say, 2022 was
+normalized using statistics that include 2024-2026 data it could not have known about
+yet. `_zscore_stats` and `build_matchup_index` now accept an optional
+`zscore_cutoff_date`: when given, the mean/std are computed using only fingerprint
+rows with `game_date < zscore_cutoff_date` (mirrors the same "fit on the past,
+transform everything" discipline the Hyperparameter Search & Alternative Methods
+stage's PCA comparison already used for its `StandardScaler`/`PCA` on
+TRAIN-split-only data). Default `None` preserves the
 OLD global-stats behavior for any caller that doesn't pass a cutoff (e.g. `similarity.py`
 today), so nothing existing silently changes behavior — see `walkforward.py` for the one
 caller that now passes a real per-fold cutoff.
@@ -85,8 +86,8 @@ def build_matchup_index(layer: int = 1, zscore_cutoff_date: str | None = None) -
 
     `zscore_cutoff_date`: if given, z-score mean/std are fit only on fingerprint rows
     strictly before this date (point-in-time, no leakage — see module docstring). If
-    omitted (default), behavior is unchanged from before item #7 (global stats across
-    the whole cached fingerprint history)."""
+    omitted (default), behavior is unchanged from before the Critique & Bug-Fix Pass's
+    fix (global stats across the whole cached fingerprint history)."""
     games = _load_games()
     fp = _load_fingerprints(layer)
     stats = _zscore_stats(fp, zscore_cutoff_date=zscore_cutoff_date)

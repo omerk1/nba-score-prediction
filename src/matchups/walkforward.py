@@ -1,5 +1,5 @@
 """
-Item #1 of this run: walk-forward (expanding-window) cross-validation harness.
+Walk-forward (expanding-window) cross-validation harness.
 
 Why this exists: the wider-exploration run's headline result (a hyperparameter-
 searched KNN config improving validation corr from 0.285 -> 0.323) was measured on a
@@ -9,7 +9,8 @@ fits the specific calendar quirks of one validation window." This module builds
 multiple chronological folds instead and evaluates the SAME three reference methods on
 every fold: (a) the untuned hand-picked default, (b) the wider-exploration run's
 winning config, (c) the new KNN-with-similarity-floor hybrid (see
-knn_similarity_floor_hybrid.py for how its (k, floor) was itself selected).
+docs/a7_phase_log.md's Walk-Forward CV Check section for how its (k, floor) was
+itself selected).
 
 Fold scheme: validate on each NBA REGULAR SEASON from 2021-22 through 2024-25 (four
 folds), training on everything before that season's start -- ending with the existing
@@ -36,16 +37,18 @@ the fold-scheme description; it is still recorded per fold below for completenes
 in case a future run adds a method that DOES need to fit something per fold (PCA/
 clustering/supervised walk-forward would need it).
 
-**Item #7 fix (wrap-up round):** the paragraph above described a real leakage bug, not
-just a "mild simplification" -- confirmed as a genuine bug in discussion with the human
-coordinator. The z-score normalization used to build each config's matchup vectors was
+**Fix from the Critique & Bug-Fix Pass:** the paragraph above described a real
+leakage bug, not just a "mild simplification" -- confirmed as a genuine bug in
+discussion with the human coordinator. The z-score normalization used to build each
+config's matchup vectors was
 fit on the FULL fingerprint history (including rows dated AFTER a given fold's
 validation window), so a game evaluated in, say, fold 1 (2021-22) was normalized using
 mean/std statistics that include 2024-2026 data that did not exist yet at prediction
 time. This module now fits z-score stats PER FOLD, using only fingerprint rows strictly
 before that fold's `validation_start` (the fold's own expanding training window -- the
 natural, already-existing boundary from the fold scheme above, not an invented one) --
-mirroring exactly how `encoding_pca.py` already correctly fits its StandardScaler/PCA on
+mirroring the same "fit on the past" discipline the Hyperparameter Search &
+Alternative Methods stage's PCA comparison used for its StandardScaler/PCA on
 TRAIN-split-only data. `run_walkforward(..., zscore_point_in_time=True)` (the new
 default) uses this corrected per-fold fit; `zscore_point_in_time=False` reproduces the
 OLD (leaky) global-stats behavior so the two can be compared side by side -- see the
@@ -77,7 +80,7 @@ FOLDS = [
      "validation_start": "2024-10-22", "validation_end": "2025-04-13"},
 ]
 
-# Item #8 (wrap-up round): a 5th fold using the 2025-26 season, already present in
+# Added by the Critique & Bug-Fix Pass: a 5th fold using the 2025-26 season, already present in
 # nba_api.sqlite through 2026-05-24 (confirmed: 1225 regular-season games, 0 with a
 # null final score) but beyond the existing validation_end_date (2025-04-13) guardrail
 # boundary. Season start/regular-season-end derived with the SAME method as the four
@@ -88,8 +91,8 @@ FOLDS = [
 # where per-day game counts drop from 15/day to 2-4/day -- the regular-season-finale to
 # playoffs transition, same signature as every other season). Kept SEPARATE from FOLDS
 # (not appended in place) so existing code that specifically wants the original
-# 4-fold walk-forward-CV-run scheme is unaffected; FOLDS_WITH_FOLD5 is what item #8's
-# analysis passes to run_walkforward(folds=...).
+# 4-fold walk-forward-CV-run scheme is unaffected; FOLDS_WITH_FOLD5 is what the
+# 5-fold analysis passes to run_walkforward(folds=...).
 FOLD_5 = {"fold": 5, "season": "2025-26", "train_end": "2025-10-01",
           "validation_start": "2025-10-21", "validation_end": "2026-04-12"}
 FOLDS_WITH_FOLD5 = FOLDS + [FOLD_5]
@@ -107,7 +110,7 @@ assert FOLDS[-1]["validation_end"] == _splits["validation_end"], (
     f"validation_end_date {_splits['validation_end']}"
 )
 
-# --- The three reference methods (item #1) ---------------------------------------
+# --- The three reference methods -------------------------------------------------
 REFERENCE_METHODS = {
     "default_handpicked": {
         "window": 20, "halflife": 5.0, "method": "cosine", "threshold": 0.70, "k": 30,
@@ -138,18 +141,19 @@ def run_walkforward(
     """Evaluates all three REFERENCE_METHODS on all four FOLDS. Returns a long
     DataFrame: one row per (method, fold) with corr/n_games/fallback_rate/mean_confidence.
 
-    `recency_years` (item #3): if set, bounds every method's similarity-search corpus
-    to this many years of prior history instead of the full unbounded history. Passed
+    `recency_years`: if set, bounds every method's similarity-search corpus to this
+    many years of prior history instead of the full unbounded history. Passed
     straight through to tuning.run_search_inmemory -- see that function's docstring.
 
-    `zscore_point_in_time` (item #7, wrap-up round): if True (the corrected default),
-    each fold's matchup-vector z-score stats are fit ONLY on fingerprint rows strictly
-    before that fold's validation_start (no look-ahead). If False, reproduces the OLD
-    (leaky) behavior -- one global fit across the full fingerprint history, shared by
-    every fold -- purely so the two can be compared side by side (see phase log).
+    `zscore_point_in_time` (added by the Critique & Bug-Fix Pass): if True (the
+    corrected default), each fold's matchup-vector z-score stats are fit ONLY on
+    fingerprint rows strictly before that fold's validation_start (no look-ahead).
+    If False, reproduces the OLD (leaky) behavior -- one global fit across the full
+    fingerprint history, shared by every fold -- purely so the two can be compared
+    side by side (see phase log).
 
-    `folds` (item #8): override the module-level FOLDS list, e.g. to add additional
-    folds built from newly-available 2025-26 data. Defaults to the original 4 FOLDS.
+    `folds`: override the module-level FOLDS list, e.g. to add additional folds
+    built from newly-available 2025-26 data. Defaults to the original 4 FOLDS.
     """
     consts = load_constants()
     fold_list = folds if folds is not None else FOLDS
