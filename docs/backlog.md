@@ -10,6 +10,7 @@
 - **A4** ✅ Lineup Data Collection (PR #14, ready to merge)
 - **A5** ✅ Polymarket Signals (PR #22, merged — real Polymarket API data, robust backfill, playoffs/championships focus)
 - **A6** 🔄 OddsPapi Sportsbook Signals (planned — full season coverage, 250+ bookmakers)
+- **A7** ✅ Style Matchup Score (branch `feature/a7-style-matchup`, 9 rounds — signal validated (beats A2 baseline, CV-robust), not yet integrated into `feature_builder.py`; see `docs/a7_phase_log.md`)
 
 ### Backfill Infrastructure ✅
 - **Backfill Resilience** (PR #21, merged)
@@ -80,30 +81,6 @@ left to play for without it being "tanking" (e.g. seed locked in with weeks to g
 **Data sources:** standings + remaining schedule (games left, other teams' records).
 **Output:** a continuous proxy (e.g. games until mathematically clinched) preferred over
 a binary flag, same reasoning as B4.
-
----
-
-## Phase 3: Feature Engineering Refinements
-
-### A7: Style Matchup Score
-
-**Current Status:** Implemented and validated on branch `feature/a7-style-matchup` — Phases
-0-5 complete, plus five follow-up rounds: hyperparameter search + PCA/clustering/
-supervised-model comparison, a walk-forward CV robustness check (tuned config wins on
-every fold), a wrap-up round (fixed a z-score normalization leak, added minutes/usage data
-to archetype classification, isolated injury-adjustment's real marginal contribution), a
-decay-weighted calibration fix (resolved the perimeter_specialist sign flip), and a
-confirmatory hyperparameter-search rerun (confirmed the standing config still wins under
-the normalization fix — no change). Style signal robustly beats the A2 H2H baseline across
-multiple independent validation folds. `style_matchup` is now a formally typed section of
-`configs/config.yaml` (`src/utils/config_loader.py`'s `StyleMatchupConfig`).
-Not yet integrated into `feature_builder.py`.
-
-All architecture decisions that used to be open here have been decided, implemented, and —
-where later questioned — re-validated with fresh scrutiny; see `docs/a7_phase_log.md` for
-what was actually built, tried, and found, rather than duplicating that detail here. The `combo`
-archetype was also redefined using real usage-rate data (previously a workaround); the
-recalibrated `injury_impact` values are already in `configs/config.yaml`.
 
 ---
 
