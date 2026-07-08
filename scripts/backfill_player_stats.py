@@ -5,9 +5,9 @@ This script populates the player_stats_cache table with game-level player statis
 from the NBA API. It processes games chronologically and can be resumed if interrupted.
 
 Usage:
-    python backfill_player_stats.py                    # Full backfill
-    python backfill_player_stats.py --start 2023-10-01 # Partial from date
-    python backfill_player_stats.py --update            # Incremental (new games only)
+    python scripts/backfill_player_stats.py                    # Full backfill
+    python scripts/backfill_player_stats.py --start 2023-10-01 # Partial from date
+    python scripts/backfill_player_stats.py --update            # Incremental (new games only)
 
 Options:
     --start DATE    Start date (YYYY-MM-DD) — defaults to config.data_start_date
@@ -33,6 +33,8 @@ from typing import Optional
 import pandas as pd
 from nba_api.stats.endpoints import BoxScoreTraditionalV3
 import numpy as np
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from src.data_processing.data_loader import NBADataLoader
 from src.migrations.migration_create_player_stats_cache import migrate_player_stats_cache

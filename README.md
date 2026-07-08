@@ -81,9 +81,10 @@ nba-score-prediction/
 │   └── models/                   # Trained model artifacts
 ├── notebooks/                    # Exploration notebooks
 ├── outputs/                      # Predictions and experiments.csv
+├── scripts/                      # Maintenance/tuning entry points (backfills, injury
+│                                  # features, hyperparameter tuning, Polymarket data)
 ├── train_model.py                # Training entry point
-├── predict_game.py               # Inference entry point
-└── build_injury_features.py      # Injury feature backfill pipeline
+└── predict_game.py               # Inference entry point
 ```
 
 ## Injury Features Pipeline
@@ -112,25 +113,25 @@ Steps must run in order. All steps are resumable — use `INSERT OR REPLACE`, so
 
 ```bash
 # Step 1: Build player importance scores from nba_api (~10 min, no LLM)
-python build_injury_features.py --run build_player_importance
+python scripts/build_injury_features.py --run build_player_importance
 
 # Step 2: Backfill historical injury features
-python build_injury_features.py --run backfill_historical_injuries
+python scripts/build_injury_features.py --run backfill_historical_injuries
 
 # Step 3 (daily): Fetch today's injuries before game time
-python build_injury_features.py --run nightly_update
+python scripts/build_injury_features.py --run nightly_update
 ```
 
 Test on a small range before committing to the full backfill:
 
 ```bash
-python build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
+python scripts/build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
 ```
 
 To resume after an interruption, advance `--start`:
 
 ```bash
-python build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
+python scripts/build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
 ```
 
 NBA official injury PDFs are available from the 2021-22 season onward (`pdf_era_start` in config). Earlier seasons fall back to ESPN scraping.
