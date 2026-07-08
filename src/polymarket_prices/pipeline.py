@@ -239,6 +239,17 @@ def run_pipeline(
             result["series"].to_parquet(series_path, index=False, compression="zstd")
         logger.info(f"{slug}: done (data_quality={result['summary'].get('data_quality')})")
 
+    # games.csv accumulates across separate pipeline invocations that each
+    # target a different batch of slugs (e.g. a 5-game checkpoint followed
+    # later by a disjoint 50-game batch) -- carry forward any previously
+    # processed games NOT in this call's slug list, so they aren't silently
+    # dropped from the CSV on overwrite (their series parquet files are
+    # untouched either way; this only concerns the summary CSV).
+    processed_slugs = set(slugs)
+    for slug, row in existing_rows.items():
+        if slug not in processed_slugs:
+            rows.append(row)
+
     df = pd.DataFrame(rows)
     df.to_csv(games_csv_path, index=False)
     logger.info(f"Wrote {len(df)} game rows to {games_csv_path}")
