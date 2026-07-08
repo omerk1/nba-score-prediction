@@ -1,12 +1,12 @@
 """
-Round 7 (feature-integration test): precomputes `style_matchup_score` (+
+Built for the KNN-score integration test: precomputes `style_matchup_score` (+
 `confidence`, `fallback_used`, `n_similar`) for every game_id in nba_api.sqlite's
 `game` table, caching the result in a new `style_matchup_scores` table in
 outputs/a7_matchups_cache.sqlite (our own additive cache DB -- see db.py's
 docstring; `game`/`nba_api.sqlite` itself is opened strictly read-only and
 never written to).
 
-This is the "precompute + join" half of the integration test: FeatureBuilder's
+This is the "precompute + join" half of that integration test: FeatureBuilder's
 new `_add_style_matchup_features` (src/feature_engineering/feature_builder.py)
 left-joins this table onto the training dataframe by GAME_ID rather than
 running the KNN similarity search live -- keeps that diff small and reuses
@@ -17,19 +17,21 @@ style_matchup block (fingerprint_window=37, decay_halflife=13.2, encoding=
 hand_picked, similarity_method=knn, knn_k=81, min_confidence_sample=21,
 full_confidence_sample=82, layer=2/injury-adjusted,
 injury_calibration_decay_halflife_games=20) via
-src/matchups/config.py:load_style_matchup_config() -- see docs/a7_phase_log.md
-Round 7 for why that yaml block previously still held the untuned defaults and
-was corrected as part of this run. Nothing is re-tuned here.
+src/matchups/config.py:load_style_matchup_config() -- see docs/a7_phase_log.md's
+KNN-Score Integration Test section for why that yaml block previously still held
+the untuned defaults and was corrected as part of that run. Nothing is re-tuned
+here.
 
 Z-score leakage: similarity.run_similarity_search is called with
 zscore_cutoff_date=<main config's datasets_loading.train_end_date> so the
 matchup-vector normalization stats are fit only on fingerprint rows strictly
 before the model's own train/validation boundary -- mirrors the
-zscore_point_in_time mechanism validated in phase log Round 6 (there applied
-per-fold/per-static-split for a hyperparameter search; here applied once for
-a single precompute pass covering train+val+test). The KNN/cosine search
-itself is unaffected -- already fully leakage-safe per-game via
-np.searchsorted on game_date (see similarity.py's docstring); this only
+zscore_point_in_time mechanism validated in the phase log's Post-Fix
+Hyperparameter Recheck section (there applied per-fold/per-static-split for a
+hyperparameter search; here applied once for a single precompute pass covering
+train+val+test). The KNN/cosine search itself is unaffected -- already fully
+leakage-safe per-game via np.searchsorted on game_date (see similarity.py's
+docstring); this only
 concerns the vector normalization constants, not which historical games are
 visible to a given target game.
 

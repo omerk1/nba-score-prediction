@@ -108,11 +108,12 @@ class StyleMatchupConfig(BaseModel):
     so it's left as a plain nested dict rather than a fixed per-archetype
     model. `enabled` gates feature_builder.py's _add_style_matchup_features
     (mirrors EloFeaturesConfig/InjuryFeaturesConfig's own `enabled` field) —
-    added in the Round 7 feature-integration test. `raw_features_enabled` gates
+    added by the KNN-score integration test. `raw_features_enabled` gates
     the separate, independently-toggleable _add_style_fingerprint_features
-    (Round 8: raw per-team fingerprint components + explicit home-vs-away
-    differentials, no KNN similarity search involved — a different feature set
-    from `enabled`'s KNN-lookup score, not a replacement for it)."""
+    (added by the raw-fingerprint feature redesign: raw per-team fingerprint
+    components + explicit home-vs-away differentials, no KNN similarity search
+    involved — a different feature set from `enabled`'s KNN-lookup score, not a
+    replacement for it)."""
     enabled: bool
     raw_features_enabled: bool = False
     fingerprint_window: int

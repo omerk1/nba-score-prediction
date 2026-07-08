@@ -107,21 +107,26 @@ style_matchup:
   # See docs/a7_style_matchup_design.md and docs/a7_phase_log.md for how these
   # values were chosen.
   #
-  # `enabled` gates feature_builder.py's _add_style_matchup_features (Round 7,
-  # feature-integration test). Left `false` as the committed default regardless
+  # `enabled` gates feature_builder.py's _add_style_matchup_features (added by the
+  # KNN-score integration test). Left `false` as the committed default regardless
   # of that test's outcome -- flipping this is the coordinator's decision, not
-  # made unilaterally by that run. See docs/a7_phase_log.md Round 7.
+  # made unilaterally by that run. See docs/a7_phase_log.md's KNN-Score
+  # Integration Test section.
   enabled: false
   # `raw_features_enabled` gates the SEPARATE, independently-toggleable
-  # _add_style_fingerprint_features (Round 8 redesign: raw per-team fingerprint
-  # components + explicit home-vs-away differentials, mirroring
-  # _add_matchup_features's pattern -- no KNN similarity search at all, unlike
-  # `enabled` above). Left `false` as the committed default regardless of that
-  # round's outcome, same rule as `enabled`. See docs/a7_phase_log.md Round 8.
+  # _add_style_fingerprint_features (added by the raw-fingerprint feature
+  # redesign: raw per-team fingerprint components + explicit home-vs-away
+  # differentials, mirroring _add_matchup_features's pattern -- no KNN
+  # similarity search at all, unlike `enabled` above). Left `false` as the
+  # committed default regardless of that redesign's outcome, same rule as
+  # `enabled`. See docs/a7_phase_log.md's Raw-Fingerprint Feature Redesign
+  # section.
   raw_features_enabled: false
-  # Round 7 correction: fingerprint_window/decay_halflife/similarity_method/knn_k/
+  # Correction made during the KNN-score integration test:
+  # fingerprint_window/decay_halflife/similarity_method/knn_k/
   # min_confidence_sample/full_confidence_sample below were the untuned Phase-0
-  # defaults -- despite the design doc and phase log (Round 2/6) both documenting
+  # defaults -- despite the design doc and phase log (Hyperparameter Search /
+  # Post-Fix Hyperparameter Recheck sections) both documenting
   # window=37/halflife=13.2/knn/k=81/min_conf=21/full_conf=82 as the validated,
   # winning config, that config was never actually written into this yaml block
   # (src/matchups/tuning.py and walkforward.py's REFERENCE_METHODS hardcode it
@@ -129,7 +134,7 @@ style_matchup:
   # from here). Corrected here so the precompute script (src/matchups/
   # precompute_scores.py) -- which reads this block via
   # src/matchups/config.py:load_style_matchup_config() -- actually uses the
-  # validated config, per this run's explicit instruction not to re-tune.
+  # validated config, per that run's explicit instruction not to re-tune.
   fingerprint_window: 37
   decay_halflife: 13.199390932957819
   # Halflife (consecutive qualifying team-games) for calibration.py's decay-weighted
@@ -138,7 +143,7 @@ style_matchup:
   # (5/10/20/40/10000-as-no-decay-reference) and why 20 was chosen.
   injury_calibration_decay_halflife_games: 20
   encoding: hand_picked
-  similarity_method: knn   # cosine | knn -- knn wins once properly tuned, see phase log Round 2
+  similarity_method: knn   # cosine | knn -- knn wins once properly tuned, see phase log's Hyperparameter Search section
   similarity_threshold: 0.70   # unused when similarity_method=knn; kept for the cosine code path
   knn_k: 81
   min_confidence_sample: 21

@@ -654,8 +654,9 @@ class FeatureBuilder:
         NOT computed live here: this method only left-joins the cached result
         onto df by GAME_ID, keeping this diff small and reusing the
         already-validated KNN similarity-search pipeline as-is (see
-        docs/a7_style_matchup_design.md / docs/a7_phase_log.md Round 7 for the
-        feature-integration test this wiring supports).
+        docs/a7_style_matchup_design.md / docs/a7_phase_log.md's KNN-Score
+        Integration Test section for the feature-integration test this wiring
+        supports).
         """
         cfg = load_config()
         if not cfg.style_matchup or not cfg.style_matchup.enabled:
@@ -683,24 +684,27 @@ class FeatureBuilder:
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     # Metrics with a calibrated (Layer 2, injury-adjusted) value already validated
-    # over Rounds 1-7 -- see docs/a7_phase_log.md.
+    # across A7's early stages -- see docs/a7_phase_log.md.
     _RAW_STYLE_CALIBRATED_METRICS = [
         "pace_score", "three_pt_reliance", "paint_activity", "defensive_rating", "assist_rate",
     ]
-    # Round 8 addition -- offensive-quality counterpart to defensive_rating. Layer 1
-    # (uncalibrated) only this round, a deliberate scope cut -- see fingerprint.py's
-    # docstring. Read from layer=1 explicitly rather than layer=2 (where it would be
-    # numerically identical, since no injury delta touches it -- see injury_layer.py).
+    # Added by the raw-fingerprint feature redesign -- offensive-quality counterpart
+    # to defensive_rating. Layer 1 (uncalibrated) only, a deliberate scope cut -- see
+    # fingerprint.py's docstring. Read from layer=1 explicitly rather than layer=2
+    # (where it would be numerically identical, since no injury delta touches it --
+    # see injury_layer.py).
     _RAW_STYLE_UNCALIBRATED_METRIC = "offensive_rating"
 
     def _add_style_fingerprint_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        A7 Round 8 redesign — raw per-team style-fingerprint components plus
-        explicit home-vs-away differentials, mirroring `_add_matchup_features`'s
-        existing pattern (home_off_vs_away_def_L{window}, etc.) instead of
-        `_add_style_matchup_features`'s KNN-similarity-search lookup above.
+        A7's raw-fingerprint feature redesign — raw per-team style-fingerprint
+        components plus explicit home-vs-away differentials, mirroring
+        `_add_matchup_features`'s existing pattern (home_off_vs_away_def_L{window},
+        etc.) instead of `_add_style_matchup_features`'s KNN-similarity-search
+        lookup above.
 
-        Motivation (see docs/a7_phase_log.md Round 8 / Round 7): Round 7 found
+        Motivation (see docs/a7_phase_log.md's Raw-Fingerprint Feature Redesign /
+        KNN-Score Integration Test sections): the KNN-score integration test found
         `style_matchup_score` — a pre-aggregated KNN-average "mini-prediction" —
         added essentially zero value to the trained model (29th of 109 features,
         confidence had zero importance) despite a decent standalone correlation.

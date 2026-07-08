@@ -1,12 +1,14 @@
 # A7 Style Matchup — Phase Log
 
-Condensed record of what was built, tried, and found across nine work rounds (all
-nine now complete). Full historical detail (per-fold tables, centroid dumps, halflife
-grids) lived here in earlier drafts — trimmed for conciseness; the numbers that
-mattered are kept below. Core method lives in `src/matchups/`; Round 7 wired the
-KNN-lookup score into `src/feature_engineering/feature_builder.py` (gated off by
-default); Round 8 added a second, independently-gated raw-components-plus-
-differentials feature set to the same file (also gated off by default — see Round 8).
+Condensed record of what was built, tried, and found, in chronological order (all
+stages below are complete). Full historical detail (per-fold tables, centroid dumps,
+halflife grids) lived here in earlier drafts — trimmed for conciseness; the numbers
+that mattered are kept below. Core method lives in `src/matchups/`; the KNN-Score
+Integration Test wired the KNN-lookup score into
+`src/feature_engineering/feature_builder.py` (gated off by default); the
+Raw-Fingerprint Feature Redesign added a second, independently-gated
+raw-components-plus-differentials feature set to the same file (also gated off by
+default — see below).
 
 ---
 
@@ -19,46 +21,48 @@ untuned default. Two real bugs were found and fixed along the way (a z-score
 normalization leak, an injury-calibration sign-flip artifact) — not just parameter
 tuning.
 
-**Round 7 (feature-integration test) found this does not translate into a measurable
+**The KNN-Score Integration Test found this does not translate into a measurable
 real-model accuracy improvement** once wired into `feature_builder.py`/`train_model.py`
 alongside the existing feature set (rolling efficiency, Elo, H2H, injury deficit) —
-see Round 7 below. `style_matchup.enabled` stays `false` by default; not adopted.
+see below. `style_matchup.enabled` stays `false` by default; not adopted.
 
-**Round 8 (raw components + explicit differentials, a redesign not a retune)**
-tried the structural fix Round 7's finding implied — expose the fingerprint's raw
-ingredients (plus a new `offensive_rating` quality metric) instead of one
-pre-aggregated KNN-average number. Result: real feature importance this time
-(top-2 overall features), but the signal sharpens `total_mae`, not `win_acc`/spread
-accuracy — mixed, not adopted by default either. See Round 8 below.
-`style_matchup.raw_features_enabled` also stays `false` by default.
+**The Raw-Fingerprint Feature Redesign** (raw components + explicit differentials, a
+redesign not a retune) tried the structural fix the KNN-Score Integration Test's
+finding implied — expose the fingerprint's raw ingredients (plus a new
+`offensive_rating` quality metric) instead of one pre-aggregated KNN-average number.
+Result: real feature importance this time (top-2 overall features), but the signal
+sharpens `total_mae`, not `win_acc`/spread accuracy — mixed, not adopted by default
+either. See below. `style_matchup.raw_features_enabled` also stays `false` by
+default.
 
-**Round 9a (expanding-window model CV, checking Round 8's robustness)** ran the
-same real-model comparison across `walkforward.py`'s 5 chronological folds instead
-of one static split. `total_mae` (and `diff_mae`/`brier`) improve consistently
-across all 5 folds — Round 8's headline finding holds, more robustly than one
-split could show. But `win_acc` — the metric that drove Round 8's "do not adopt"
-call — reverses sign on 2 of 5 folds and is roughly net-neutral in aggregate, so
-Round 8's "win_acc gets worse" characterization does not hold up as a stable
-property. `pace_score`'s #1/#2 importance (ahead of `elo_diff`) is confirmed
-consistent across every fold. Still not adopted by default (validation run, not
-an adoption decision) — see Round 9a below.
+**The Expanding-Window Model CV** (checking the Raw-Fingerprint Feature Redesign's
+robustness) ran the same real-model comparison across `walkforward.py`'s 5
+chronological folds instead of one static split. `total_mae` (and `diff_mae`/`brier`)
+improve consistently across all 5 folds — the Raw-Fingerprint Feature Redesign's
+headline finding holds, more robustly than one split could show. But `win_acc` — the
+metric that drove the "do not adopt" call — reverses sign on 2 of 5 folds and is
+roughly net-neutral in aggregate, so the "win_acc gets worse" characterization does
+not hold up as a stable property. `pace_score`'s #1/#2 importance (ahead of
+`elo_diff`) is confirmed consistent across every fold. Still not adopted by default
+(validation run, not an adoption decision) — see below.
 
 **Current recommended config** (`configs/config.yaml`'s `style_matchup` block):
 `fingerprint_window=37, decay_halflife=13.2, encoding=hand_picked, similarity_method=knn,
 knn_k=81, min_confidence_sample=21, full_confidence_sample=82, layer=2 (injury-adjusted),
 injury_calibration_decay_halflife_games=20`.
 
-**Round 6 closed the last open item.** The hyperparameter search that found this config
-ran before the z-score fix; Round 4 confirmed the fix didn't change which config wins
-(walk-forward CV) but never reran the search itself under corrected normalization.
-Round 6 reran it (identical search space/trials/seed) — the corrected-normalization
-search's own best config does not beat the standing recommendation above (re-evaluated
-under the same corrected normalization: 0.220 train / 0.321 validation vs. the new
-search's 0.208 train / 0.319 validation). No config change.
+**The Post-Fix Hyperparameter Recheck closed the last open item.** The hyperparameter
+search that found this config ran before the z-score fix; the Critique & Bug-Fix Pass
+confirmed the fix didn't change which config wins (walk-forward CV) but never reran
+the search itself under corrected normalization. This recheck reran it (identical
+search space/trials/seed) — the corrected-normalization search's own best config does
+not beat the standing recommendation above (re-evaluated under the same corrected
+normalization: 0.220 train / 0.321 validation vs. the new search's 0.208 train / 0.319
+validation). No config change.
 
 ---
 
-## Round 1 — Foundation (Phases 0–5)
+## Initial Build (Phases 0–5)
 
 Built from scratch: box-score cache (`box_scores.py`, via `nba_api.LeagueGameLog`,
 parity-checked 1:1 against the `game` table), player-name→id resolution (`players.py`,
@@ -72,9 +76,9 @@ adjustment (Layer 2), and cosine/KNN similarity search (`similarity.py`).
   `FeatureBuilder._add_h2h_features`).
 - **Result: style score correlates 0.281 with actual home margin vs. A2's 0.118** —
   more than double. Cosine@0.70 beat untuned KNN k=30 (0.281 vs 0.248, later reversed
-  in Round 2 once KNN was properly tuned). Hand-picked encoding cleared the design
-  doc's 0.2 bar, so PCA was skipped per the doc's own conditional rule (tested anyway
-  in Round 2).
+  once KNN was properly tuned in the Hyperparameter Search). Hand-picked encoding
+  cleared the design doc's 0.2 bar, so PCA was skipped per the doc's own conditional
+  rule (tested anyway in the Hyperparameter Search).
 - The naive "Layer 1 only / Layer 1+2" (no similarity search) ablation correlates
   *negatively* (-0.14) — not a bug, confirms the design doc's own warning against
   comparing raw style vectors directly. Layer 3 (the search) is what turns the
@@ -85,19 +89,20 @@ adjustment (Layer 2), and cosine/KNN similarity search (`similarity.py`).
   PPG/AST/REB/BLK/STL/FG% available, no minutes/usage data at the time). Kept
   percentiles.
 - `perimeter_specialist`'s calibrated injury delta had the wrong sign vs. the design
-  doc's v1 guess — flagged for investigation, resolved in Round 5.
+  doc's v1 guess — flagged for investigation, resolved in the Injury-Calibration
+  Decay Fix.
 
 ---
 
-## Round 2 — Wider exploration
+## Hyperparameter Search & Alternative Methods
 
 Real hyperparameter search (`tuning.py`, Optuna, 40 trials) instead of hand-picked
 grids; PCA and clustering tried unconditionally (not just as escape hatches); a
 CatBoost supervised-model paradigm tried as a genuine alternative to lookup-and-average.
 
 - **Best config found: window=37, halflife=13.2, similarity_method=knn, knn_k=81** —
-  validation corr 0.323 vs. 0.285 untuned default. This *reversed* Round 1's
-  cosine-beats-KNN finding — KNN wasn't worse, it was under-tuned at k=30.
+  validation corr 0.323 vs. 0.285 untuned default. This *reversed* the Initial
+  Build's cosine-beats-KNN finding — KNN wasn't worse, it was under-tuned at k=30.
 - PCA (0.262) and clustering (0.192, weakest method) both lost to hand-picked cosine.
 - Supervised CatBoost tied the untuned default (0.284) but lost to the tuned lookup
   config, and was the only method showing train>validation overfitting.
@@ -106,11 +111,12 @@ CatBoost supervised-model paradigm tried as a genuine alternative to lookup-and-
 
 ---
 
-## Round 3 — Walk-forward CV
+## Walk-Forward CV Check
 
 Built a proper multi-fold CV (`walkforward.py`, 4 folds validating on 2021-22 through
-2024-25) to check whether Round 2's winning config was robust or a one-split fluke.
-Also tested a KNN-with-similarity-floor hybrid and a recency-cutoff sweep.
+2024-25) to check whether the Hyperparameter Search's winning config was robust or a
+one-split fluke. Also tested a KNN-with-similarity-floor hybrid and a recency-cutoff
+sweep.
 
 - **Confirmed robust: the tuned config beats the untuned default on every single
   fold** (mean 0.2547 vs 0.1962), with *lower* variance (0.052 vs 0.073) — not just a
@@ -123,7 +129,7 @@ Also tested a KNN-with-similarity-floor hybrid and a recency-cutoff sweep.
 
 ---
 
-## Round 4 — Wrap-up (5 items, critique mode)
+## Critique & Bug-Fix Pass (5 Items)
 
 ### Z-score normalization leak (fixed)
 Found the z-score mean/std used to build matchup vectors was computed globally across
@@ -155,14 +161,15 @@ percentiles instead of an artificially high PPG/AST threshold (verified: preserv
 continuous ACL-recovery absence alone accounts for 127 of 680 qualifying event-rows.
 Excluding just his rows flips the delta to +0.957. Verdict: small-sample/
 misclassification artifact (an offense-first guard misclassified by a stat-based
-archetype definition), not a real basketball effect. Fix implemented in Round 5.
+archetype definition), not a real basketball effect. Fix implemented in the
+Injury-Calibration Decay Fix (below).
 
 ### Injury adjustment's real contribution — isolated
-Earlier rounds only compared Layer 1 vs. Layer 2 *without* the similarity search
+Earlier work only compared Layer 1 vs. Layer 2 *without* the similarity search
 active (both near -0.14, uninformative). Built the missing comparison: full pipeline,
 layer=1 vs layer=2, search method held constant. **Layer 2 beats Layer 1 on every
 single fold for both configs** (small, consistent, +0.005 to +0.007 mean) — resolves
-a question left open since Round 1.
+a question left open since the Initial Build.
 
 ### Walk-forward extended to 5 folds
 Added a 5th fold using already-present 2025-26 data. Tuned config's advantage held
@@ -171,12 +178,13 @@ slightly at n=5, as expected with one more data point.
 
 ---
 
-## Round 5 — Decay-weighted injury calibration (fixes Round 4's flagged issue)
+## Injury-Calibration Decay Fix
 
 Calibration previously treated every qualifying `Out` team-game identically regardless
 of how long the absence had run. Fixed by weighting each event by
 `0.5 ** (streak_position / halflife)` — reusing the exact decay math already used for
-fingerprint rolling windows (`fingerprint.py`'s `_decay_weight`), not new math.
+fingerprint rolling windows (`fingerprint.py`'s `_decay_weight`), not new math. Fixes
+the `perimeter_specialist` sign-flip flagged by the Critique & Bug-Fix Pass.
 
 **Halflife grid (all archetypes checked, not just the one that motivated this):**
 
@@ -199,16 +207,16 @@ regression.
 
 ---
 
-## Round 6 — Hyperparameter search recheck
+## Post-Fix Hyperparameter Recheck
 
-Reran the Round 2 Optuna search (`tuning.run_optuna_search`, identical search space,
-40 trials, TPE, seed=42) under Round 4's z-score fix — the one residual gap Round 4
-explicitly flagged and left open (the fix was verified against the walk-forward harness,
-never against the search that originally produced this config). New
-`zscore_point_in_time` flag on `run_optuna_search` reuses the existing
-`zscore_cutoff_date` mechanism, fit once at `train_end_date` (2024-04-14) and applied to
-both the train (selection) and validation (report) windows — same principle as the
-per-fold fix, just for one static cutoff instead of five.
+Reran the Hyperparameter Search's Optuna search (`tuning.run_optuna_search`, identical
+search space, 40 trials, TPE, seed=42) under the Critique & Bug-Fix Pass's z-score fix
+— the one residual gap that pass explicitly flagged and left open (the fix was
+verified against the walk-forward harness, never against the search that originally
+produced this config). New `zscore_point_in_time` flag on `run_optuna_search` reuses
+the existing `zscore_cutoff_date` mechanism, fit once at `train_end_date` (2024-04-14)
+and applied to both the train (selection) and validation (report) windows — same
+principle as the per-fold fix, just for one static cutoff instead of five.
 
 **All four numbers below use identical corrected normalization — a genuine
 apples-to-apples table:**
@@ -220,8 +228,8 @@ apples-to-apples table:**
 | **standing config** (window=37/halflife=13.2/knn k=81/min_conf=21/full_conf=82) | **0.220** | **0.321** |
 
 - The standing config's own numbers barely moved from its originally-reported
-  (leaky-normalization) 0.218/0.323 — confirms Round 4's general finding that this fix
-  doesn't differentially affect already-tuned configs.
+  (leaky-normalization) 0.218/0.323 — confirms the Critique & Bug-Fix Pass's general
+  finding that this fix doesn't differentially affect already-tuned configs.
 - **The fresh 40-trial search did not find anything better — its own best config scores
   *below* the standing config on both splits**, under the identical metric it was
   selecting on. The new config is a minor variation in the same neighborhood (large
@@ -236,7 +244,7 @@ apples-to-apples table:**
 
 ---
 
-## Round 7 — Feature integration test
+## KNN-Score Integration Test
 
 The acid test: does A7 improve the actual trained model's real prediction accuracy,
 not just correlation-with-margin in isolation? Reversed two standing rules
@@ -255,14 +263,15 @@ both now in scope, per explicit instruction.
   fix, 24.75% after, matching the design doc's expectation).
 - Found and fixed en route: `configs/config.yaml`'s `style_matchup` block still had
   the untuned Phase-0 defaults (window=20/halflife=5/cosine/k=30) — despite the
-  design doc and Round 2/6 both documenting window=37/halflife=13.2/knn/k=81 as the
-  validated winner, that config was never actually written into the yaml (only
+  design doc and earlier rounds both documenting window=37/halflife=13.2/knn/k=81 as
+  the validated winner, that config was never actually written into the yaml (only
   hardcoded separately inside `tuning.py`/`walkforward.py`). Corrected as part of
   this round (not a re-tune — using the already-identified winner).
 - `similarity.run_similarity_search` gained an optional `zscore_cutoff_date` param
   (default `None`, backward compatible) so the precompute pass fits matchup-vector
   z-score stats only on pre-`train_end_date` (2024-04-14) data — avoids a look-ahead
-  leak into val/test scores, reusing the exact mechanism validated in Round 6.
+  leak into val/test scores, reusing the exact mechanism validated by the Post-Fix
+  Hyperparameter Recheck.
 - `FeatureBuilder._add_style_matchup_features` — left-joins the cache onto the
   training dataframe by `GAME_ID`, gated by new `style_matchup.enabled` config flag
   (mirrors the `elo_features`/`injury_features` gating pattern exactly). Left
@@ -324,15 +333,15 @@ doesn't move accuracy).
 
 ---
 
-## Round 8 — Raw fingerprint components + explicit differentials (redesign, not a retune)
+## Raw-Fingerprint Feature Redesign (Not a Retune)
 
-Round 7's `style_matchup_score` is a pre-aggregated KNN-average "mini-prediction" —
-CatBoost never sees the ingredients, just one opaque number (29th of 109 features,
-confidence 0% importance). This round tests a structurally different alternative:
-expose the fingerprint's raw per-team components plus explicit home-vs-away
-differentials directly, mirroring `_add_matchup_features`'s existing pattern
-(`home_off_vs_away_def_L{window}` etc.) instead of another black-box lookup. No KNN
-involved at all. Additive, independently gated — old method/pipeline untouched.
+The KNN-Score Integration Test's `style_matchup_score` is a pre-aggregated KNN-average
+"mini-prediction" — CatBoost never sees the ingredients, just one opaque number (29th
+of 109 features, confidence 0% importance). This round tests a structurally different
+alternative: expose the fingerprint's raw per-team components plus explicit
+home-vs-away differentials directly, mirroring `_add_matchup_features`'s existing
+pattern (`home_off_vs_away_def_L{window}` etc.) instead of another black-box lookup.
+No KNN involved at all. Additive, independently gated — old method/pipeline untouched.
 
 **Also fixed a real gap, not just a re-encoding:** 4 of the 5 original metrics
 (`pace_score`, `three_pt_reliance`, `paint_activity`, `assist_rate`) are volume/style
@@ -343,9 +352,10 @@ estimate as `defensive_rating`) as a 6th `FINGERPRINT_METRICS` entry in
 (deliberate scope cut; a full Phase-0-style calibration is out of scope for this
 redesign round, candidate for later if this approach shows promise). Rebuilt
 layer=1/layer=2 fingerprint caches (25,436 team-games; 24.75% injury-adjusted,
-matching Round 7's coverage exactly); layer=2 passes `offensive_rating` through
-unmodified (verified 100% match vs layer=1). `db.py`'s `matchup_fingerprints` schema
-gained the column plus an `ALTER TABLE` migration for pre-existing cache DBs.
+matching the KNN-Score Integration Test's coverage exactly); layer=2 passes
+`offensive_rating` through unmodified (verified 100% match vs layer=1). `db.py`'s
+`matchup_fingerprints` schema gained the column plus an `ALTER TABLE` migration for
+pre-existing cache DBs.
 
 **Built:** `FeatureBuilder._add_style_fingerprint_features` — reads
 `matchup_fingerprints` directly (no similarity search), layer=2 for the 5 calibrated
@@ -355,7 +365,8 @@ teams. Adds 18 columns: `home_style_{metric}` / `away_style_{metric}` (12 raw) +
 (default `false`), independent of `style_matchup.enabled` — both can be toggled
 separately. `config_loader.py`'s `StyleMatchupConfig` gained the field (default
 `False` so any caller not yet passing it still works); `tests/test_h2h.py`'s mock
-config updated (same MagicMock-truthiness fix pattern as Round 7).
+config updated (same MagicMock-truthiness fix pattern as the KNN-Score Integration
+Test).
 
 **Blocker:** fresh worktree had no `data/raw/*.sqlite` symlinks and an empty
 `outputs/a7_matchups_cache.sqlite` (git-ignored data files, not carried over) — and
@@ -366,14 +377,15 @@ working copy (read-only, matches `db.py`'s existing symlink convention), removed
 the stale unused worktree registration (clean, no lost work, confirmed via
 `git status`/`git diff` before removing), and rebuilt every cache table from
 scratch. Rebuilt coverage numbers (name resolution 90.95%, archetypes, 24.75%
-injury-adjusted) matched Round 7's documented values exactly, confirming the
-rebuild reproduced the same environment.
+injury-adjusted) matched the KNN-Score Integration Test's documented values exactly,
+confirming the rebuild reproduced the same environment.
 
-**Experiment:** reran all three configs end-to-end (not reused from Round 7's CSV —
-having rebuilt the environment from empty, wanted freshly-generated, directly
-comparable full feature-importance tables for all three, which Round 7's artifacts
-never saved). `train_model.py` now also dumps the FULL per-feature importance table
-(not just top-20) to `outputs/a7_feature_importance_<run_name>.csv` — Round 7 only
+**Experiment:** reran all three configs end-to-end (not reused from the KNN-Score
+Integration Test's CSV — having rebuilt the environment from empty, wanted
+freshly-generated, directly comparable full feature-importance tables for all three,
+which that test's artifacts never saved). `train_model.py` now also dumps the FULL
+per-feature importance table (not just top-20) to
+`outputs/a7_feature_importance_<run_name>.csv` — the KNN-Score Integration Test only
 kept top-20 (print + gitignored `outputs/reports/`), losing the full ranking once the
 worktree was cleaned up.
 
@@ -390,11 +402,12 @@ worktree was cleaned up.
 | val brier | **0.2129** | 0.2142 | **0.2129** |
 | test brier | **0.2108** | 0.2095 | 0.2113 |
 
-Baseline and old-KNN rows match Round 7's `a7_integration_test_results.csv` exactly
-(e.g. baseline val/test diff_mae 11.162/11.572 both rounds) — confirms unchanged
-environment/data despite the from-scratch rebuild. `style_matchup_score` still
-ranks 29th (~1% importance), confidence still 0% — Round 7's finding reconfirmed,
-unaffected by this round's additive changes.
+Baseline and old-KNN rows match the KNN-Score Integration Test's
+`a7_integration_test_results.csv` exactly (e.g. baseline val/test diff_mae
+11.162/11.572 both times) — confirms unchanged environment/data despite the
+from-scratch rebuild. `style_matchup_score` still ranks 29th (~1% importance),
+confidence still 0% — that test's finding reconfirmed, unaffected by this round's
+additive changes.
 
 **Does the redesign get non-trivial importance? Yes, clearly** — unlike the old
 score's ~1%/0%. In the new run, `home_style_pace_score`/`away_style_pace_score` rank
@@ -424,21 +437,22 @@ is confirmed — but the *specific* new information the model latches onto
 markets the project cares about most.
 
 **Recommendation: do not adopt by default at this time**, but for a different reason
-than Round 7 — not "no signal" (there clearly is, and it's structurally the fix Round
-7's finding called for) but "the signal that emerged sharpens the wrong market."
-Two concrete follow-ups if revisited: (a) since `total_mae` improved substantially,
-consider whether a total-points-focused evaluation (or an over/under product
-surface) would find this variant worth adopting even though win_acc doesn't improve —
-out of scope to judge here, flagging for the coordinator; (b) if pursuing the
-moneyline/spread angle further, the zero-importance columns (`home_style_
-three_pt_reliance`, `away_style_defensive_rating`, `style_assist_rate_diff`) are
-candidates to drop, and the asymmetry between `home_style_offensive_rating` (rank
-102, ~0) and `away_style_offensive_rating` (rank 13) is worth a closer look before
-concluding the metric itself is the win — it may be specifically the *away* team's
-offensive quality relative to home defensive/rolling features already in the model
-that's informative, not offensive_rating symmetrically. Config defaults correctly
-left `false` for both `style_matchup.enabled` and `raw_features_enabled`;
-`predict_game.py` untouched, per instructions.
+than the KNN-Score Integration Test — not "no signal" (there clearly is, and it's
+structurally the fix that test's finding called for) but "the signal that emerged
+sharpens the wrong market." Two concrete follow-ups if revisited: (a) since
+`total_mae` improved substantially, consider whether a total-points-focused
+evaluation (or an over/under product surface) would find this variant worth adopting
+even though win_acc doesn't improve — out of scope to judge here, flagging for the
+coordinator; (b) if pursuing the moneyline/spread angle further, the zero-importance
+columns (`home_style_three_pt_reliance`, `away_style_defensive_rating`,
+`style_assist_rate_diff`) are candidates to drop, and the asymmetry between
+`home_style_offensive_rating` (rank 102, ~0) and `away_style_offensive_rating` (rank
+13) is worth a closer look before concluding the metric itself is the win — it may be
+specifically the *away* team's offensive quality relative to home defensive/rolling
+features already in the model that's informative, not offensive_rating
+symmetrically. Config defaults correctly left `false` for both
+`style_matchup.enabled` and `raw_features_enabled`; `predict_game.py` untouched, per
+instructions.
 
 Full rows: `outputs/a7_fingerprint_features_results.csv` (run names `a7r8_baseline` /
 `a7r8_old_knn_style_matchup` / `a7r8_raw_fingerprint_features`) — NOT
@@ -447,26 +461,26 @@ Full rows: `outputs/a7_fingerprint_features_results.csv` (run names `a7r8_baseli
 
 ---
 
-## Round 9a — Expanding-window CV for the raw fingerprint features
+## Expanding-Window Model CV (Raw-Fingerprint Features)
 
-Round 8's mixed result (`total_mae` improves, `win_acc` worsens) was measured on a
-SINGLE static train/validation/test split — the same limitation Round 3/6 already
-addressed for A7's standalone similarity-search pipeline via `walkforward.py`'s
-5-fold walk-forward CV. This round applies the same rigor to the full trained
-model: reuses `walkforward.py`'s exact `FOLDS_WITH_FOLD5` boundaries unmodified
-(train-through-cutoff / validate-on-next-season), but instead of evaluating A7's
-standalone lookup per fold, builds real features via `FeatureBuilder.
-create_all_features` and trains the actual CatBoost model per fold — reusing
-`train_model.py`'s data-loading/feature-building/training/metric flow and
-hyperparameters as-is (`src/matchups/experiments/round9_modelcv.py`; kept in this
-directory despite training the full model, since its entire purpose is checking
-an A7 finding's robustness and it reuses `walkforward.py`'s fold scheme directly).
-No re-tuning of anything. `style_matchup.enabled`/`raw_features_enabled` toggled
-via an in-memory `model_copy(update=...)` monkeypatch of `feature_builder.
-load_config` — reversible per-process, the committed `config.yaml` is never
-touched. No third split per fold (`walkforward.py`'s own scheme is train/validate
-only), so — per instructions — only each fold's validation season is reported,
-not a val+test pair like Round 8's single-split table.
+The Raw-Fingerprint Feature Redesign's mixed result (`total_mae` improves, `win_acc`
+worsens) was measured on a SINGLE static train/validation/test split — the same
+limitation the Walk-Forward CV Check already addressed for A7's standalone
+similarity-search pipeline via `walkforward.py`'s 5-fold walk-forward CV. This round
+applies the same rigor to the full trained model: reuses `walkforward.py`'s exact
+`FOLDS_WITH_FOLD5` boundaries unmodified (train-through-cutoff / validate-on-next-
+season), but instead of evaluating A7's standalone lookup per fold, builds real
+features via `FeatureBuilder.create_all_features` and trains the actual CatBoost model
+per fold — reusing `train_model.py`'s data-loading/feature-building/training/metric
+flow and hyperparameters as-is (`src/matchups/experiments/round9_modelcv.py`; kept in
+this directory despite training the full model, since its entire purpose is checking
+an A7 finding's robustness and it reuses `walkforward.py`'s fold scheme directly). No
+re-tuning of anything. `style_matchup.enabled`/`raw_features_enabled` toggled via an
+in-memory `model_copy(update=...)` monkeypatch of `feature_builder.load_config` —
+reversible per-process, the committed `config.yaml` is never touched. No third split
+per fold (`walkforward.py`'s own scheme is train/validate only), so — per
+instructions — only each fold's validation season is reported, not a val+test pair
+like the single-split table above.
 
 **Per-fold results (validation season only; baseline=107 feat, raw_features=125 feat):**
 
@@ -494,92 +508,96 @@ Full rows: `outputs/a7_round9_modelcv_results.csv` — NOT `outputs/experiments.
 Full per-feature importance, every fold × config:
 `outputs/a7_round9_feature_importance_fold{1-5}_{baseline,raw_features}.csv`.
 
-**Does Round 8's pattern hold consistently across folds? Partially — total_mae
-robustly holds, win_acc does not.**
+**Does the Raw-Fingerprint Feature Redesign's pattern hold consistently across folds?
+Partially — total_mae robustly holds, win_acc does not.**
 
 - `total_mae`: raw_features improves on **all 5 of 5 folds**, unanimous, no
   exceptions — the single cleanest, most robust result in this whole round. It
   also comes with *lower* variance (±0.210 vs baseline's ±0.298), not just a
-  better mean. This is the strongest possible confirmation Round 8's headline
+  better mean. This is the strongest possible confirmation that the headline
   `total_mae` finding wasn't a one-split artifact.
 - `diff_mae`: raw_features ties-or-improves on all 5 folds (fold 1 is a
   statistical wash, +0.001; folds 2-5 all improve, up to −0.090 on fold 5) —
-  more consistently positive than Round 8's single-split "mixed" framing
-  (val better/test worse) suggested.
+  more consistently positive than the single-split "mixed" framing (val
+  better/test worse) suggested.
 - `brier`: raw_features improves-or-ties on all 5 folds too — another metric
   that looked like a wash on the single split but is quietly, consistently
   favorable across the walk-forward view.
 - `diff_within_5`: genuinely mixed, 3 of 5 folds better (2, 4, 5), 2 of 5 worse
-  (1, 3) — matches Round 8's "mixed" characterization for this specific metric.
+  (1, 3) — matches the single-split "mixed" characterization for this specific
+  metric.
 - **`win_acc`: does NOT hold consistently — it reverses sign on 2 of 5 folds.**
   Worse on folds 1, 2, 5 (2021-22, 2022-23, 2025-26: −0.0106, −0.0008, −0.0016)
   but *better* on folds 3, 4 (2023-24, 2024-25: +0.0113, +0.0114). Folds 3-4's
   gains are larger in magnitude than folds 1/2/5's losses, so the 5-fold mean
   win_acc is actually marginally **higher** for raw_features than baseline
-  (0.6525 vs 0.6505) — the opposite direction from Round 8's single-split
-  conclusion that win_acc gets worse. Round 8's win_acc-worse finding held on
-  the one split tested (which is closest to fold 4/5 here) but is not a stable
-  property of this feature set across folds — it is fold-dependent, close to a
-  coin flip in sign, and net-neutral-to-slightly-positive on average.
+  (0.6525 vs 0.6505) — the opposite direction from the single-split conclusion
+  that win_acc gets worse. That single-split finding held on the one split
+  tested (which is closest to fold 4/5 here) but is not a stable property of
+  this feature set across folds — it is fold-dependent, close to a coin flip in
+  sign, and net-neutral-to-slightly-positive on average.
 
-**Caveat on reproducing Round 8's exact split:** fold 4 here (train-through-
-2024-10-01, validate 2024-10-22 to 2025-04-13) is nominally the same window as
-Round 8's static-split validation set, but the numbers don't match Round 8's
-reported val row (this round: baseline win_acc 0.6490/raw 0.6604, raw *better*;
-Round 8: baseline 0.6531/raw 0.6514, raw *worse* — for what should be the same
-games). Root cause: this worktree's `matchup_fingerprints`/injury-calibration
-caches were rebuilt from scratch this round (see Blocker below) against the
-*current* `nba_api.sqlite`/`injury_features.sqlite` — more games and injury
-reports have been added since Round 8 ran, and the empirical, decay-weighted
-injury calibration (Round 5) is recomputed from the *full* available history
-every time it's built, so historical Layer-2 fingerprint values can legitimately
-shift when the underlying data grows, even for old games. Not a bug in this
-round's harness (row counts/coverage match Round 8's documented values, and this
-is the same recalibrate-from-full-history behavior Round 5 already documented as
-intentional) — but it means "same nominal split" isn't perfectly reproducible
-across time for this pipeline, itself a data point on how much noise to expect
-from this feature set's accuracy effect on any one split.
+**Caveat on reproducing the original static split exactly:** fold 4 here (train-
+through-2024-10-01, validate 2024-10-22 to 2025-04-13) is nominally the same window
+as the Raw-Fingerprint Feature Redesign's static-split validation set, but the
+numbers don't match that round's reported val row (this round: baseline win_acc
+0.6490/raw 0.6604, raw *better*; that round: baseline 0.6531/raw 0.6514, raw
+*worse* — for what should be the same games). Root cause: this worktree's
+`matchup_fingerprints`/injury-calibration caches were rebuilt from scratch this round
+(see Blocker below) against the *current* `nba_api.sqlite`/`injury_features.sqlite`
+— more games and injury reports have been added since, and the empirical,
+decay-weighted injury calibration (from the Injury-Calibration Decay Fix) is
+recomputed from the *full* available history every time it's built, so historical
+Layer-2 fingerprint values can legitimately shift when the underlying data grows,
+even for old games. Not a bug in this round's harness (row counts/coverage match the
+Raw-Fingerprint Feature Redesign's documented values, and this is the same
+recalibrate-from-full-history behavior already documented as intentional) — but it
+means "same nominal split" isn't perfectly reproducible across time for this
+pipeline, itself a data point on how much noise to expect from this feature set's
+accuracy effect on any one split.
 
 **Is pace_score's dominant importance consistent across folds? Yes, completely.**
 `home_style_pace_score`/`away_style_pace_score` rank **#1 and #2 overall in every
 single one of the 5 folds** (order between the two swaps fold to fold, magnitude
 ranges ~7-13 depending on fold, but never dislodged from the top 2), always ahead
 of `elo_diff` at #3. This is not a one-split artifact — it is the single most
-robust finding of this round. (A parallel feature-EDA task, run against this same
-codebase but tracked on a separate `feature/feature-eda` branch since it covers
-the whole model's features, not just A7, independently explains *why*:
-`pace_score` correlates ~0 with `elo_diff`/spread/moneyline labels but 0.37-0.38
-with `TOTAL_POINTS` — genuinely
-new information, but specifically for the total/over-under market, which lines up
-exactly with this round's `total_mae`-robust/`win_acc`-fold-dependent split.)
+robust finding of this round. (A separate feature-EDA task, run against this same
+codebase but tracked on its own `feature/feature-eda` branch since it covers the
+whole model's features, not just A7, independently explains *why*: `pace_score`
+correlates ~0 with `elo_diff`/spread/moneyline labels but 0.37-0.38 with
+`TOTAL_POINTS` — genuinely new information, but specifically for the total/over-under
+market, which lines up exactly with this round's `total_mae`-robust/`win_acc`-fold-
+dependent split.)
 
-**Blocker:** same as Round 8 — fresh worktree, no `data/raw/*.sqlite` symlinks,
-and the copied-in `outputs/a7_matchups_cache.sqlite` (from the human's working
-copy) predated the Round 8 `offensive_rating` column/migration (present in code,
-but the cached data still only had 5 metrics). Fallback: symlinked the 3 raw DBs
-same as Round 8's convention, copied (not symlinked, so as to not write into the
-human's live copy) the cache DB, ran `init_cache_db()` (triggers the `ALTER TABLE`
-migration) followed by `build_fingerprint_cache(layer=1)` +
-`build_injury_adjusted_fingerprints()` to populate real `offensive_rating` values
-and refresh Layer 2 — reused the already-built `player_name_resolution`/
-`player_archetypes`/`injury_calibration` tables rather than rebuilding those too
-(independent of fingerprint_window/decay_halflife, per `precompute_scores.py`'s
-own skip-if-populated logic). Confirmed 25,436 team-games both layers, 0 NULL
-`offensive_rating` post-rebuild, 24.25% injury-adjusted (vs Round 8's 24.75% —
-small drift, consistent with the caveat above: more current data than Round 8 had).
+**Blocker:** same as the Raw-Fingerprint Feature Redesign — fresh worktree, no
+`data/raw/*.sqlite` symlinks, and the copied-in `outputs/a7_matchups_cache.sqlite`
+(from the human's working copy) predated that round's `offensive_rating`
+column/migration (present in code, but the cached data still only had 5 metrics).
+Fallback: symlinked the 3 raw DBs same as that round's convention, copied (not
+symlinked, so as to not write into the human's live copy) the cache DB, ran
+`init_cache_db()` (triggers the `ALTER TABLE` migration) followed by
+`build_fingerprint_cache(layer=1)` + `build_injury_adjusted_fingerprints()` to
+populate real `offensive_rating` values and refresh Layer 2 — reused the
+already-built `player_name_resolution`/`player_archetypes`/`injury_calibration`
+tables rather than rebuilding those too (independent of
+fingerprint_window/decay_halflife, per `precompute_scores.py`'s own
+skip-if-populated logic). Confirmed 25,436 team-games both layers, 0 NULL
+`offensive_rating` post-rebuild, 24.25% injury-adjusted (vs the prior round's 24.75%
+— small drift, consistent with the caveat above: more current data than that round
+had).
 
 **Recommendation: still do not flip either flag by default (this is a validation
 run, not an adoption decision) — but the evidence is more favorable to the raw
-fingerprint approach than Round 8's single split suggested.** `total_mae`,
-`diff_mae`, and `brier` all now look like consistent, low-risk wins across 5
-independent folds (not just one), and `win_acc` — the metric that drove Round 8's
-"do not adopt" call — turns out not to be a stable cost at all: it's fold-
-dependent and roughly net-neutral in aggregate. If this feature set is revisited,
-it's now on stronger footing than Round 8 alone implied; a natural next step
-(flagged, not executed here, per this round's no-retuning scope) would be a
-total-points-focused product evaluation given how unanimous and variance-
-reducing the `total_mae` gain is — echoing the open item Round 8 already flagged
-in "Known open items" below, now with 5-fold confirmation instead of one split.
+fingerprint approach than the single split suggested.** `total_mae`, `diff_mae`, and
+`brier` all now look like consistent, low-risk wins across 5 independent folds (not
+just one), and `win_acc` — the metric that drove the original "do not adopt" call —
+turns out not to be a stable cost at all: it's fold-dependent and roughly
+net-neutral in aggregate. If this feature set is revisited, it's now on stronger
+footing than the single split alone implied; a natural next step (flagged, not
+executed here, per this round's no-retuning scope) would be a total-points-focused
+product evaluation given how unanimous and variance-reducing the `total_mae` gain is
+— echoing the open item already flagged in "Known open items" below, now with
+5-fold confirmation instead of one split.
 
 ---
 
@@ -588,26 +606,29 @@ in "Known open items" below, now with 5-fold confirmation instead of one split.
 - **PCA `n_components` sweep, further supervised-model tuning** — both already lose to
   hand-picked/lookup by a clear, CV-confirmed margin; low expected value.
 - **Richer/shot-chart style inputs** (`nba_api` shot-chart endpoints) — real scope
-  expansion, backlogged (`docs/backlog.md`); Round 7 found the current hand-picked
-  metric set doesn't add real signal on top of the existing model, so this is now
-  the more load-bearing open item, not just a nice-to-have.
-- **`config_loader.py` formalization** — done (`StyleMatchupConfig` added, 78 tests pass;
-  `enabled` field added Round 7, `raw_features_enabled` added Round 8).
-- **`feature_builder.py` integration** — done (Round 7, KNN-lookup score: no measurable
-  accuracy improvement). Round 8 tried a structurally different raw+differential
-  redesign: gets real feature importance (unlike Round 7's ~1%/0%) but the signal it
-  captures sharpens total-points accuracy, not win_acc/spread accuracy — mixed result,
-  not adopted by default either. Round 9a confirmed the `total_mae`/importance
-  finding across a 5-fold expanding-window model CV (consistent, unanimous), but
-  found Round 8's `win_acc`-worse finding was itself fold-dependent (reverses on
-  2/5 folds, net-neutral in aggregate) — not the stable cost Round 8's one split
-  implied. Both flags still stay `false` (validation run, not an adoption call).
-- **Offensive_rating injury-calibration** — deliberately deferred in Round 8 (Layer 1
-  only); a candidate full Phase-0-style calibration pass if the raw-features approach
-  is revisited.
-- **Total-points-focused evaluation** — Round 8 flagged that its redesign's `total_mae`
-  gain didn't show up in Round 7's original motivation (win_acc/spread), raising
-  whether a total/over-under-focused product surface would value this differently.
-  Round 9a's 5-fold CV strengthens the case for this being worth doing (unanimous,
+  expansion, backlogged (`docs/backlog.md`); the KNN-Score Integration Test found the
+  current hand-picked metric set doesn't add real signal on top of the existing
+  model, so this is now the more load-bearing open item, not just a nice-to-have.
+- **`config_loader.py` formalization** — done (`StyleMatchupConfig` added, 78 tests
+  pass; `enabled` field added by the KNN-Score Integration Test, `raw_features_enabled`
+  added by the Raw-Fingerprint Feature Redesign).
+- **`feature_builder.py` integration** — done (KNN-Score Integration Test: no
+  measurable accuracy improvement). The Raw-Fingerprint Feature Redesign tried a
+  structurally different raw+differential approach: gets real feature importance
+  (unlike the KNN score's ~1%/0%) but the signal it captures sharpens total-points
+  accuracy, not win_acc/spread accuracy — mixed result, not adopted by default
+  either. The Expanding-Window Model CV confirmed the `total_mae`/importance finding
+  across a 5-fold expanding-window model CV (consistent, unanimous), but found the
+  `win_acc`-worse finding was itself fold-dependent (reverses on 2/5 folds,
+  net-neutral in aggregate) — not the stable cost the single-split result implied.
+  Both flags still stay `false` (validation run, not an adoption call).
+- **Offensive_rating injury-calibration** — deliberately deferred in the
+  Raw-Fingerprint Feature Redesign (Layer 1 only); a candidate full Phase-0-style
+  calibration pass if the raw-features approach is revisited.
+- **Total-points-focused evaluation** — the Raw-Fingerprint Feature Redesign flagged
+  that its `total_mae` gain didn't show up in the KNN-Score Integration Test's
+  original motivation (win_acc/spread), raising whether a total/over-under-focused
+  product surface would value this differently. The Expanding-Window Model CV's
+  5-fold results strengthen the case for this being worth doing (unanimous,
   variance-reducing `total_mae` gain across every fold) — still not evaluated here,
   coordinator call.

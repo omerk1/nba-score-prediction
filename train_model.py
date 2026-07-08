@@ -71,7 +71,7 @@ def _save_experiment(
     """Append one row to `experiments_csv` (default outputs/experiments.csv, the
     shared production log). Creates the file with headers if absent.
 
-    `experiments_csv` override (Round 7, A7 feature-integration test): lets
+    `experiments_csv` override (added for A7's KNN-score integration test): lets
     exploratory/throwaway runs log to a separate file instead of polluting the
     shared history — see --experiments-csv below."""
     out = Path(experiments_csv)
@@ -231,9 +231,10 @@ def main():
     reports_dir.mkdir(exist_ok=True, parents=True)
     importance_df.to_csv(reports_dir / f"feature_importance_{args.run_name}.csv", index=False)
 
-    # A7 Round 8: outputs/reports/ is gitignored (and the model itself is gitignored
-    # too), so Round 7's artifacts lost the full per-feature importance ranking once
-    # the worktree was cleaned up -- only the top-20 above survived, print-only. Save
+    # Added by the raw-fingerprint feature redesign: outputs/reports/ is gitignored
+    # (and the model itself is gitignored too), so the KNN-score integration test's
+    # artifacts lost the full per-feature importance ranking once the worktree was
+    # cleaned up -- only the top-20 above survived, print-only. Save
     # the FULL table (every feature, not just A7's) to a non-gitignored path so the
     # coordinator can see where H2H/Elo/rolling-stats/etc. rank alongside any new
     # experimental features across runs.

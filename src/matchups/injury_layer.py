@@ -25,10 +25,11 @@ instances would double-count. Different archetypes missing simultaneously DO
 stack additively (each archetype's config block targets its own metrics
 independently, matching the design doc's per-archetype injury_impact structure).
 
-Round 8: fingerprint.py's FINGERPRINT_METRICS gained a 6th metric,
-offensive_rating. No archetype's injury_impact config entry references it (a
-deliberate scope cut -- see fingerprint.py's docstring), so the adjustment loop
-below never touches it and it passes through from layer=1 to layer=2 unchanged.
+The raw-fingerprint feature redesign gave fingerprint.py's FINGERPRINT_METRICS a
+6th metric, offensive_rating. No archetype's injury_impact config entry references
+it (a deliberate scope cut -- see fingerprint.py's docstring), so the adjustment
+loop below never touches it and it passes through from layer=1 to layer=2
+unchanged.
 FeatureBuilder's new raw-features method reads offensive_rating from layer=1
 directly rather than relying on this pass-through, to make that explicit.
 """

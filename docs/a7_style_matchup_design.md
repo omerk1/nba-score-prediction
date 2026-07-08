@@ -1,11 +1,14 @@
 # A7: Style Matchup Score — Architecture & Design (as-built)
 
-> **Status:** Validated across six work rounds (see `docs/a7_phase_log.md` for full
-> evidence trail). Round 7 integrated it into `feature_builder.py` behind a
-> `style_matchup.enabled` config flag (default `false`) and ran a real train/val/test
-> comparison — result: no measurable accuracy improvement over the existing feature
-> set, so it is not enabled by default. See phase log Round 7 for the full comparison
-> and recommendation.
+> **Status:** Validated across nine work stages (see `docs/a7_phase_log.md` for full
+> evidence trail). The KNN-Score Integration Test integrated it into
+> `feature_builder.py` behind a `style_matchup.enabled` config flag (default `false`)
+> and ran a real train/val/test comparison — result: no measurable accuracy
+> improvement over the existing feature set, so it is not enabled by default. A
+> follow-up redesign (raw fingerprint components instead of the KNN score) found real
+> feature importance but a mixed accuracy effect — see the phase log's KNN-Score
+> Integration Test and Raw-Fingerprint Feature Redesign sections for the full
+> comparison and recommendation.
 
 ---
 
@@ -23,7 +26,7 @@
 
 ### Why not compare team styles directly?
 
-The naive approach — comparing home style vector to away style vector — tells you "these teams play differently from each other." That's not useful. You want to know *who wins when this stylistic dynamic exists.* (Confirmed empirically: a naive per-dimension diff-sum correlates *negatively* with margin, -0.14 — see phase log Round 1.)
+The naive approach — comparing home style vector to away style vector — tells you "these teams play differently from each other." That's not useful. You want to know *who wins when this stylistic dynamic exists.* (Confirmed empirically: a naive per-dimension diff-sum correlates *negatively* with margin, -0.14 — see phase log's Initial Build section.)
 
 ### The right framing: a matchup is a single entity
 
@@ -44,7 +47,7 @@ Built from each team's **last N games before the game date** — never the game 
 
 This vector is computed for every historical game upfront, forming a searchable index (`src/matchups/matchup_index.py`): `game_id | date | matchup_vector (10 values) | actual_home_margin`.
 
-**Normalization:** z-score, fit point-in-time (only on data available up to the evaluation cutoff — a global-history fit was found to leak and was fixed; see phase log Round 4).
+**Normalization:** z-score, fit point-in-time (only on data available up to the evaluation cutoff — a global-history fit was found to leak and was fixed; see phase log's Critique & Bug-Fix Pass section).
 
 ---
 
@@ -62,7 +65,7 @@ This vector is computed for every historical game upfront, forming a searchable 
 
 **Decay:** exponential, half-life = `decay_halflife` games (tuned to 13.2, see below).
 
-**Alternatives tried and rejected** (phase log Round 2): PCA (5 components on 11 raw
+**Alternatives tried and rejected** (phase log's Hyperparameter Search & Alternative Methods section): PCA (5 components on 11 raw
 metrics) and KMeans clustering (k=8 archetype-pair bucket lookup) both scored lower
 than hand-picked on every split tested. Clustering was the weakest method overall —
 discretizing into cluster-pair buckets throws away the fine-grained ranking cosine
@@ -104,7 +107,7 @@ For each archetype, compare team style metrics in games where that archetype was
 games into that continuous absence this occurrence is (`halflife=20` games). This
 resolves a real bug found in the naive (unweighted) version: one player's ~5-month
 continuous absence dominated the `perimeter_specialist` sample and flipped its sign
-(see phase log Round 5). Severity multiplier (severe/moderate/minor) reuses the
+(see phase log's Injury-Calibration Decay Fix section). Severity multiplier (severe/moderate/minor) reuses the
 existing `injury_features.severity_weights` config, not duplicated.
 
 **Resolved:** `injury_features.sqlite`'s historical backfill sources from NBA official
@@ -192,10 +195,14 @@ Full numbers, per-round detail, and every rejected alternative: `docs/a7_phase_l
 - Layer order: Layer 2 before Layer 3 (confirmed).
 
 **Confirmed, no open items:** the hyperparameter search that chose the current config
-predated a later-fixed normalization bug; a rerun under the fix (phase log Round 6)
-found nothing better, confirming the config selection holds up. `feature_builder.py`
-integration itself was completed and tested in Round 7 — result: no measurable
-real-model accuracy improvement, not adopted by default (see phase log Round 7).
+predated a later-fixed normalization bug; a rerun under the fix (phase log's Post-Fix
+Hyperparameter Recheck section) found nothing better, confirming the config selection
+holds up. `feature_builder.py` integration itself was completed and tested by the
+KNN-Score Integration Test — result: no measurable real-model accuracy improvement,
+not adopted by default. A follow-up redesign (Raw-Fingerprint Feature Redesign, plus
+an Expanding-Window Model CV robustness check) found real feature importance but a
+signal that sharpens total-points accuracy rather than win/spread accuracy — also not
+adopted by default (see phase log for full detail).
 
 ---
 

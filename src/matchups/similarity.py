@@ -52,7 +52,7 @@ def run_similarity_search(
     """Returns one row per evaluated game: style_score, confidence, n_similar,
     fallback_used, plus h2h_score and actual_home_margin for comparison.
 
-    `zscore_cutoff_date` (Round 7, feature-integration test): if given, the
+    `zscore_cutoff_date` (added for the KNN-score integration test): if given, the
     matchup-vector z-score mean/std are fit only on fingerprint rows strictly
     before this date (point-in-time -- see matchup_index.py's docstring for
     why this matters and walkforward.py's `zscore_point_in_time` for the

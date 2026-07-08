@@ -1,34 +1,36 @@
 """
-Round 9a — does Round 8's raw-fingerprint-features finding hold across folds,
-or was it a one-split artifact?
+Expanding-window model CV -- does the raw-fingerprint feature redesign's finding
+hold across folds, or was it a one-split artifact?
 
-Round 8 (see docs/a7_phase_log.md) found that `_add_style_fingerprint_features`
-(raw per-team fingerprint components + explicit home/away differentials, gated by
-`style_matchup.raw_features_enabled`) gets real CatBoost feature importance --
-`home_style_pace_score`/`away_style_pace_score` outrank `elo_diff` outright -- but
-the accuracy effect was MIXED on the single static train/validation/test split
-config.yaml's datasets_loading dates define: `total_mae` improved clearly (val
-14.905 vs 15.070 baseline; test 15.410 vs 15.654), while `win_acc` got slightly
-WORSE on both splits (val 0.6514 vs 0.6531; test 0.6637 vs 0.6735).
+The raw-fingerprint feature redesign (see docs/a7_phase_log.md) found that
+`_add_style_fingerprint_features` (raw per-team fingerprint components + explicit
+home/away differentials, gated by `style_matchup.raw_features_enabled`) gets real
+CatBoost feature importance -- `home_style_pace_score`/`away_style_pace_score`
+outrank `elo_diff` outright -- but the accuracy effect was MIXED on the single
+static train/validation/test split config.yaml's datasets_loading dates define:
+`total_mae` improved clearly (val 14.905 vs 15.070 baseline; test 15.410 vs
+15.654), while `win_acc` got slightly WORSE on both splits (val 0.6514 vs 0.6531;
+test 0.6637 vs 0.6735).
 
 One static split cannot distinguish "this pattern is robust" from "this pattern
 fits the specific calendar quirks of one validation window" -- exactly the
 reasoning that motivated `walkforward.py`'s 5-fold walk-forward CV for A7's
-standalone similarity-search pipeline (Round 3/6). This module applies the SAME
-5 fold boundaries (`walkforward.FOLDS_WITH_FOLD5` -- train-through-cutoff /
-validate-on-next-season, unmodified, reused as-is) to the FULL trained model
-instead: per fold, build real features via `FeatureBuilder.create_all_features`
-and train the actual CatBoost model via `ScorePredictor`, reusing
-`train_model.py`'s exact data-loading/feature-building/training/metric flow and
-hyperparameters -- nothing here re-tunes or reimplements any of that, it is
-called per fold with a fold-specific date range substituted for
-`config.yaml`'s single static one.
+standalone similarity-search pipeline (the walk-forward CV check / post-fix
+hyperparameter recheck). This module applies the SAME 5 fold boundaries
+(`walkforward.FOLDS_WITH_FOLD5` -- train-through-cutoff / validate-on-next-season,
+unmodified, reused as-is) to the FULL trained model instead: per fold, build real
+features via `FeatureBuilder.create_all_features` and train the actual CatBoost
+model via `ScorePredictor`, reusing `train_model.py`'s exact
+data-loading/feature-building/training/metric flow and hyperparameters -- nothing
+here re-tunes or reimplements any of that, it is called per fold with a
+fold-specific date range substituted for `config.yaml`'s single static one.
 
 Two configs per fold (same hyperparameters, only this one difference):
   - "baseline":      style_matchup.enabled=False, raw_features_enabled=False
   - "raw_features":  style_matchup.enabled=False, raw_features_enabled=True
-(`enabled`, the OLD KNN-lookup score, stays off in both -- Round 7 already
-settled that path; this round is only about Round 8's raw+diff redesign.)
+(`enabled`, the OLD KNN-lookup score, stays off in both -- the KNN-score
+integration test already settled that path; this module is only about the
+raw-fingerprint feature redesign's raw+diff approach.)
 
 No test split per fold: `walkforward.py`'s own fold scheme is train/validate
 only (see its module docstring -- it never defines a third held-out split), so
@@ -50,10 +52,10 @@ itself is not modified, per instructions.
 Placement note: this script trains the full model (not just A7's standalone
 similarity-search/fingerprint pipeline), which the task instructions say may
 warrant a location outside `src/matchups/experiments/` -- kept here anyway
-because its entire purpose is checking the robustness of an A7 finding (Round 8),
-it reuses walkforward.py's fold scheme directly, and every other one-off A7
-analysis script already lives in this directory; splitting this one out would
-separate it from the round it's testing for no real benefit.
+because its entire purpose is checking the robustness of the raw-fingerprint
+feature redesign's finding, it reuses walkforward.py's fold scheme directly, and
+every other one-off A7 analysis script already lives in this directory; splitting
+this one out would separate it from the finding it's testing for no real benefit.
 
 Outputs (NOT outputs/experiments.csv, the shared production log):
   - outputs/a7_round9_modelcv_results.csv           (one row per fold x config)
