@@ -11,6 +11,7 @@
 - **A5** ✅ Polymarket Signals (PR #22, merged — real Polymarket API data, robust backfill, playoffs/championships focus)
 - **A6** 🔄 OddsPapi Sportsbook Signals (planned — full season coverage, 250+ bookmakers)
 - **A7** ✅ Style Matchup Score (branch `feature/a7-style-matchup`, 9 rounds — signal validated (beats A2 baseline, CV-robust), not yet integrated into `feature_builder.py`; see `docs/a7_phase_log.md`)
+- **A8** 🔄 Feature-Builder Fixes (found during A7's EDA): fix `h2h_win_pct_3yr`'s index-reindex bug (~99.7% NaN, live in default features) + disambiguate `home_team_3pt_rate_L{window}` (FG3_PCT) vs `home_style_three_pt_reliance` (3PA/FGA) naming
 
 ### Backfill Infrastructure ✅
 - **Backfill Resilience** (PR #21, merged)
