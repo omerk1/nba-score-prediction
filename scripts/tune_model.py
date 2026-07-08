@@ -7,7 +7,7 @@ Optimizes val diff_MAE with early stopping on every trial.
 Logs the best configuration to outputs/experiments.csv.
 
 Usage:
-    python tune_model.py --run-name hp_tuned --n-trials 40
+    python scripts/tune_model.py --run-name hp_tuned --n-trials 40
 """
 
 import argparse
@@ -19,7 +19,7 @@ import numpy as np
 import optuna
 import pandas as pd
 
-sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from src.data_processing.data_loader import load_training_data
 from src.feature_engineering.feature_builder import FeatureBuilder

@@ -4,9 +4,9 @@ Recover failed games from a backfill run.
 Extracts failed game IDs from backfill.log and retries them with exponential backoff.
 
 Usage:
-    python recover_failed_backfill.py                    # Use backfill.log
-    python recover_failed_backfill.py --logfile other.log # Use different log
-    python recover_failed_backfill.py --max-retries 5     # Retry each game up to 5 times
+    python scripts/recover_failed_backfill.py                    # Use backfill.log
+    python scripts/recover_failed_backfill.py --logfile other.log # Use different log
+    python scripts/recover_failed_backfill.py --max-retries 5     # Retry each game up to 5 times
 """
 
 import argparse
@@ -19,6 +19,8 @@ from typing import Set
 
 import pandas as pd
 from nba_api.stats.endpoints import BoxScoreTraditionalV3
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from src.data_processing.data_loader import NBADataLoader
 from src.utils.config_loader import load_config
