@@ -21,9 +21,9 @@ sys.path.insert(0, "src")
 
 from polymarket_comeback.pipeline import run_pipeline  # noqa: E402
 
-RAW_DIR = "data/raw"
-GAMES_CSV = "data/games.csv"
-SERIES_DIR = "data/series"
+RAW_DIR = "data/polymarket_comeback/raw"
+GAMES_CSV = "data/polymarket_comeback/games.csv"
+SERIES_DIR = "data/polymarket_comeback/series"
 
 
 def main():
