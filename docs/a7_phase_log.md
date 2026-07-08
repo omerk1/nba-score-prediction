@@ -563,12 +563,11 @@ accuracy effect on any one split.
 single one of the 5 folds** (order between the two swaps fold to fold, magnitude
 ranges ~7-13 depending on fold, but never dislodged from the top 2), always ahead
 of `elo_diff` at #3. This is not a one-split artifact — it is the single most
-robust finding of this round. (A separate feature-EDA task, run against this same
-codebase but tracked on its own `feature/feature-eda` branch since it covers the
-whole model's features, not just A7, independently explains *why*: `pace_score`
-correlates ~0 with `elo_diff`/spread/moneyline labels but 0.37-0.38 with
-`TOTAL_POINTS` — genuinely new information, but specifically for the total/over-under
-market, which lines up exactly with this round's `total_mae`-robust/`win_acc`-fold-
+robust finding of this round. (The Feature EDA below, run against this same
+codebase, independently explains *why*: `pace_score` correlates ~0 with
+`elo_diff`/spread/moneyline labels but 0.37-0.38 with `TOTAL_POINTS` — genuinely
+new information, but specifically for the total/over-under market, which lines up
+exactly with this round's `total_mae`-robust/`win_acc`-fold-
 dependent split.)
 
 **Blocker:** same as the Raw-Fingerprint Feature Redesign — fresh worktree, no
@@ -600,6 +599,35 @@ executed here, per this round's no-retuning scope) would be a total-points-focus
 product evaluation given how unanimous and variance-reducing the `total_mae` gain is
 — echoing the open item already flagged in "Known open items" below, now with
 5-fold confirmation instead of one split.
+
+---
+
+## Feature EDA (Full Model Feature Set)
+
+Comprehensive EDA on the model's full feature set (127 cols: 107 default-enabled +
+`style_matchup.enabled`'s 2 KNN cols + `raw_features_enabled`'s 18 raw-fingerprint
+cols, both flags locally overridden to `true` for this analysis only — committed
+`config.yaml` unchanged), motivated by the Raw-Fingerprint Feature Redesign's
+pace_score/elo_diff importance finding. Built `notebooks/02_feature_eda.ipynb`
+(distributions, missingness, feature-feature and feature-label correlation, era
+drift) + concise write-up `docs/feature_eda_insights.md`.
+
+**Single most important finding:** `pace_score` is not a redundant Elo proxy —
+`home/away_style_pace_score` correlate ~0 with `elo_diff` and the spread/moneyline
+labels, but 0.37-0.38 with `TOTAL_POINTS` (Elo, built from margin-of-victory, can't
+see this at all — correlates -0.003 with `TOTAL_POINTS`). Confirms the
+Raw-Fingerprint Feature Redesign's result structurally: genuinely new information,
+just for the total/over-under market. By contrast `style_offensive_rating_diff`
+(also top-15 in that redesign) correlates 0.75 with `elo_diff` — much more
+redundant.
+
+**Also found (not blockers, flagged for whoever picks these up next):** a real bug
+in `_compute_h2h_3year_win_pct` (index-reindex mismatch) makes `h2h_win_pct_3yr`
+~99.7% NaN and its apparent label correlations pure noise — live in the *default*
+feature set today, independent of A7 (see `docs/backlog.md`'s A8 item); and
+`style_matchup_confidence` is ~99.3% one constant value, structurally explaining
+the KNN-Score Integration Test's zero-importance finding for it.
+Full detail, redundant-feature list, and era-drift results: `docs/feature_eda_insights.md`.
 
 ---
 
