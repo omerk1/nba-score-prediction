@@ -4,8 +4,8 @@ download -> series construction -> per-game summary -> pre-game snapshot,
 and write:
 
 - data/polymarket_prices/raw/                cached raw API responses (via http_utils/data_api)
-- data/polymarket_prices/games.csv           one row per game (Step 3 + Step 3b columns)
-- data/polymarket_prices/series/{slug}.parquet   full per-game unified price series
+- data/polymarket_prices/games.csv           one row per game (Step 3 + Step 3b + Step 3/5 hybrid-source columns)
+- data/polymarket_prices/series/{slug}.parquet   1-minute OHLCV bars (Step 4; primary per-game series file)
 
 Resumable: if a game's row is already present in games.csv AND its series
 parquet exists, it is skipped (unless force_refresh=True). Raw API responses
@@ -95,13 +95,13 @@ def process_game(
         flags.append("gameStartTime_and_startDate_missing")
     game_start_ts = int(game_start.timestamp()) if game_start is not None else None
 
-    trades, capped = fetch_all_trades(ml.condition_id, raw_dir, force_refresh=force_refresh)
+    trades, trade_meta = fetch_all_trades(ml.condition_id, raw_dir, force_refresh=force_refresh)
 
     series = build_game_series(
         trades=trades,
         winner_token_id=winner_token,
         game_start_ts=game_start_ts,
-        trades_capped=capped,
+        trade_meta=trade_meta,
     )
     flags.extend(series.notes)
 
@@ -123,10 +123,17 @@ def process_game(
         "in_game_min_price_winner_raw_ts": series.in_game_min_price_raw_ts,
         "in_game_min_price_winner_robust": series.in_game_min_price_robust,
         "in_game_min_price_winner_robust_ts": series.in_game_min_price_robust_ts,
+        "in_game_min_price_winner_bar_vwap": series.in_game_min_price_bar_vwap,
+        "in_game_min_price_winner_bar_vwap_ts": series.in_game_min_price_bar_vwap_ts,
         "in_game_max_price_loser_sanity": series.in_game_max_price_loser_sanity,
         "in_game_trade_count": series.in_game_trade_count,
         "in_game_size_sum": series.in_game_size_sum,
         "data_quality": series.data_quality,
+        # Step 3/5: hybrid-source + cap-coverage bookkeeping
+        "trade_source": series.trade_source,
+        "was_capped": series.was_capped,
+        "earliest_trade_ts": series.earliest_trade_ts,
+        "pregame_coverage": series.pregame_coverage,
     }
 
     # --- Step 3b: pre-game snapshot for spread + totals ---
@@ -200,7 +207,10 @@ def process_game(
 
     row["flags"] = ";".join(flags)
 
-    return {"summary": row, "series": series.df}
+    # Step 4: the 1-minute OHLCV bars are the primary stored per-game series
+    # (parquet); the tick-level trades remain recoverable from the gzip-
+    # compressed raw cache (data/polymarket_prices/raw/trades/) if ever needed.
+    return {"summary": row, "series": series.bars}
 
 
 def run_pipeline(
