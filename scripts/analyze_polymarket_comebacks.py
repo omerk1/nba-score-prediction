@@ -7,7 +7,7 @@ number and percent of games where the eventual winner's in-game (robust) min
 price was <= p, plus a list of the most extreme comebacks with Polymarket links.
 
 Usage:
-    python analyze_polymarket_comebacks.py [--games-csv data/polymarket_prices/games.csv]
+    python scripts/analyze_polymarket_comebacks.py [--games-csv data/polymarket_prices/games.csv]
 """
 
 import argparse

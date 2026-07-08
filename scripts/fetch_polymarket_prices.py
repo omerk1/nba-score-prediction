@@ -8,7 +8,7 @@ Collects general per-game win-probability time series; comeback analysis
 (analyze_polymarket_comebacks.py) is one use of this data, not the only one.
 
 Usage:
-    python fetch_polymarket_prices.py --slugs nba-orl-chi-2026-04-10 nba-mem-uta-2026-04-10 ...
+    python scripts/fetch_polymarket_prices.py --slugs nba-orl-chi-2026-04-10 nba-mem-uta-2026-04-10 ...
 
 IMPORTANT (owner instruction): this is deliberately run on a small, explicit
 list of game slugs (~5 games from one recent week) as a checkpoint before any
@@ -18,8 +18,9 @@ larger-scale run. Do not pass a large slug list without the owner's go-ahead.
 import argparse
 import logging
 import sys
+from pathlib import Path
 
-sys.path.insert(0, "src")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from polymarket_prices.pipeline import run_pipeline  # noqa: E402
 

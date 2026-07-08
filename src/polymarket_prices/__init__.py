@@ -11,7 +11,7 @@ so other questions can be asked of it later.
 
 See the module docstrings in gamma.py / data_api.py for empirically-verified
 API schema notes and known limitations (offset cap, CLOB coarseness, etc.),
-and fetch_polymarket_prices.py at the repo root for the collection CLI entry
-point (analyze_polymarket_comebacks.py is the comeback-specific analysis
+and scripts/fetch_polymarket_prices.py for the collection CLI entry point
+(scripts/analyze_polymarket_comebacks.py is the comeback-specific analysis
 script built on top of this data, not part of this package).
 """
