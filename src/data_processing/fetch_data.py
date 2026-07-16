@@ -44,9 +44,33 @@ CREATE TABLE IF NOT EXISTS game (
     ft_pct_away   REAL,
     fg3_pct_away  REAL,
     ast_away      INTEGER,
-    reb_away      INTEGER
+    reb_away      INTEGER,
+    fgm_home      INTEGER,
+    fga_home      INTEGER,
+    fg3m_home     INTEGER,
+    fg3a_home     INTEGER,
+    ftm_home      INTEGER,
+    fta_home      INTEGER,
+    fgm_away      INTEGER,
+    fga_away      INTEGER,
+    fg3m_away     INTEGER,
+    fg3a_away     INTEGER,
+    ftm_away      INTEGER,
+    fta_away      INTEGER
 )
 """
+
+# Columns added after the `game` table's initial release (A8 volume-weighted shooting-pct
+# fix) — used by the one-time migration in scripts/migrate_shot_volume_columns.py to
+# ALTER TABLE an already-existing `game` table that predates these columns.
+SHOT_VOLUME_COLUMNS: list[tuple[str, str]] = [
+    ("fgm_home", "INTEGER"), ("fga_home", "INTEGER"),
+    ("fg3m_home", "INTEGER"), ("fg3a_home", "INTEGER"),
+    ("ftm_home", "INTEGER"), ("fta_home", "INTEGER"),
+    ("fgm_away", "INTEGER"), ("fga_away", "INTEGER"),
+    ("fg3m_away", "INTEGER"), ("fg3a_away", "INTEGER"),
+    ("ftm_away", "INTEGER"), ("fta_away", "INTEGER"),
+]
 
 
 def _date_to_season(date: str) -> str:
@@ -104,6 +128,20 @@ def _fetch_season(season: str, season_type: str) -> pd.DataFrame:
         "fg3_pct_away": merged["FG3_PCT_away"],
         "ast_away":     merged["AST_away"],
         "reb_away":     merged["REB_away"],
+        # Makes/attempts (A8): needed downstream for volume-weighted rolling shooting %,
+        # since averaging per-game percentages directly is statistically wrong.
+        "fgm_home":     merged["FGM_home"],
+        "fga_home":     merged["FGA_home"],
+        "fg3m_home":    merged["FG3M_home"],
+        "fg3a_home":    merged["FG3A_home"],
+        "ftm_home":     merged["FTM_home"],
+        "fta_home":     merged["FTA_home"],
+        "fgm_away":     merged["FGM_away"],
+        "fga_away":     merged["FGA_away"],
+        "fg3m_away":    merged["FG3M_away"],
+        "fg3a_away":    merged["FG3A_away"],
+        "ftm_away":     merged["FTM_away"],
+        "fta_away":     merged["FTA_away"],
     })
 
 

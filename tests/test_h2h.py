@@ -24,6 +24,29 @@ class TestH2HFeatures:
         mock_cfg.features.exclude = []
         return mock_cfg
 
+    @staticmethod
+    def _with_shot_volume(game: dict, fga_home: int = 80, fta_home: int = 25, fg3a_home: int = 25,
+                           fga_away: int = 78, fta_away: int = 24, fg3a_away: int = 24) -> dict:
+        """
+        Attach makes/attempts columns (A8: volume-weighted rolling shooting %) derived
+        from a game dict's existing *_PCT fields, so FeatureBuilder's rolling FG_PCT/
+        FT_PCT/fg3_pct features (which now require makes/attempts) aren't silently
+        skipped in these fixtures.
+        """
+        game['FGA_home'] = fga_home
+        game['FGM_home'] = round(fga_home * game['FG_PCT_home'])
+        game['FTA_home'] = fta_home
+        game['FTM_home'] = round(fta_home * game['FT_PCT_home'])
+        game['FG3A_home'] = fg3a_home
+        game['FG3M_home'] = round(fg3a_home * game['FG3_PCT_home'])
+        game['FGA_away'] = fga_away
+        game['FGM_away'] = round(fga_away * game['FG_PCT_away'])
+        game['FTA_away'] = fta_away
+        game['FTM_away'] = round(fta_away * game['FT_PCT_away'])
+        game['FG3A_away'] = fg3a_away
+        game['FG3M_away'] = round(fg3a_away * game['FG3_PCT_away'])
+        return game
+
     @pytest.fixture
     def sample_games_df(self):
         """Create a minimal sample dataset for testing"""
@@ -31,7 +54,7 @@ class TestH2HFeatures:
         games = []
 
         # Season 2022 (SEASON_ID = 2022)
-        games.append({
+        games.append(self._with_shot_volume({
             'GAME_ID': 1,
             'GAME_DATE': datetime(2021, 10, 19),
             'SEASON_ID': 2022,
@@ -45,10 +68,10 @@ class TestH2HFeatures:
             'HOME_TEAM_WINS': 1,
             'FG_PCT_home': 0.5, 'FT_PCT_home': 0.8, 'FG3_PCT_home': 0.35, 'AST_home': 25, 'REB_home': 40,
             'FG_PCT_away': 0.48, 'FT_PCT_away': 0.75, 'FG3_PCT_away': 0.33, 'AST_away': 24, 'REB_away': 38,
-        })
+        }))
 
         # Another game in season 2022
-        games.append({
+        games.append(self._with_shot_volume({
             'GAME_ID': 2,
             'GAME_DATE': datetime(2021, 12, 20),
             'SEASON_ID': 2022,
@@ -62,10 +85,10 @@ class TestH2HFeatures:
             'HOME_TEAM_WINS': 1,
             'FG_PCT_home': 0.48, 'FT_PCT_home': 0.75, 'FG3_PCT_home': 0.33, 'AST_home': 24, 'REB_home': 38,
             'FG_PCT_away': 0.5, 'FT_PCT_away': 0.8, 'FG3_PCT_away': 0.35, 'AST_away': 25, 'REB_away': 40,
-        })
+        }))
 
         # Season 2023
-        games.append({
+        games.append(self._with_shot_volume({
             'GAME_ID': 3,
             'GAME_DATE': datetime(2022, 11, 1),
             'SEASON_ID': 2023,
@@ -79,10 +102,10 @@ class TestH2HFeatures:
             'HOME_TEAM_WINS': 0,
             'FG_PCT_home': 0.45, 'FT_PCT_home': 0.72, 'FG3_PCT_home': 0.30, 'AST_home': 22, 'REB_home': 35,
             'FG_PCT_away': 0.52, 'FT_PCT_away': 0.82, 'FG3_PCT_away': 0.38, 'AST_away': 27, 'REB_away': 42,
-        })
+        }))
 
         # Another game in season 2023
-        games.append({
+        games.append(self._with_shot_volume({
             'GAME_ID': 4,
             'GAME_DATE': datetime(2023, 1, 15),
             'SEASON_ID': 2023,
@@ -96,10 +119,10 @@ class TestH2HFeatures:
             'HOME_TEAM_WINS': 1,
             'FG_PCT_home': 0.52, 'FT_PCT_home': 0.82, 'FG3_PCT_home': 0.38, 'AST_home': 27, 'REB_home': 42,
             'FG_PCT_away': 0.45, 'FT_PCT_away': 0.72, 'FG3_PCT_away': 0.30, 'AST_away': 22, 'REB_away': 35,
-        })
+        }))
 
         # Season 2024
-        games.append({
+        games.append(self._with_shot_volume({
             'GAME_ID': 5,
             'GAME_DATE': datetime(2023, 10, 25),
             'SEASON_ID': 2024,
@@ -113,10 +136,10 @@ class TestH2HFeatures:
             'HOME_TEAM_WINS': 1,
             'FG_PCT_home': 0.53, 'FT_PCT_home': 0.83, 'FG3_PCT_home': 0.39, 'AST_home': 28, 'REB_home': 43,
             'FG_PCT_away': 0.46, 'FT_PCT_away': 0.73, 'FG3_PCT_away': 0.31, 'AST_away': 23, 'REB_away': 36,
-        })
+        }))
 
         # Another game in season 2024
-        games.append({
+        games.append(self._with_shot_volume({
             'GAME_ID': 6,
             'GAME_DATE': datetime(2024, 1, 20),
             'SEASON_ID': 2024,
@@ -130,7 +153,7 @@ class TestH2HFeatures:
             'HOME_TEAM_WINS': 1,
             'FG_PCT_home': 0.49, 'FT_PCT_home': 0.76, 'FG3_PCT_home': 0.34, 'AST_home': 25, 'REB_home': 39,
             'FG_PCT_away': 0.47, 'FT_PCT_away': 0.71, 'FG3_PCT_away': 0.29, 'AST_away': 21, 'REB_away': 34,
-        })
+        }))
 
         df = pd.DataFrame(games)
         df['GAME_DATE'] = pd.to_datetime(df['GAME_DATE'])
@@ -316,7 +339,7 @@ class TestH2HFeatures:
         """Test that matchup key ordering is symmetric"""
         mock_config.return_value = self._mock_config()
         games = [
-            {
+            self._with_shot_volume({
                 'GAME_ID': i,
                 'GAME_DATE': datetime(2023, 1, i+1),
                 'SEASON_ID': 2024,
@@ -332,7 +355,7 @@ class TestH2HFeatures:
                 'AST_home': 25, 'REB_home': 40,
                 'FG_PCT_away': 0.48, 'FT_PCT_away': 0.75, 'FG3_PCT_away': 0.33,
                 'AST_away': 24, 'REB_away': 38,
-            }
+            })
             for i in range(4)
         ]
 

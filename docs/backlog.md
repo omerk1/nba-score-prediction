@@ -11,7 +11,7 @@
 - **A5** ✅ Polymarket Signals (PR #22, merged — real Polymarket API data, robust backfill, playoffs/championships focus)
 - **A6** 🔄 OddsPapi Sportsbook Signals (planned — full season coverage, 250+ bookmakers)
 - **A7** ✅ Style Matchup Score (branch `feature/a7-style-matchup`, 9 rounds — signal validated (beats A2 baseline, CV-robust), not yet integrated into `feature_builder.py`; see `docs/a7_phase_log.md`)
-- **A8** ✅ Feature-Builder Fixes (found during A7's EDA): fixed `h2h_win_pct_3yr`'s index-reindex bug (~99.7% NaN → NaN only for genuine first-meetings) + renamed `home_team_3pt_rate_L{window}` (FG3_PCT) → `home_team_fg3_pct_L{window}` to disambiguate from `home_style_three_pt_reliance` (3PA/FGA)
+- **A8** ✅ Feature-Builder Fixes (found during A7's EDA): fixed `h2h_win_pct_3yr`'s index-reindex bug (~99.7% NaN → NaN only for genuine first-meetings) + renamed `home_team_3pt_rate_L{window}` (FG3_PCT) → `home_team_fg3_pct_L{window}` to disambiguate from `home_style_three_pt_reliance` (3PA/FGA) + made rolling FG_PCT/FT_PCT/fg3_pct volume-weighted (sum(makes)/sum(attempts) over the window instead of a naive mean of per-game percentages, which let low-attempt outlier games swing the average as much as normal-volume ones) — required storing FGM/FGA/FG3M/FG3A/FTM/FTA in the `game` table (`scripts/migrate_shot_volume_columns.py` backfills these into pre-existing DBs)
 
 ### Backfill Infrastructure ✅
 - **Backfill Resilience** (PR #21, merged)
