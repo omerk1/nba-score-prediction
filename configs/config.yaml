@@ -55,7 +55,19 @@ features:
     - "AST_away"
     - "REB_home"
     - "REB_away"
-  
+    - "FGM_home"
+    - "FGM_away"
+    - "FGA_home"
+    - "FGA_away"
+    - "FG3M_home"
+    - "FG3M_away"
+    - "FG3A_home"
+    - "FG3A_away"
+    - "FTM_home"
+    - "FTM_away"
+    - "FTA_home"
+    - "FTA_away"
+
 # Model parameters
 model:
   random_state: 42
