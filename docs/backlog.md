@@ -25,6 +25,13 @@
 
 ---
 
+## Standalone: Polymarket In-Game Price History Pipeline
+
+**Status:** Built (branch `feature/polymarket-comeback-analysis`), not integrated with the prediction model — general-purpose per-game win-probability time series for comeback analysis, independent of A5/feature_builder.py.
+**Known limitation (deferred, not blocking):** the BUY/SELL side-split fetch (`data_api.py`) fixes the Data API's 3000-trade offset cap for the vast majority of games, but at extreme Finals-level volume (~6,000+ trades) both sides can still individually hit their own cap (observed directly on `nba-sas-okc-2026-05-26`, 6,427 trades). The Goldsky subgraph fallback from the original design doc was deliberately not built since it wasn't needed for the accepted scope; revisit only if comeback analysis on the highest-volume playoff games turns out to need it.
+
+---
+
 ## Phase 2: Dependent Features (Group B)
 
 ### B1: Player On/Off Splits Analysis
