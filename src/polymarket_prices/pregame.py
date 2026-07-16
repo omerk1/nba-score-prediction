@@ -1,6 +1,5 @@
 """
-Step 3b: pre-game "closing line" snapshot for spread/totals markets (and a
-CLOB cross-check helper for the moneyline pre-game price).
+Step 3b: pre-game "closing line" snapshot for spread/totals markets.
 
 Pre-game price is defined as the last traded price strictly BEFORE
 gameStartTime. Trades are returned newest-first by the Data API (verified),
@@ -12,11 +11,8 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .data_api import fetch_trades_until_before
-from .http_utils import get_json
 
 logger = logging.getLogger(__name__)
-
-CLOB_BASE = "https://clob.polymarket.com"
 
 
 def find_last_pregame_trade(
@@ -57,26 +53,3 @@ def fetch_pregame_snapshot(
         "capped": capped,
         "flag": None,
     }
-
-
-def clob_cross_check(token_id: str, start_ts: int, end_ts: int) -> Optional[Dict[str, Any]]:
-    """
-    Optional cross-check (design doc Step 3b): query CLOB /prices-history
-    with a startTs/endTs window ending at tip-off, to see whether pre-game
-    candles survive resolution even when in-game ones don't. Best-effort;
-    returns None on any failure or empty history.
-    """
-    try:
-        data = get_json(
-            f"{CLOB_BASE}/prices-history",
-            params={"market": token_id, "startTs": start_ts, "endTs": end_ts, "fidelity": 10},
-        )
-    except Exception as e:
-        logger.debug(f"CLOB cross-check failed for {token_id}: {e}")
-        return None
-
-    history = data.get("history", [])
-    if not history:
-        return None
-    last = history[-1]
-    return {"clob_pregame_price": float(last["p"]), "clob_pregame_ts": int(last["t"]), "num_points": len(history)}
