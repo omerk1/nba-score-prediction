@@ -12,13 +12,15 @@ data/processed/*
 # Keep ablation logs
 !outputs/experiments.csv
 
-# Keep the polymarket_prices small-scale checkpoint dataset (5-game test;
-# data/polymarket_prices/raw/* stays ignored per the data/raw/* rule below -
-# only the summary CSV + the per-game series parquets are small enough / meant
-# to be reviewed in git)
+# Polymarket price-history pipeline: raw API cache (json.gz, needs its own
+# rule -- not .csv/.parquet so the blanket rules above don't cover it).
+# games.csv/series/*.parquet used to be committed via an exception here (from
+# when this was a 5-game test); now that it's scaled to a full season
+# (1,417 games, ~26MB and growing every future run), that no longer fits the
+# "large files should not be in git" rule at the top of this file, so it's
+# local-only now, same as the project's other data (basketball.sqlite,
+# nba_api.sqlite, etc.) -- covered by the blanket *.csv/*.parquet rules above.
 data/polymarket_prices/raw/*
-!data/polymarket_prices/games.csv
-!data/polymarket_prices/series/*.parquet
 
 # Python
 __pycache__/
