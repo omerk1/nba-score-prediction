@@ -2,7 +2,7 @@
 One-time migration: backfill shot-volume columns (makes/attempts) into an existing
 `game` table that predates them.
 
-Background (A8 follow-up): feature_builder.py's rolling FG_PCT/FT_PCT/FG3_PCT features
+Background: feature_builder.py's rolling FG_PCT/FT_PCT/FG3_PCT features
 used to average per-game *percentage* columns directly, which is statistically wrong
 (a low-attempt outlier game swings the average as much as a normal-volume game). The
 fix requires volume-weighted rolling percentages: sum(makes) / sum(attempts) over the

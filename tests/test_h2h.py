@@ -28,8 +28,8 @@ class TestH2HFeatures:
     def _with_shot_volume(game: dict, fga_home: int = 80, fta_home: int = 25, fg3a_home: int = 25,
                            fga_away: int = 78, fta_away: int = 24, fg3a_away: int = 24) -> dict:
         """
-        Attach makes/attempts columns (A8: volume-weighted rolling shooting %) derived
-        from a game dict's existing *_PCT fields, so FeatureBuilder's rolling FG_PCT/
+        Attach makes/attempts columns (needed for volume-weighted rolling shooting %)
+        derived from a game dict's existing *_PCT fields, so FeatureBuilder's rolling FG_PCT/
         FT_PCT/fg3_pct features (which now require makes/attempts) aren't silently
         skipped in these fixtures.
         """

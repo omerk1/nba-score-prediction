@@ -1,5 +1,5 @@
 """
-Regression test for A8's third fix: rolling FG_PCT/FT_PCT/fg3_pct features must be
+Regression test: rolling FG_PCT/FT_PCT/fg3_pct features must be
 volume-weighted (sum of makes / sum of attempts over the window), not a naive mean of
 per-game percentages. A naive mean lets a low-attempt outlier game (e.g. 1-for-2) swing
 the rolling average exactly as much as a normal-volume game (e.g. 15-for-40), which is
@@ -30,7 +30,7 @@ def _noise_game(game_id, game_date):
     Purely there to give HOME_TEAM_ID/AWAY_TEAM_ID more than one distinct group: with
     only a single group, pandas' groupby(...).apply(...) in _add_rest_features's
     games_in_4_nights (unrelated to this fix) returns a wide DataFrame instead of a
-    flat Series and raises. That's a pre-existing quirk, not part of A8 — this dummy
+    flat Series and raises. That's a pre-existing quirk unrelated to this fix — this dummy
     row just keeps these fixtures out of its way without touching that code.
     """
     return _make_game(game_id, game_date, 999, 300, fgm_home=10, fga_home=20)
