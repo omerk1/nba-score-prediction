@@ -11,6 +11,7 @@ import math
 import sqlite3
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from src.utils.config_loader import load_config
@@ -125,12 +126,22 @@ class FeatureBuilder:
                 new_cols[f'{prefix}_diff_avg_L{window}'] = df.groupby(team_col)[f'_diff_{prefix}'].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
-                for stat in ['FG_PCT', 'FT_PCT']:  # FG3_PCT omitted — 3pt_rate in _add_style_features is identical
-                    stat_col = f'{stat}_{prefix.split("_")[0]}'
-                    if stat_col in df.columns:
-                        new_cols[f'{prefix}_{stat.lower()}_L{window}'] = df.groupby(team_col)[stat_col].transform(
-                            lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                # FG3_PCT omitted — fg3_pct in _add_style_features is identical.
+                # Volume-weighted (sum of makes / sum of attempts over the window), NOT a mean
+                # of per-game percentages — the latter would let a low-attempt outlier game
+                # (e.g. 1-for-2) swing the rolling average as much as a normal-volume game.
+                for stat, made_stat, att_stat in [('FG_PCT', 'FGM', 'FGA'), ('FT_PCT', 'FTM', 'FTA')]:
+                    team_suffix = prefix.split("_")[0]
+                    made_col = f'{made_stat}_{team_suffix}'
+                    att_col = f'{att_stat}_{team_suffix}'
+                    if made_col in df.columns and att_col in df.columns:
+                        made_roll = df.groupby(team_col)[made_col].transform(
+                            lambda x, w=window: x.shift(1).rolling(w, min_periods=1).sum()
                         )
+                        att_roll = df.groupby(team_col)[att_col].transform(
+                            lambda x, w=window: x.shift(1).rolling(w, min_periods=1).sum()
+                        )
+                        new_cols[f'{prefix}_{stat.lower()}_L{window}'] = made_roll / att_roll.replace(0, np.nan)
 
             df.drop(columns=[f'_win_{prefix}', f'_diff_{prefix}'], inplace=True)
 
@@ -158,14 +169,22 @@ class FeatureBuilder:
         ]:
             pts_col = 'PTS_home' if prefix == 'home_team' else 'PTS_away'
             opp_pts_col = 'PTS_away' if prefix == 'home_team' else 'PTS_home'
-            fg3_col = f'FG3_PCT_{prefix.split("_")[0]}'
+            team_suffix = prefix.split("_")[0]
+            fg3m_col = f'FG3M_{team_suffix}'
+            fg3a_col = f'FG3A_{team_suffix}'
 
             for window in self.rolling_windows:
                 grouped = df.groupby(team_col)
-                if fg3_col in df.columns:
-                    new_cols[f'{prefix}_3pt_rate_L{window}'] = grouped[fg3_col].transform(
-                        lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                # Volume-weighted (sum of makes / sum of attempts), not a mean of per-game
+                # percentages — see the matching comment in _add_rolling_features.
+                if fg3m_col in df.columns and fg3a_col in df.columns:
+                    fg3m_roll = grouped[fg3m_col].transform(
+                        lambda x, w=window: x.shift(1).rolling(w, min_periods=1).sum()
                     )
+                    fg3a_roll = grouped[fg3a_col].transform(
+                        lambda x, w=window: x.shift(1).rolling(w, min_periods=1).sum()
+                    )
+                    new_cols[f'{prefix}_fg3_pct_L{window}'] = fg3m_roll / fg3a_roll.replace(0, np.nan)
                 new_cols[f'{prefix}_off_eff_L{window}'] = grouped[pts_col].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
@@ -290,8 +309,8 @@ class FeatureBuilder:
                 new_cols[f'home_off_vs_away_def_L{window}'] = df[f'home_team_off_eff_L{window}'] - df[f'away_team_def_eff_L{window}']
                 new_cols[f'away_off_vs_home_def_L{window}'] = df[f'away_team_off_eff_L{window}'] - df[f'home_team_def_eff_L{window}']
 
-            if f'home_team_3pt_rate_L{window}' in df.columns:
-                new_cols[f'home_3pt_advantage_L{window}'] = df[f'home_team_3pt_rate_L{window}'] - df[f'away_team_3pt_rate_L{window}']
+            if f'home_team_fg3_pct_L{window}' in df.columns:
+                new_cols[f'home_3pt_advantage_L{window}'] = df[f'home_team_fg3_pct_L{window}'] - df[f'away_team_fg3_pct_L{window}']
 
             if f'home_team_win_pct_L{window}' in df.columns:
                 new_cols[f'form_differential_L{window}'] = df[f'home_team_win_pct_L{window}'] - df[f'away_team_win_pct_L{window}']
@@ -394,7 +413,9 @@ class FeatureBuilder:
 
         # Preserve original index but sort by date
         orig_index = matchup_games.index
-        matchup_sorted = matchup_games.sort_values('GAME_DATE').reset_index(drop=True)
+        matchup_sorted = matchup_games.sort_values('GAME_DATE')
+        sorted_orig_index = matchup_sorted.index  # original labels, in date-sorted order
+        matchup_sorted = matchup_sorted.reset_index(drop=True)
         current_season = matchup_sorted['SEASON_ID'].values
         canonical_win = (matchup_sorted['_canonical_margin'] > 0).astype(float).values
 
@@ -413,7 +434,7 @@ class FeatureBuilder:
                     result.append(win_pct)
 
         # Return Series with original index
-        result_series = pd.Series(result, index=matchup_sorted.index)
+        result_series = pd.Series(result, index=sorted_orig_index)
         return result_series.reindex(orig_index)
 
     def _compute_h2h_home_away_splits(self, df: pd.DataFrame, venue_type: str) -> pd.Series:

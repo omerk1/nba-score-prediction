@@ -7,18 +7,18 @@ but safely overwrites any existing rows.
 
 Usage:
     # Run all steps (full backfill from config date range)
-    python build_injury_features.py
+    python scripts/build_injury_features.py
 
     # Run a specific step
-    python build_injury_features.py --run build_player_importance
-    python build_injury_features.py --run backfill_historical_injuries
-    python build_injury_features.py --run nightly_update
+    python scripts/build_injury_features.py --run build_player_importance
+    python scripts/build_injury_features.py --run backfill_historical_injuries
+    python scripts/build_injury_features.py --run nightly_update
 
     # Test on a small date range before committing to the full backfill
-    python build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
+    python scripts/build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
 
     # Resume a partial backfill (just move --start forward to where you left off)
-    python build_injury_features.py --run backfill_historical_injuries --start 2021-10-01
+    python scripts/build_injury_features.py --run backfill_historical_injuries --start 2021-10-01
 
 Historical data source: NBA official injury report PDFs (available from 2021-22 season).
 Dates before 2021-10-01 will have no injury data (PDF reports did not exist yet).
@@ -30,9 +30,13 @@ Scoring (controlled by injury_features.scorer in config.yaml):
 
 import argparse
 import logging
+import sys
 from datetime import date
+from pathlib import Path
 
 from dotenv import load_dotenv
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 load_dotenv()  # must run before src.news_scraping imports — llm_extractor reads GOOGLE_API_KEY at module level
 

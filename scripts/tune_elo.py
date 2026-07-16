@@ -20,8 +20,8 @@ k_factor, home_advantage, season_regression, mov_multiplier,
 mae (diff_mae), mae_within_5 (diff_within_5), win_accuracy.
 
 Usage:
-    python tune_elo.py --run-name elo_param_search
-    python tune_elo.py --run-name elo_param_search --n-trials 50
+    python scripts/tune_elo.py --run-name elo_param_search
+    python scripts/tune_elo.py --run-name elo_param_search --n-trials 50
 """
 
 import argparse
@@ -33,7 +33,7 @@ from typing import Dict, Any
 import optuna
 import pandas as pd
 
-sys.path.append(str(Path(__file__).parent))
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from src.data_processing.data_loader import NBADataLoader, load_training_data
 from src.feature_engineering.elo import compute_elo_ratings

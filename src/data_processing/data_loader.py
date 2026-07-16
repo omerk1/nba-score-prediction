@@ -46,7 +46,19 @@ class NBADataLoader:
             ft_pct_away      AS FT_PCT_away,
             fg3_pct_away     AS FG3_PCT_away,
             ast_away         AS AST_away,
-            reb_away         AS REB_away
+            reb_away         AS REB_away,
+            fgm_home         AS FGM_home,
+            fga_home         AS FGA_home,
+            fg3m_home        AS FG3M_home,
+            fg3a_home        AS FG3A_home,
+            ftm_home         AS FTM_home,
+            fta_home         AS FTA_home,
+            fgm_away         AS FGM_away,
+            fga_away         AS FGA_away,
+            fg3m_away        AS FG3M_away,
+            fg3a_away        AS FG3A_away,
+            ftm_away         AS FTM_away,
+            fta_away         AS FTA_away
         FROM game
     """
 
