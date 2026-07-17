@@ -12,6 +12,12 @@ data/processed/*
 # Keep ablation logs
 !outputs/experiments.csv
 
+# Keep the comeback-dip analysis deliverables (small summary outputs, not raw
+# bulk source data -- dip_events.parquet is ~12k summary rows, recovery_matrix.csv
+# is a small p x N table), same rationale as !outputs/experiments.csv above.
+!data/polymarket_prices/dip_events.parquet
+!data/polymarket_prices/recovery_matrix.csv
+
 # Polymarket price-history pipeline: raw API cache (json.gz, needs its own
 # rule -- not .csv/.parquet so the blanket rules above don't cover it).
 # games.csv/series/*.parquet used to be committed via an exception here (from
