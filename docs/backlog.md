@@ -8,7 +8,7 @@
 - **A2** ✅ Extended H2H Features (PR #16, ready to merge)
 - **A3** ✅ Player Box Score Projections (PR #18, awaiting expansion confirmation to 6 stats)
 - **A4** ✅ Lineup Data Collection (PR #14, ready to merge)
-- **A5** ✅ Polymarket Signals (PR #22, merged — real Polymarket API data, robust backfill, playoffs/championships focus)
+- **A5** ✅ Polymarket Signals (branch `feature/polymarket-comeback-analysis` — supersedes the original collector, which had an unfixed game_id-join bug and weaker fuzzy-search/regex-based discovery; covers moneyline in-game comeback analysis + pre-game moneyline/spread/O-U ratios at ~94-99% real coverage on the 2025-26 season; see "Standalone: Polymarket In-Game Price History Pipeline" below)
 - **A6** 🔄 OddsPapi Sportsbook Signals (planned — full season coverage, 250+ bookmakers)
 - **A7** ✅ Style Matchup Score (branch `feature/a7-style-matchup`, 9 rounds — signal validated (beats A2 baseline, CV-robust), not yet integrated into `feature_builder.py`; see `docs/a7_phase_log.md`)
 - **A8** ✅ Feature-Builder Fixes (found during A7's EDA): fixed `h2h_win_pct_3yr`'s index-reindex bug (~99.7% NaN → NaN only for genuine first-meetings) + renamed `home_team_3pt_rate_L{window}` (FG3_PCT) → `home_team_fg3_pct_L{window}` to disambiguate from `home_style_three_pt_reliance` (3PA/FGA) + made rolling FG_PCT/FT_PCT/fg3_pct volume-weighted (sum(makes)/sum(attempts) over the window instead of a naive mean of per-game percentages, which let low-attempt outlier games swing the average as much as normal-volume ones) — required storing FGM/FGA/FG3M/FG3A/FTM/FTA in the `game` table (`scripts/migrate_shot_volume_columns.py` backfills these into pre-existing DBs)
@@ -18,16 +18,11 @@
   - Exponential backoff retry in backfill_player_stats.py
   - recover_failed_backfill.py script for manual recovery
   - Database fully recovered: 1,850,508 stats (all 23 previously failed games recovered)
-- **A5 Robust Backfill** (PR #22, merged)
-  - Error tracking and recovery script (recover_polymarket_failed.py)
-  - Incremental progress saves (resume-safe)
-  - 529 playoff/championship odds collected (93.3% success rate)
-
 ---
 
 ## Standalone: Polymarket In-Game Price History Pipeline
 
-**Status:** Built (branch `feature/polymarket-comeback-analysis`), not integrated with the prediction model — general-purpose per-game win-probability time series for comeback analysis, independent of A5/feature_builder.py.
+**Status:** Built (branch `feature/polymarket-comeback-analysis`), not integrated with the prediction model — general-purpose per-game win-probability time series (moneyline in-game + moneyline/spread/O-U pre-game snapshots) for comeback analysis and betting-ratio use, independent of feature_builder.py.
 **Known limitation (deferred, not blocking):** the BUY/SELL side-split fetch (`data_api.py`) fixes the Data API's 3000-trade offset cap for the vast majority of games, but at extreme Finals-level volume (~6,000+ trades) both sides can still individually hit their own cap (observed directly on `nba-sas-okc-2026-05-26`, 6,427 trades). The Goldsky subgraph fallback from the original design doc was deliberately not built since it wasn't needed for the accepted scope; revisit only if comeback analysis on the highest-volume playoff games turns out to need it.
 
 ---
@@ -120,8 +115,8 @@ exploration plateaus below what richer inputs might unlock)
 
 ## Notes
 
-- **PR #21, #22 merged** — backfill resilience + A5 robust Polymarket collector ready
+- **PR #21 merged** — backfill resilience (backfill_player_stats.py retry logic, recover_failed_backfill.py)
 - **Phase 1 Group A PRs** (#14, #16, #18) ready to merge once reviewed
-- **A5 complete** (real Polymarket data) — playoffs/championships focus, use A6 (OddsPapi) for full season
+- **A5 rebuilt** (`feature/polymarket-comeback-analysis`, supersedes the original PR #22 collector) — full 2025-26 season already collected (moneyline + spread/O-U), use A6 (OddsPapi) for additional sportsbook coverage if needed
 - **A6 planned** — OddsPapi sportsbook integration blocked on API key setup
 - **Player stats cache** fully backfilled (1,850,508 stats) — ready for A3 expansion and B1/B2 work

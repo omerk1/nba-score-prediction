@@ -1,8 +1,7 @@
 """
 Shared HTTP helpers for the Polymarket price-history pipeline.
 
-Standalone module — independent of src/data_processing/polymarket_collector.py
-(the earlier "A5" pre-game-odds collector). Provides:
+Provides:
 
 - A polite, rate-limited GET with exponential backoff on 429/5xx.
 - Simple on-disk JSON response caching so re-runs don't re-download data

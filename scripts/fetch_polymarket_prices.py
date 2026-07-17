@@ -2,8 +2,7 @@
 CLI entry point for the Polymarket price-history pipeline.
 
 Standalone data-science pipeline - independent of the model's feature
-engineering (feature_builder.py / train_model.py / predict_game.py) and of
-the earlier A5 pre-game-odds collector (src/data_processing/polymarket_collector.py).
+engineering (feature_builder.py / train_model.py / predict_game.py).
 Collects general per-game win-probability time series; comeback analysis
 (analyze_polymarket_comebacks.py) is one use of this data, not the only one.
 
