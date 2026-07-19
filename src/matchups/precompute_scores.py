@@ -2,7 +2,7 @@
 Built for the KNN-score integration test: precomputes `style_matchup_score` (+
 `confidence`, `fallback_used`, `n_similar`) for every game_id in nba_api.sqlite's
 `game` table, caching the result in a new `style_matchup_scores` table in
-outputs/a7_matchups_cache.sqlite (our own additive cache DB -- see db.py's
+outputs/style_fingerprint_cache.sqlite (our own additive cache DB -- see db.py's
 docstring; `game`/`nba_api.sqlite` itself is opened strictly read-only and
 never written to).
 
@@ -75,7 +75,7 @@ def precompute_and_cache() -> dict:
 
     # Prerequisites for Layer 2 (injury adjustment): player_name_resolution and
     # player_archetypes are read by injury_layer.py's _out_players_with_reason but
-    # NOT built by it -- a fresh outputs/a7_matchups_cache.sqlite (e.g. a new
+    # NOT built by it -- a fresh outputs/style_fingerprint_cache.sqlite (e.g. a new
     # worktree) starts with both tables empty, which silently makes Layer 2 a
     # no-op (0 games adjusted) rather than erroring. Build them here if missing so
     # this script is self-contained; skip if already populated (they're

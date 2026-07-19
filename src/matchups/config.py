@@ -24,7 +24,7 @@ NBA_API_DB = str(PROJECT_ROOT / "data" / "raw" / "nba_api.sqlite")
 INJURY_DB = str(PROJECT_ROOT / "data" / "raw" / "injury_features.sqlite")
 
 # Our own additive cache DB, kept under outputs/ (a permitted write location).
-CACHE_DB = str(PROJECT_ROOT / "outputs" / "a7_matchups_cache.sqlite")
+CACHE_DB = str(PROJECT_ROOT / "outputs" / "style_fingerprint_cache.sqlite")
 
 DEFAULT_STYLE_MATCHUP_CONFIG: dict[str, Any] = {
     "fingerprint_window": 20,

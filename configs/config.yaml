@@ -119,21 +119,23 @@ style_matchup:
   # See docs/a7_style_matchup_design.md and docs/a7_phase_log.md for how these
   # values were chosen.
   #
-  # `enabled` gates feature_builder.py's _add_style_matchup_features (added by the
-  # KNN-score integration test). Left `false` as the committed default regardless
-  # of that test's outcome -- flipping this is the coordinator's decision, not
-  # made unilaterally by that run. See docs/a7_phase_log.md's KNN-Score
-  # Integration Test section.
+  # `enabled` gates feature_builder.py's _add_style_matchup_features (the
+  # KNN-similarity style-matchup score). A real ablation-pipeline comparison
+  # against baseline confirmed no real signal (style_matchup_score ranked ~29th
+  # of 109 features, confidence had ~zero importance) -- NOT adopted, stays
+  # `false`. See docs/a7_phase_log.md's KNN-Score Integration Test section.
   enabled: false
   # `raw_features_enabled` gates the SEPARATE, independently-toggleable
-  # _add_style_fingerprint_features (added by the raw-fingerprint feature
-  # redesign: raw per-team fingerprint components + explicit home-vs-away
-  # differentials, mirroring _add_matchup_features's pattern -- no KNN
-  # similarity search at all, unlike `enabled` above). Left `false` as the
-  # committed default regardless of that redesign's outcome, same rule as
-  # `enabled`. See docs/a7_phase_log.md's Raw-Fingerprint Feature Redesign
-  # section.
-  raw_features_enabled: false
+  # _add_style_fingerprint_features (raw per-team fingerprint components +
+  # explicit home-vs-away differentials, mirroring _add_matchup_features's
+  # pattern -- no KNN similarity search at all, unlike `enabled` above). A real
+  # ablation-pipeline comparison against baseline found genuine signal
+  # (away_style_pace_score/home_style_pace_score were the #1/#2 most important
+  # features in the trained model) and a consistent total_mae improvement on
+  # both val and test splits, at the cost of flat-to-slightly-worse
+  # win_acc/brier -- ADOPTED as the new committed default: `true`. See
+  # docs/a7_phase_log.md's Raw-Fingerprint Feature Redesign section.
+  raw_features_enabled: true
   # Correction made during the KNN-score integration test:
   # fingerprint_window/decay_halflife/similarity_method/knn_k/
   # min_confidence_sample/full_confidence_sample below were the untuned Phase-0

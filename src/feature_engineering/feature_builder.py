@@ -14,6 +14,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.matchups.config import CACHE_DB
 from src.utils.config_loader import load_config
 
 logging.basicConfig(level=logging.INFO)
@@ -670,7 +671,7 @@ class FeatureBuilder:
     def _add_style_matchup_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         A7 style-matchup score (src/matchups/) — precomputed offline by
-        src/matchups/precompute_scores.py into outputs/a7_matchups_cache.sqlite's
+        src/matchups/precompute_scores.py into outputs/style_fingerprint_cache.sqlite's
         style_matchup_scores table (game_id -> style_matchup_score/confidence),
         NOT computed live here: this method only left-joins the cached result
         onto df by GAME_ID, keeping this diff small and reusing the
@@ -683,7 +684,7 @@ class FeatureBuilder:
         if not cfg.style_matchup or not cfg.style_matchup.enabled:
             return df
 
-        cache_db = Path("outputs/a7_matchups_cache.sqlite")
+        cache_db = Path(CACHE_DB)
         if not cache_db.exists():
             logger.warning(f"Style matchup cache not found at {cache_db} — skipping style matchup features")
             return df
@@ -743,22 +744,35 @@ class FeatureBuilder:
         scope cut) for the new `offensive_rating` metric.
 
         Gated independently from `_add_style_matchup_features` via the separate
-        `style_matchup.raw_features_enabled` flag (default false) — both methods
-        can be toggled independently for a clean three-way comparison (baseline /
-        old KNN-lookup approach / this new raw+differential approach).
+        `style_matchup.raw_features_enabled` flag (default true — adopted as the
+        committed production config: away_style_pace_score/home_style_pace_score
+        were the #1/#2 most important features in the trained model, with a
+        consistent total_mae improvement on both val and test splits, at the cost
+        of flat-to-slightly-worse win_acc/brier). `_add_style_matchup_features`'s
+        KNN-lookup flag stays independently toggleable (default false, not
+        adopted — no real signal found).
 
         Adds, for each of the 6 metrics: two raw columns (home_style_{metric},
         away_style_{metric}) and one differential column (style_{metric}_diff,
         home - away) — 18 new columns total.
+
+        Unlike `_add_style_matchup_features` above (soft warn+skip on a missing
+        cache — that feature stays optional/disabled by default), this flag is
+        now the committed default, so a missing cache must not silently produce a
+        model missing its top features with no error: raises RuntimeError instead.
         """
         cfg = load_config()
         if not cfg.style_matchup or not cfg.style_matchup.raw_features_enabled:
             return df
 
-        cache_db = Path("outputs/a7_matchups_cache.sqlite")
+        cache_db = Path(CACHE_DB)
         if not cache_db.exists():
-            logger.warning(f"Style matchup cache not found at {cache_db} — skipping style fingerprint features")
-            return df
+            raise RuntimeError(
+                f"Style fingerprint cache not found at {cache_db} — "
+                "run `python src/matchups/precompute_scores.py` first to build it "
+                "(style_matchup.raw_features_enabled is true, so this feature is "
+                "required, not optional)."
+            )
 
         calibrated = self._RAW_STYLE_CALIBRATED_METRICS
         uncalibrated = self._RAW_STYLE_UNCALIBRATED_METRIC

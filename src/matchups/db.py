@@ -5,7 +5,7 @@ Safety: `nba_api.sqlite` and `injury_features.sqlite` are symlinked into this
 worktree from the human's live working copy of the repo (they are gitignored,
 data-only files). They are opened strictly read-only (SQLite URI mode=ro) so
 this module can never write to, corrupt, or race with the human's local copy.
-All new caching lives in a separate additive file: outputs/a7_matchups_cache.sqlite.
+All new caching lives in a separate additive file: outputs/style_fingerprint_cache.sqlite.
 """
 
 import sqlite3
@@ -30,7 +30,7 @@ def injury_conn() -> sqlite3.Connection:
 
 
 def cache_conn() -> sqlite3.Connection:
-    """Read-write connection to our own additive cache DB (outputs/a7_matchups_cache.sqlite)."""
+    """Read-write connection to our own additive cache DB (outputs/style_fingerprint_cache.sqlite)."""
     Path(CACHE_DB).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(CACHE_DB)
     conn.row_factory = sqlite3.Row
@@ -108,7 +108,7 @@ def init_cache_db() -> None:
     # fingerprint.py). CREATE TABLE IF NOT EXISTS above is a no-op against an
     # already-populated cache DB from before that change, so ALTER TABLE the column
     # in rather than requiring a full from-empty rebuild of every existing
-    # outputs/a7_matchups_cache.sqlite.
+    # outputs/style_fingerprint_cache.sqlite.
     if table_exists(conn, "matchup_fingerprints"):
         cols = {row[1] for row in conn.execute("PRAGMA table_info(matchup_fingerprints)").fetchall()}
         if "offensive_rating" not in cols:
