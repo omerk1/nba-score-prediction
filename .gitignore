@@ -12,6 +12,11 @@ data/processed/*
 # Keep ablation logs
 !outputs/experiments.csv
 
+# Keep the full per-run feature-importance tables (small, one row per feature)
+# so the ablation record has durable evidence of where each run's features
+# ranked, same rationale as !outputs/experiments.csv above.
+!outputs/full_feature_importance_*.csv
+
 # Keep the comeback-dip analysis deliverables (small summary outputs, not raw
 # bulk source data -- dip_events.parquet is ~12k summary rows, recovery_matrix.csv
 # is a small p x N table), same rationale as !outputs/experiments.csv above.
