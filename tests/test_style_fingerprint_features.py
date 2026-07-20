@@ -104,9 +104,10 @@ class TestStyleFingerprintAsofLookup:
         fingerprint. Must resolve to that team's most recent cached value, not NaN.
         """
         mock_config.return_value = _mock_config()
-        monkeypatch.chdir(tmp_path)
+        cache_path = tmp_path / "outputs" / "style_fingerprint_cache.sqlite"
+        monkeypatch.setattr("src.feature_engineering.feature_builder.CACHE_DB", str(cache_path))
         _write_cache_db(
-            tmp_path / "outputs" / "a7_matchups_cache.sqlite",
+            cache_path,
             [
                 ("g1", 100, "2024-01-01", 1.0),
                 ("g2", 100, "2024-01-10", 2.0),  # most recent for team 100
@@ -134,9 +135,10 @@ class TestStyleFingerprintAsofLookup:
         return that row's own value (the historical/training behavior the old exact-match
         join already handled correctly)."""
         mock_config.return_value = _mock_config()
-        monkeypatch.chdir(tmp_path)
+        cache_path = tmp_path / "outputs" / "style_fingerprint_cache.sqlite"
+        monkeypatch.setattr("src.feature_engineering.feature_builder.CACHE_DB", str(cache_path))
         _write_cache_db(
-            tmp_path / "outputs" / "a7_matchups_cache.sqlite",
+            cache_path,
             [
                 ("g1", 100, "2024-01-01", 1.0),
                 ("g2", 100, "2024-01-10", 2.0),
@@ -160,9 +162,10 @@ class TestStyleFingerprintAsofLookup:
         date) must yield NaN -- same convention as today's insufficient-history case,
         not a new failure mode."""
         mock_config.return_value = _mock_config()
-        monkeypatch.chdir(tmp_path)
+        cache_path = tmp_path / "outputs" / "style_fingerprint_cache.sqlite"
+        monkeypatch.setattr("src.feature_engineering.feature_builder.CACHE_DB", str(cache_path))
         _write_cache_db(
-            tmp_path / "outputs" / "a7_matchups_cache.sqlite",
+            cache_path,
             [
                 # Team 100 only has a fingerprint AFTER the query date below.
                 ("g1", 100, "2024-02-01", 1.0),
