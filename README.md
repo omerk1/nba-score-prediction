@@ -44,6 +44,14 @@ python src/data_processing/fetch_data.py
 
 Data is pulled from the [nba_api](https://github.com/swar/nba_api) and stored in `data/raw/nba_api.sqlite`. Subsequent runs are incremental — existing rows are skipped via `INSERT OR IGNORE`.
 
+If `style_matchup.raw_features_enabled` is on in `configs/config.yaml`, also periodically re-run the style-fingerprint precompute so live prediction has a reasonably recent per-team fingerprint available:
+
+```bash
+python src/matchups/precompute_scores.py
+```
+
+This rebuilds `outputs/a7_matchups_cache.sqlite`'s `matchup_fingerprints` cache (and the KNN `style_matchup_scores` table). It's a periodic offline maintenance job, like `fetch_data.py` — not something `predict_game.py` triggers itself, since it rescans the entire game history each run. `predict_game.py` looks up each team's most recent cached fingerprint at or before the prediction date, so it stays correct even if the cache is a bit stale — a team with no cached fingerprint at all just yields NaN for those features, same as any other feature with insufficient history.
+
 ### Train
 
 ```bash
