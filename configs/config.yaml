@@ -222,3 +222,24 @@ style_matchup:
       paint_activity: -0.2729
     perimeter_specialist:
       defensive_rating: 0.2948
+
+on_off_splits:
+  # Player on/off court splits. See docs/on_off_splits_decisions.md (phase 1 data
+  # decisions, empirically tested against nba_api's TeamPlayerOnOffSummary) and
+  # docs/on_off_splits_log.md (phase 2 implementation + validation).
+  #
+  # `enabled` gates feature_builder.py's _add_on_off_splits_features, mirroring
+  # InjuryFeaturesConfig/StyleMatchupConfig's own `enabled` field.
+  enabled: true
+  db_path: "data/raw/player_on_off_splits.sqlite"
+  # Checkpoint cadence for scripts/backfill_on_off_splits.py: TeamPlayerOnOffSummary
+  # returns a season-cumulative-to-date number for whatever DateTo cutoff is passed,
+  # so a fresh snapshot is only needed every `checkpoint_cadence_days`, not per game
+  # (the value barely moves between two adjacent games at any point past the first
+  # few weeks of a season) -- see the decisions doc's backfill-scope cost analysis.
+  checkpoint_cadence_days: 7
+  # Minimum combined on+off minutes (MIN column, both rows) before a player's
+  # on_off_plus_minus is trusted enough to feed the missing-player-impact feature --
+  # guards against small-sample noise (e.g. a two-way/10-day-contract player with a
+  # handful of minutes producing a wild plus-minus swing).
+  min_on_off_minutes: 100.0

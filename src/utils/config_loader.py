@@ -130,6 +130,20 @@ class StyleMatchupConfig(BaseModel):
     injury_impact: dict[str, dict[str, float]]
 
 
+class OnOffSplitsConfig(BaseModel):
+    """Player on/off court splits (see docs/on_off_splits_decisions.md /
+    docs/on_off_splits_log.md). Data source is nba_api's TeamPlayerOnOffSummary
+    endpoint, called with DateTo set to enforce a leakage-safe historical cutoff
+    (LastNGames was tested and found to NOT compose with date filters — see the
+    decisions doc). `enabled` gates feature_builder.py's
+    _add_on_off_splits_features, mirroring InjuryFeaturesConfig/StyleMatchupConfig's
+    own `enabled` field."""
+    enabled: bool
+    db_path: str
+    checkpoint_cadence_days: int
+    min_on_off_minutes: float = 0.0
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -144,6 +158,7 @@ class Config(BaseModel):
     elo_features: Optional[EloFeaturesConfig] = None
     injury_features: Optional[InjuryFeaturesConfig] = None
     style_matchup: Optional[StyleMatchupConfig] = None
+    on_off_splits: Optional[OnOffSplitsConfig] = None
 
 
 # --- Loader Functions ---
