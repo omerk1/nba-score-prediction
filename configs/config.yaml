@@ -238,8 +238,13 @@ on_off_splits:
   # (the value barely moves between two adjacent games at any point past the first
   # few weeks of a season) -- see the decisions doc's backfill-scope cost analysis.
   checkpoint_cadence_days: 7
-  # Minimum combined on+off minutes (MIN column, both rows) before a player's
-  # on_off_plus_minus is trusted enough to feed the missing-player-impact feature --
-  # guards against small-sample noise (e.g. a two-way/10-day-contract player with a
-  # handful of minutes producing a wild plus-minus swing).
-  min_on_off_minutes: 100.0
+  # Minimum minutes required on EACH side (on-court AND off-court independently,
+  # not their sum) before a player's on_off_plus_minus is trusted enough to feed
+  # the missing-player-impact feature -- guards against small-sample noise. Gating
+  # on the sum alone is NOT enough: a rotation player can have hundreds of "on"
+  # minutes and almost none "off" (rarely rested), which makes a combined total
+  # look ample while the thin side alone is pure noise -- observed directly in
+  # testing, a rookie with 620 on-minutes / 4 off-minutes produced a +150-point
+  # on/off "swing" from a 4-minute sample. See feature_builder.py's
+  # _add_on_off_splits_features docstring.
+  min_on_off_minutes: 50.0
