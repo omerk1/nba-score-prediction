@@ -679,6 +679,14 @@ class FeatureBuilder:
         docs/a7_style_matchup_design.md / docs/a7_phase_log.md's KNN-Score
         Integration Test section for the feature-integration test this wiring
         supports).
+
+        KNOWN GAP (deliberately deferred, not an oversight): this exact-GAME_ID
+        join has the same live-prediction bug `_add_style_fingerprint_features`
+        below used to have — predict_game.py's synthetic 'upcoming' GAME_ID can
+        never match a cached game_id, so this always returns NaN in live
+        prediction. Left as-is here because this feature stays `enabled: false`
+        (not adopted, see configs/config.yaml). If it's ever revisited/adopted,
+        it needs the same asof-on-(team_id, game_date) fix applied below.
         """
         cfg = load_config()
         if not cfg.style_matchup or not cfg.style_matchup.enabled:
@@ -737,11 +745,39 @@ class FeatureBuilder:
 
         No KNN/similarity search is involved at all — this reads directly from
         the already-existing `matchup_fingerprints` cache table (built offline by
-        src/matchups/fingerprint.py + src/matchups/injury_layer.py), joined by
-        (game_id, team_id) for both home and away teams: layer=2 (injury-adjusted,
-        calibrated) for the five original hand-picked metrics, layer=1
-        (uncalibrated — no injury delta calibrated for it this round, a deliberate
-        scope cut) for the new `offensive_rating` metric.
+        src/matchups/fingerprint.py + src/matchups/injury_layer.py): layer=2
+        (injury-adjusted, calibrated) for the five original hand-picked metrics,
+        layer=1 (uncalibrated — no injury delta calibrated for it this round, a
+        deliberate scope cut) for the new `offensive_rating` metric.
+
+        Join strategy — asof on (team_id, game_date), NOT exact game_id match:
+        an exact `game_id` join (the original implementation) works for training,
+        where every row is a real, already-played, already-cached game. But it is
+        silently broken for live prediction: predict_game.py builds a synthetic
+        row for the matchup being predicted with GAME_ID='upcoming' (a placeholder
+        string that can never match any cached game_id), so an exact-match join
+        would leave every style-fingerprint column NaN for the one row we're
+        actually trying to predict. `_add_injury_features` above already solves
+        the equivalent problem for injuries by joining on (team_id, game_date), a
+        natural key that works for any date, not just already-played games. Here
+        we do the same via `pd.merge_asof`: for each team_id, take that team's
+        most recently *computed* fingerprint at or before the target game_date
+        (direction="backward", allow_exact_matches=True). For historical/training
+        rows this returns exactly the same value as the old exact-game_id join —
+        each cached fingerprint's own game_date is trivially "the most recent
+        fingerprint at or before itself" — so this changes *how* the lookup
+        matches, not what value it produces for any already-cached row (verified
+        directly against the full cache: zero mismatches, zero cases where one
+        method had NaN and the other didn't). For a genuinely-uncached team_id/
+        date (either no cache built at all, or too little history yet — same
+        `min_games_played` gate `precompute_scores.py` already applies), asof
+        naturally returns NaN, matching today's existing NaN convention.
+
+        `pd.merge_asof` requires both sides sorted ascending by the "on" column
+        (`game_date`) — the cache is explicitly sorted here since it comes back
+        from SQL in no guaranteed order; `df` is already sorted ascending by
+        GAME_DATE at the top of `create_all_features`, same assumption already
+        relied on by `_compute_venue_delta`'s merge_asof calls above.
 
         Gated independently from `_add_style_matchup_features` via the separate
         `style_matchup.raw_features_enabled` flag (default true — adopted as the
@@ -760,6 +796,13 @@ class FeatureBuilder:
         cache — that feature stays optional/disabled by default), this flag is
         now the committed default, so a missing cache must not silently produce a
         model missing its top features with no error: raises RuntimeError instead.
+
+        NOTE: `_add_style_matchup_features` (the KNN-lookup method above) is NOT
+        fixed by this change and still joins by exact GAME_ID — it remains
+        `enabled: false` (not adopted) and is deliberately out of scope for this
+        pass. If that feature is ever revisited/adopted, it has the exact same
+        live-prediction NaN bug this method used to have, and would need the same
+        asof-on-(team_id, game_date) treatment.
         """
         cfg = load_config()
         if not cfg.style_matchup or not cfg.style_matchup.raw_features_enabled:
@@ -780,7 +823,7 @@ class FeatureBuilder:
 
         with sqlite3.connect(f"file:{cache_db}?mode=ro", uri=True) as conn:
             layer2 = pd.read_sql_query(
-                "SELECT game_id, team_id, " + ", ".join(calibrated) +
+                "SELECT game_id, team_id, game_date, " + ", ".join(calibrated) +
                 " FROM matchup_fingerprints WHERE layer = 2",
                 conn,
             )
@@ -789,16 +832,33 @@ class FeatureBuilder:
                 conn,
             )
 
-        fingerprints = layer2.merge(layer1_uncalibrated, on=["game_id", "team_id"], how="left")
+        fingerprints = layer2.merge(
+            layer1_uncalibrated, on=["game_id", "team_id"], how="left"
+        )
+        # Normalize to date granularity (drop any time-of-day component) so this
+        # matches on the same terms as _add_injury_features's (team_id, game_date)
+        # join, and sort ascending — merge_asof's "on" column must be sorted on
+        # both sides (globally, not just within each `by` group).
+        fingerprints["game_date"] = pd.to_datetime(fingerprints["game_date"]).dt.normalize()
+        fingerprints = fingerprints.sort_values("game_date").reset_index(drop=True)
+
+        query_dates = pd.to_datetime(df["GAME_DATE"]).dt.normalize()
 
         new_cols = {}
         side_values = {}
         for team_col, side in [("HOME_TEAM_ID", "home"), ("AWAY_TEAM_ID", "away")]:
             lookup = pd.DataFrame({
-                "game_id": df["GAME_ID"].values,
+                "game_date": query_dates.values,
                 "team_id": df[team_col].values,
             })
-            merged = lookup.merge(fingerprints, on=["game_id", "team_id"], how="left")
+            merged = pd.merge_asof(
+                lookup,
+                fingerprints[["game_date", "team_id"] + all_metrics],
+                on="game_date",
+                by="team_id",
+                direction="backward",
+                allow_exact_matches=True,
+            )
             side_values[side] = {metric: merged[metric].values for metric in all_metrics}
             for metric in all_metrics:
                 new_cols[f"{side}_style_{metric}"] = side_values[side][metric]
