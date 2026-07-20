@@ -2,7 +2,7 @@
 Built for the KNN-score integration test: precomputes `style_matchup_score` (+
 `confidence`, `fallback_used`, `n_similar`) for every game_id in nba_api.sqlite's
 `game` table, caching the result in a new `style_matchup_scores` table in
-outputs/a7_matchups_cache.sqlite (our own additive cache DB -- see db.py's
+outputs/style_fingerprint_cache.sqlite (our own additive cache DB -- see db.py's
 docstring; `game`/`nba_api.sqlite` itself is opened strictly read-only and
 never written to).
 
@@ -41,6 +41,27 @@ dataframe (train from 2018 onward, plus val/test). Games with fewer than
 `min_games_played` prior team-games (early-season, no valid fingerprint) are
 not scored -- FeatureBuilder's left join leaves those as NaN, same "kept,
 CatBoost handles natively" convention already used for every other feature.
+
+OPERATIONAL REQUIREMENT -- re-run this periodically, same as nba_api.sqlite's
+own refresh via src/data_processing/fetch_data.py: `_add_style_fingerprint_features`
+(feature_builder.py) looks up each team's most recent precomputed fingerprint at
+or before the target date via an asof match on (team_id, game_date) -- see that
+method's docstring for why an asof match is used instead of an exact game_id
+match. That match can only ever be as fresh as the last time this script (and
+`build_fingerprint_cache` specifically) was run: if a team hasn't had a game
+scored since this cache was last built, live prediction for that team will use
+a stale fingerprint (still correct, just not as recent as it could be), and if
+a team has no cached fingerprint at all (e.g. cache never built, or team never
+reached `min_games_played`), the asof merge correctly returns NaN -- same
+"kept, CatBoost handles natively" convention as today, not a new failure mode.
+
+This script is NOT something predict_game.py should trigger synchronously per
+call -- it rebuilds fingerprints for the ENTIRE ~12,700+ game history every run
+(expensive: full fingerprint computation + injury-layer adjustment + KNN
+similarity search), not just the handful of new games since the last run. Treat
+it as a periodic offline maintenance job (e.g. run it right after each
+fetch_data.py refresh) that keeps the cache reasonably fresh for whichever
+teams have upcoming games to predict.
 """
 
 import logging
@@ -75,7 +96,7 @@ def precompute_and_cache() -> dict:
 
     # Prerequisites for Layer 2 (injury adjustment): player_name_resolution and
     # player_archetypes are read by injury_layer.py's _out_players_with_reason but
-    # NOT built by it -- a fresh outputs/a7_matchups_cache.sqlite (e.g. a new
+    # NOT built by it -- a fresh outputs/style_fingerprint_cache.sqlite (e.g. a new
     # worktree) starts with both tables empty, which silently makes Layer 2 a
     # no-op (0 games adjusted) rather than erroring. Build them here if missing so
     # this script is self-contained; skip if already populated (they're

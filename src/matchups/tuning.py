@@ -14,7 +14,7 @@ fair layer=2-vs-layer=2 comparison.
 
 Why an in-memory pipeline instead of reusing fingerprint.build_fingerprint_cache
 / injury_layer.build_injury_adjusted_fingerprints / matchup_index.build_matchup_index
-directly: those functions persist every call into `outputs/a7_matchups_cache.sqlite`'s
+directly: those functions persist every call into `outputs/style_fingerprint_cache.sqlite`'s
 `matchup_fingerprints` table (DELETE + INSERT ~25k/50k rows). Hyperparameter search
 calls this pipeline dozens of times with different fingerprint_window/decay_halflife
 values -- writing the shared cache table on every trial would (a) be slow churn,

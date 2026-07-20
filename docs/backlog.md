@@ -10,7 +10,7 @@
 - **A4** ✅ Lineup Data Collection (PR #14, ready to merge)
 - **A5** ✅ Polymarket Signals (branch `feature/polymarket-comeback-analysis` — supersedes the original collector, which had an unfixed game_id-join bug and weaker fuzzy-search/regex-based discovery; covers moneyline in-game comeback analysis + pre-game moneyline/spread/O-U ratios at ~94-99% real coverage on the 2025-26 season; see "Standalone: Polymarket In-Game Price History Pipeline" below)
 - **A6** 🔄 OddsPapi Sportsbook Signals (planned — full season coverage, 250+ bookmakers)
-- **A7** ✅ Style Matchup Score (branch `feature/a7-style-matchup`, 9 rounds — signal validated (beats A2 baseline, CV-robust), not yet integrated into `feature_builder.py`; see `docs/a7_phase_log.md`)
+- **A7** ✅ Style Matchup Score (branch `feature/a7-style-matchup`, 9 rounds; see `docs/a7_phase_log.md`) — real ablation-pipeline comparison decided the two variants differently: KNN-similarity score (`style_matchup.enabled`) confirmed no signal (~29th of 109 features, confidence ~zero importance), **not adopted**, stays `false`; raw-fingerprint redesign (`style_matchup.raw_features_enabled`) showed genuine signal (`away_style_pace_score`/`home_style_pace_score` ranked #1/#2 importance, consistent `total_mae` improvement on both val and test, flat-to-slightly-worse `win_acc`/`brier`), **adopted** as the new committed default (`true`)
 - **A8** ✅ Feature-Builder Fixes (found during A7's EDA): fixed `h2h_win_pct_3yr`'s index-reindex bug (~99.7% NaN → NaN only for genuine first-meetings) + renamed `home_team_3pt_rate_L{window}` (FG3_PCT) → `home_team_fg3_pct_L{window}` to disambiguate from `home_style_three_pt_reliance` (3PA/FGA) + made rolling FG_PCT/FT_PCT/fg3_pct volume-weighted (sum(makes)/sum(attempts) over the window instead of a naive mean of per-game percentages, which let low-attempt outlier games swing the average as much as normal-volume ones) — required storing FGM/FGA/FG3M/FG3A/FTM/FTA in the `game` table (`scripts/migrate_shot_volume_columns.py` backfills these into pre-existing DBs)
 
 ### Backfill Infrastructure ✅
@@ -99,8 +99,11 @@ a binary flag, same reasoning as B4.
 **Goal:** Complete B3 once data source identified
 
 ### Future: Model Retraining with A2 + A7
-**Status:** Post-A7 validation
-**Goal:** Integrate style_matchup features into model, measure improvement vs A2 alone
+**Status:** Done — raw-fingerprint style features adopted as the production default
+(`style_matchup.raw_features_enabled: true`), retrained and logged as `raw_fingerprint_adopted`
+in `outputs/experiments.csv` (reproduces `style_matchup_raw_fingerprint`'s probe numbers exactly:
+125 features, val/test total_mae 14.752/15.452 vs baseline `elo_v2`'s 14.958/15.458). KNN-score
+variant (`style_matchup.enabled`) confirmed not worth adopting, stays `false`.
 
 ### Future: Richer Style-Fingerprint Inputs (Shot Charts)
 **Status:** Deferred — deliberately skipped for the first A7 exploration to keep scope contained
