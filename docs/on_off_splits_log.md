@@ -275,15 +275,17 @@ GAME_DATE   actual_margin  home_impact  away_impact  diff    home_n_out  away_n_
 
 ### MAE comparison (`train_model.py`, same train/val/test split as the existing pipeline)
 
-Ran twice, toggling `on_off_splits.enabled` in-process via the config file (baseline
-`false`, treatment `true`) — mirroring the toggle-and-restore pattern
-`docs/a7_phase_log.md` used for its own KNN-Score Integration Test — logging both
-runs to the shared `outputs/experiments.csv` (`on_off_splits_baseline` /
-`on_off_splits_treatment` rows), the same convention the style-matchup KNN and
-raw-fingerprint probes used: every real `train_model.py` comparison run is logged
-there regardless of whether it leads to adoption, not just the adopted ones.
+Ran twice, toggling `on_off_splits.enabled` in-process via the config file. The
+`enabled=false` run reproduced `production_deploy_raw_fingerprint`'s numbers
+exactly (125 features, byte-identical metrics) — confirming it, not a new
+baseline — so only the `enabled=true` run was logged as a new row
+(`on_off_splits_treatment` in the shared `outputs/experiments.csv`), which
+references that existing row as its comparison baseline in its `notes` field.
+This matches the actual precedent: `style_matchup_knn`/`style_matchup_raw_fingerprint`
+were each logged as a single new row referencing `elo_v2` by name, not by
+re-logging `elo_v2` itself as a duplicate row.
 
-| metric | baseline (125 feat, `enabled=false`) | treatment (132 feat, `enabled=true`) | delta |
+| metric | baseline (`production_deploy_raw_fingerprint`, 125 feat) | treatment (132 feat, `enabled=true`) | delta |
 |---|---|---|---|
 | val diff_mae | 11.13 | 11.11 | -0.02 (better) |
 | test diff_mae | 11.59 | 11.53 | -0.06 (better) |
