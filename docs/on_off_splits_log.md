@@ -277,10 +277,11 @@ GAME_DATE   actual_margin  home_impact  away_impact  diff    home_n_out  away_n_
 
 Ran twice, toggling `on_off_splits.enabled` in-process via the config file (baseline
 `false`, treatment `true`) — mirroring the toggle-and-restore pattern
-`docs/a7_phase_log.md` used for its own KNN-Score Integration Test — and logging
-both to a dedicated `outputs/on_off_splits_ablation_results.csv` (not the shared
-`outputs/experiments.csv`), same rationale A7 used for its own exploratory
-comparison runs.
+`docs/a7_phase_log.md` used for its own KNN-Score Integration Test — logging both
+runs to the shared `outputs/experiments.csv` (`on_off_splits_baseline` /
+`on_off_splits_treatment` rows), the same convention the style-matchup KNN and
+raw-fingerprint probes used: every real `train_model.py` comparison run is logged
+there regardless of whether it leads to adoption, not just the adopted ones.
 
 | metric | baseline (125 feat, `enabled=false`) | treatment (132 feat, `enabled=true`) | delta |
 |---|---|---|---|
