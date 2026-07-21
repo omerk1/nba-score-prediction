@@ -28,6 +28,11 @@ data/processed/*
 # !outputs/experiments.csv) and the validation sample output, both small.
 !outputs/on_off_backfill_log.csv
 !outputs/on_off_splits_results.csv
+# Ablation comparison (baseline vs. treatment train_model.py runs) behind the
+# docs/on_off_splits_log.md MAE comparison table -- same rationale as
+# !outputs/experiments.csv: the raw numbers should be independently re-checkable,
+# not just the markdown summary.
+!outputs/on_off_splits_ablation_results.csv
 
 # Polymarket price-history pipeline: raw API cache (json.gz, needs its own
 # rule -- not .csv/.parquet so the blanket rules above don't cover it).
