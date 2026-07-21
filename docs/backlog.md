@@ -30,17 +30,14 @@
 ## Phase 2: Dependent Features (Group B)
 
 ### B1: Player On/Off Splits Analysis
-**Status:** Planned (depends on A3 player projections, A4 lineup data)
-**Goal:** Compute +/- impact of each player on team performance (home/away, vs specific opponents)
-**Data sources:** A3 (player stats), A4 (actual lineups from box scores)
-**Output:** DataFrame with player_id, on_off_plus_minus, vs_opponent splits
-**Note:** Use historical lineups from box scores; real-time injury data (future work)
+**Status:** 🔄 Implemented (branch `feature/on-off-splits`), **not adopted** — `on_off_splits.enabled: false` pending a full (non-partial) backfill and a conclusive ablation-pipeline result, same bar `style_matchup.raw_features_enabled` had to clear before it earned `true`. See `docs/on_off_splits_decisions.md` (phase 1 data-source investigation — the original "A4 lineup data" premise below turned out to be wrong, see Note) and `docs/on_off_splits_log.md` (phase 2 implementation + validation) for the full story.
+**What was actually built:** direct nba_api `TeamPlayerOnOffSummary` backfill at a checkpoint cadence (not per-game, not play-by-play reconstruction — `LastNGames` was confirmed unusable for leakage-safe historical queries) into a new `player_on_off_splits` cache; `_add_on_off_splits_features` in `feature_builder.py` sums currently-`Out` players' on/off plus-minus per team-game (folds B2's injury-tie-in framing directly into this one feature rather than a separate follow-on step).
+**Real result so far:** partial backfill coverage (~11% of in-scope games have genuinely fresh data; the 2024-25 validation season wasn't reached yet); a real MAE comparison (`train_model.py`, baseline vs. treatment) came back honestly mixed/inconclusive at this coverage — not yet a demonstrated win either way.
+**Next step:** complete the backfill across all configured seasons, re-run the ablation comparison, then decide adoption.
+**Note (corrects the original plan below):** the original data-source assumption ("actual lineups from box scores" via A4) was wrong — A4's lineup collector only fetches season rosters (`CommonTeamRoster`), never in-game on-court/off-court state, and box scores have no on-court-time data either. nba_api's `TeamPlayerOnOffSummary` endpoint was the real, working data source, confirmed via live API calls.
 
 ### B2: Player Availability Impact on Model
-**Status:** Planned (depends on A3, B1)
-**Goal:** Integrate B1 on/off metrics into feature_builder.py as injury-aware features
-**Output:** New columns: player_availability_impact, team_roster_strength_delta
-**Integration:** _add_player_features() method in feature_builder.py
+**Status:** Folded into B1's actual implementation above — the injury-tie-in ("which currently-missing players, weighted by their on/off impact") IS `_add_on_off_splits_features`, not a separate later step. Not a distinct remaining backlog item.
 
 ### B3: Betting Data Integration (Real)
 **Status:** Planned (blocked on external data source)
