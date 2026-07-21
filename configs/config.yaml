@@ -229,8 +229,22 @@ on_off_splits:
   # docs/on_off_splits_log.md (phase 2 implementation + validation).
   #
   # `enabled` gates feature_builder.py's _add_on_off_splits_features, mirroring
-  # InjuryFeaturesConfig/StyleMatchupConfig's own `enabled` field.
-  enabled: true
+  # InjuryFeaturesConfig/StyleMatchupConfig's own `enabled` field. Same convention
+  # as `style_matchup.enabled` above: a feature only flips to `true` after a
+  # CONCLUSIVE ablation-pipeline comparison (compare `style_matchup.
+  # raw_features_enabled` above, which earned `true` from a real, consistent
+  # total_mae improvement across both val and test at full data coverage). This
+  # feature has NOT cleared that bar yet -- docs/on_off_splits_log.md's real
+  # MAE comparison (train_model.py, baseline vs treatment) was honestly
+  # mixed/inconclusive (some metrics better, some worse, all within noise range),
+  # and critically was run against only ~11% genuinely fresh backfill coverage
+  # (most games either had zero on/off data or a stale value carried forward
+  # from a checkpoint months earlier -- see the log's Backfill Run section). This
+  # is pending (1) completing the full (non-partial) backfill across all
+  # configured seasons, then (2) a conclusive ablation-pipeline result at that
+  # full coverage, before being considered for adoption -- not "not decided yet."
+  # Stays `false` until both of those happen.
+  enabled: false
   db_path: "data/raw/player_on_off_splits.sqlite"
   # Checkpoint cadence for scripts/backfill_on_off_splits.py: TeamPlayerOnOffSummary
   # returns a season-cumulative-to-date number for whatever DateTo cutoff is passed,
