@@ -998,9 +998,22 @@ class FeatureBuilder:
             sub_pool = pool[pool["split_type"] == split_type].sort_values("as_of_date")
             if sub_pool.empty:
                 return pd.Series([float("nan")] * len(rows), index=rows.index)
+            # `splits` is read from SQL with a single dtype per column across ALL
+            # split_types at once -- opponent_team_id is NULL for every non-
+            # vs_opponent row, so pandas infers float64 for the whole column even
+            # though it's always non-null within the vs_opponent slice used here.
+            # merge_asof's `by` columns require matching dtypes on both sides, so
+            # cast explicitly rather than relying on inference (this bug was latent
+            # until a real vs_opponent backfill produced non-empty data to merge
+            # against -- caught via scripts/validate_on_off_splits.py, not a smoke
+            # test, since earlier smoke tests always hit the sub_pool.empty branch).
+            left = rows[["lookup_date"] + by_cols].copy()
+            right = sub_pool[["as_of_date"] + by_cols + ["on_off_plus_minus"]].copy()
+            for col in by_cols:
+                left[col] = left[col].astype("int64")
+                right[col] = right[col].astype("int64")
             merged = pd.merge_asof(
-                rows[["lookup_date"] + by_cols],
-                sub_pool[["as_of_date"] + by_cols + ["on_off_plus_minus"]],
+                left, right,
                 left_on="lookup_date", right_on="as_of_date",
                 by=by_cols, direction="backward", allow_exact_matches=True,
             )
