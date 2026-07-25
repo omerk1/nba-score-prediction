@@ -28,6 +28,13 @@ data/processed/*
 # !outputs/experiments.csv) and the validation sample output, both small.
 !outputs/on_off_backfill_log.csv
 !outputs/on_off_splits_results.csv
+
+# Dedicated iteration scratch file for the backfill-completion round (step 1
+# of on/off-splits' iterative-improvement plan) -- keeps this round's
+# baseline-vs-treatment comparison out of the shared outputs/experiments.csv
+# (per the coordinator's instruction) while still being durable, committed
+# evidence, same rationale as !outputs/experiments.csv above.
+!outputs/on_off_splits_iteration_scratch.csv
 # Polymarket price-history pipeline: raw API cache (json.gz, needs its own
 # rule -- not .csv/.parquet so the blanket rules above don't cover it).
 # games.csv/series/*.parquet used to be committed via an exception here (from

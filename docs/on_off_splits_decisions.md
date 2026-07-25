@@ -296,6 +296,11 @@ calls, not fewer:
    `_add_h2h_features`'s 3-year lookback), which the API's `Season` parameter
    doesn't natively support in one call — would require fetching per season and
    combining GP-weighted on our side. Not tested in this phase.
+   **Resolved in a later iteration round** (see `docs/on_off_splits_log.md` §7.3):
+   this risk was confirmed rather than mitigated, so `vs_opponent` was dropped
+   from the feature entirely rather than shipped with the noise unaddressed.
+   Already-collected `vs_opponent` rows remain in the table for a possible future
+   multi-season-pooling attempt, but the feature no longer reads them.
 2b. Where exactly the new cache DB should physically live (shared `nba_api.sqlite`
    vs. a dedicated additive file) is flagged in §3 as a soft, not hard, decision —
    depends on whether phase 2 gets a read-write symlink into the shared DB or not.

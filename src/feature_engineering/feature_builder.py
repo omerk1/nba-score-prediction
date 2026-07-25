@@ -894,13 +894,25 @@ class FeatureBuilder:
         name-resolution table `src/matchups/injury_layer.py` already relies on for
         its own Out-player lookup, rather than rebuilding a second resolution table.
 
-        Split preference per (out player, team-game): most specific available wins
-        — `vs_opponent` (this exact opponent, only backfilled lazily for pairings
-        that actually occurred — see the decisions doc's cost analysis) beats the
-        venue-specific split (`home` for the home team's rows, `away` for the away
-        team's rows) beats `overall` (always-available fallback). Implemented via
-        three separate `merge_asof` lookups combined with `combine_first`, in that
-        preference order.
+        Split preference per (out player, team-game): the venue-specific split
+        (`home` for the home team's rows, `away` for the away team's rows) beats
+        `overall` (always-available fallback). Implemented via two separate
+        `merge_asof` lookups combined with `combine_first`.
+
+        `vs_opponent` (this exact opponent) was deliberately dropped from this
+        preference chain (was: vs_opponent > venue > overall) after reviewing real
+        backfilled data: a single season only has 2-4 meetings between two specific
+        teams, and vs_opponent checkpoints are taken per-game rather than on the
+        same weekly cadence as venue/overall, so the value can swing enormously
+        from meeting to meeting purely from small-sample arithmetic (e.g. one
+        blowout as the only meeting so far dominates the number until enough games
+        accumulate to dilute it — there's no guarantee that ever happens within a
+        season). This is a real, structural volatility problem, not a coverage gap
+        that more backfilling fixes. A proper fix would need multi-season pooling
+        (mirroring `_add_h2h_features`'s 3-year lookback) — not implemented here;
+        the already-backfilled `player_on_off_splits` rows with `split_type=
+        'vs_opponent'` are left in place (harmless, reusable if that fix is ever
+        built) but are no longer read by this method.
 
         Leakage guard: `date_to_nullable` was empirically confirmed INCLUSIVE of
         games played on that exact calendar date (Boston's cumulative GP jumped
@@ -964,9 +976,13 @@ class FeatureBuilder:
         min_minutes = cfg.on_off_splits.min_on_off_minutes
 
         with sqlite3.connect(f"file:{on_off_db}?mode=ro", uri=True) as conn:
+            # Only overall/home/away are read -- vs_opponent rows exist in this table
+            # (see method docstring for why they're no longer used) but are excluded
+            # here rather than fetched and ignored downstream.
             splits = pd.read_sql_query(
-                "SELECT player_id, team_id, split_type, opponent_team_id, as_of_date, "
-                "min_on, min_off, on_off_plus_minus FROM player_on_off_splits",
+                "SELECT player_id, team_id, split_type, as_of_date, "
+                "min_on, min_off, on_off_plus_minus FROM player_on_off_splits "
+                "WHERE split_type != 'vs_opponent'",
                 conn,
             )
         if splits.empty:
@@ -998,15 +1014,12 @@ class FeatureBuilder:
             sub_pool = pool[pool["split_type"] == split_type].sort_values("as_of_date")
             if sub_pool.empty:
                 return pd.Series([float("nan")] * len(rows), index=rows.index)
-            # `splits` is read from SQL with a single dtype per column across ALL
-            # split_types at once -- opponent_team_id is NULL for every non-
-            # vs_opponent row, so pandas infers float64 for the whole column even
-            # though it's always non-null within the vs_opponent slice used here.
-            # merge_asof's `by` columns require matching dtypes on both sides, so
-            # cast explicitly rather than relying on inference (this bug was latent
-            # until a real vs_opponent backfill produced non-empty data to merge
-            # against -- caught via scripts/validate_on_off_splits.py, not a smoke
-            # test, since earlier smoke tests always hit the sub_pool.empty branch).
+            # merge_asof's `by` columns require matching dtypes on both sides -- cast
+            # explicitly rather than relying on pandas' inference (this caught a real
+            # bug when `by_cols` included opponent_team_id for the now-removed
+            # vs_opponent lookup: that column was NULL for every other split_type in
+            # the same SQL read, so pandas inferred float64 for the whole column even
+            # though it's non-null within the vs_opponent slice specifically).
             left = rows[["lookup_date"] + by_cols].copy()
             right = sub_pool[["as_of_date"] + by_cols + ["on_off_plus_minus"]].copy()
             for col in by_cols:
@@ -1020,15 +1033,14 @@ class FeatureBuilder:
             return merged["on_off_plus_minus"]
 
         new_cols = {}
-        for team_col, opp_col, venue_split, prefix in [
-            ("HOME_TEAM_ID", "AWAY_TEAM_ID", "home", "home_team"),
-            ("AWAY_TEAM_ID", "HOME_TEAM_ID", "away", "away_team"),
+        for team_col, venue_split, prefix in [
+            ("HOME_TEAM_ID", "home", "home_team"),
+            ("AWAY_TEAM_ID", "away", "away_team"),
         ]:
             rows = pd.DataFrame({
                 "row_id": df.index,
                 "game_date": pd.to_datetime(df["GAME_DATE"]).dt.normalize().values,
                 "team_id": df[team_col].values,
-                "opponent_team_id": df[opp_col].values,
             })
             rows = rows.merge(
                 out_players_resolved[["game_date", "team_id", "player_name", "player_id"]],
@@ -1047,11 +1059,10 @@ class FeatureBuilder:
             rows["lookup_date"] = rows["game_date"] - pd.Timedelta(days=1)
             rows = rows.sort_values("lookup_date").reset_index(drop=True)
 
-            vs_opp = _asof_lookup(rows, splits, "vs_opponent", ["player_id", "team_id", "opponent_team_id"])
             venue = _asof_lookup(rows, splits, venue_split, ["player_id", "team_id"])
             overall = _asof_lookup(rows, splits, "overall", ["player_id", "team_id"])
 
-            rows["impact"] = vs_opp.combine_first(venue).combine_first(overall)
+            rows["impact"] = venue.combine_first(overall)
             rows["resolved"] = rows["impact"].notna().astype(int)
 
             agg = rows.groupby("row_id").agg(

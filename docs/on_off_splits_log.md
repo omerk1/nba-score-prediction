@@ -434,3 +434,96 @@ data before scaling up.
 **Open questions before merging:** see §6 below in full — the coverage gap (open
 question #6/#7) and the early-season noise finding (#5) are the two most
 important to resolve before this branch is considered ready to merge into `main`.
+
+## 7. Follow-up Round — Full 3-Season Backfill + `vs_opponent` Removal
+
+This section documents a later iteration round, run after the FINAL SUMMARY above,
+addressing recommended-next-step #1 (complete the backfill) from a dedicated
+`outputs/on_off_splits_iteration_scratch.csv` comparison (see that round's own
+scratch log for the raw before/after rows; not folded into the shared
+`outputs/experiments.csv` since it's an intermediate step, not the final decision).
+
+### 7.1 Coverage after completing the 2023-24/2024-25/2025-26 checkpoint backfill
+
+The prior pass left `2024-25` (the validation season) at 0/25 planned weekly
+checkpoints and `2023-24`/`2025-26` partially done. This round ran the checkpoint
+backfill to completion for all three of those seasons (25/25 weekly checkpoints
+each) plus a vs-opponent lazy backfill covering the val/test window. Result:
+`outputs/on_off_backfill_log.csv` grew to 11,822 rows (2339 + 2250 + 2333 checkpoint
+rows across the three seasons, plus 4,900 vs-opponent rows: 3,168 `ok` / 1,732
+legitimately-`empty`).
+
+Coverage against the actual feature output improved from **11.0%** (partial
+backfill, §4 above) to **~76.1%** of in-scope games having a genuinely fresh
+(not stale-carried-forward) checkpoint value — a large jump, though still short
+of 100% because the model's real training window (`train_start_date: 2018-10-16`)
+extends back through six seasons, five of which (2018-19 through 2022-23) still
+have zero backfill coverage. That gap is *not* addressed by this round; it is
+the next planned step (see §7.3).
+
+### 7.2 Updated MAE comparison (full 3-season backfill, `vs_opponent` still included)
+
+Re-ran the baseline/treatment comparison at the new ~76.1% coverage level,
+logged to the iteration scratch file as `on_off_splits_full_backfill_baseline`
+(reproduces `style_matchup_raw_fingerprint` exactly, confirming the baseline is
+unchanged) and `on_off_splits_full_backfill_treatment`:
+
+| metric | baseline (125 feat) | treatment (132 feat) | delta |
+|---|---|---|---|
+| val diff_mae | 11.13 | 11.07 | -0.06 (better) |
+| test diff_mae | 11.592 | 11.542 | -0.05 (better) |
+| val total_mae | 14.752 | 14.866 | +0.114 (worse) |
+| test total_mae | 15.452 | 15.442 | -0.01 (better) |
+| val win_acc | 65.88% | 66.69% | +0.81pp (better) |
+| test win_acc | 65.96% | 67.51% | +1.55pp (better) |
+| val brier | 0.2129 | 0.213 | ~flat |
+| test brier | 0.2109 | 0.2088 | better |
+
+Directionally more encouraging than the partial-backfill result (val and test now
+agree on the sign of diff_mae, win_acc, and brier movement, whereas the partial-
+backfill run had val and test disagreeing on win_acc), but `total_mae` is still
+mixed (val worse, test better), and per
+`outputs/full_feature_importance_on_off_splits_full_backfill_treatment.csv` the
+7 new columns still rank in the bottom third: 78th, 89th, 101st, 111th, 119th,
+125th, and 128th of 132 features (vs. 67th-132nd at partial coverage) — a modest
+improvement in ranking, but not a demonstration of strong signal. **Still not a
+clean, decisive result** — read this as progress toward, not proof of, the
+feature's value.
+
+### 7.3 Decision: drop `vs_opponent`, extend the checkpoint backfill instead
+
+Before extending the backfill further, the coordinator identified a structural
+problem with the `vs_opponent` split (distinct from the coverage gap above, and
+not fixed by more backfilling): unlike `overall`/`home`/`away`, which are fetched
+at a weekly checkpoint cadence, `vs_opponent` values are fetched lazily per actual
+game pairing. A team's single-season series against one specific opponent is
+only 2-4 games, so the very first meeting's result can dominate the number for
+the rest of the season (one blowout with no other meetings yet to dilute it,
+which may never happen within a season). This is the sample-size risk flagged
+as an open, untested question in the phase-1 decisions doc (§2, "vs-opponent
+sample-size noise") and open question #2 in §6 above — this round confirms it in
+practice rather than resolving it. The correct fix would be multi-season pooling
+(mirroring `_add_h2h_features`'s 3-year lookback), which was not implemented here;
+instead, the coordinator chose to remove `vs_opponent` from the feature entirely
+rather than ship a component with a known, unmitigated volatility problem.
+
+**What changed:** `_add_on_off_splits_features` in `feature_builder.py` no longer
+reads or merges `vs_opponent` rows — the split-preference chain is now
+`venue.combine_first(overall)` (2 tiers, 2 `merge_asof` lookups) instead of the
+previous `vs_opponent.combine_first(venue).combine_first(overall)` (3 tiers, 3
+lookups). The SQL query now filters `WHERE split_type != 'vs_opponent'` and no
+longer selects `opponent_team_id`. Already-collected `vs_opponent` rows are left
+in the `player_on_off_splits` table (harmless, and reusable if multi-season
+pooling is built later) — only the feature's *read* path changed, not the
+backfill script or existing data. Tests updated accordingly: the venue-vs-overall
+preference test no longer includes vs_opponent rows, a new test
+(`test_vs_opponent_rows_are_ignored_even_when_present`) proves a vs_opponent row
+present in the cache is genuinely ignored (not just never reached), and the
+now-obsolete `test_dtype_mismatch_regression_mixed_opponent_team_id` (guarding a
+dtype bug in a `merge_asof` `by`-column code path that no longer exists once
+`opponent_team_id` isn't part of the query) was removed.
+
+**Not yet done:** extending the checkpoint backfill (`overall`/`home`/`away`
+only, explicitly not `vs_opponent`) to cover the five missing training seasons
+(2018-19 through 2022-23), which is the next step before re-running the MAE
+comparison at full training-window coverage.

@@ -2,16 +2,18 @@
 Regression tests for `_add_on_off_splits_features`.
 
 This method reads three separate caches (player_on_off_splits, player_injuries,
-player_name_resolution) and combines three `pd.merge_asof` lookups (vs_opponent /
-venue / overall) with `combine_first` -- exactly the kind of logic that already
-produced one real dtype bug (see docs/on_off_splits_log.md's "Second bug found and
-fixed") during manual smoke-testing. These tests lock in the properties that bug
-fix and the rest of the method's design rely on:
+player_name_resolution) and combines two `pd.merge_asof` lookups (venue / overall)
+with `combine_first`. `vs_opponent` was deliberately dropped from this method (see
+its docstring): single-season vs-opponent samples are only 2-4 games, and
+per-game (not weekly) checkpoints mean the value can swing enormously from one
+meeting to the next purely from small-sample arithmetic -- a real, structural
+volatility problem, not something more backfilling fixes. The already-backfilled
+`player_on_off_splits` rows with `split_type='vs_opponent'` are left in the DB
+(harmless) but must never be read by this method. These tests lock in:
 
   1. A cached on/off value for a resolved `Out` player flows through to the team-
      level impact column correctly (not NaN, not the wrong value).
-  2. Split preference: vs_opponent (for the correct opponent) beats venue-specific
-     (home/away) beats overall.
+  2. Split preference: venue-specific (home/away) beats overall.
   3. The min(on, off) noise gate excludes a player whose combined minutes look
      ample but where one side alone is a tiny, noisy sample (the exact bug found
      and fixed in feature_builder.py).
@@ -22,10 +24,10 @@ fix and the rest of the method's design rely on:
      legitimate zero-impact case, not missing data.
   6. `on_off_splits.enabled=False` short-circuits before touching any cache file
      at all.
-  7. A direct regression test for the dtype-mismatch bug: opponent_team_id is
-     non-null for vs_opponent rows and NULL for other split types within the SAME
-     table read, which makes pandas infer float64 for the whole column -- must not
-     raise and must still return the correct value.
+  7. `vs_opponent` rows present in the cache are correctly ignored, even when
+     they'd otherwise "win" by being the most specific/recent match -- confirms
+     the SQL-level exclusion actually works, not just that the method never
+     reaches for that split_type in code.
 """
 
 import sqlite3
@@ -180,10 +182,9 @@ class TestOnOffSplitsFeature:
         assert result.loc[0, "missing_player_on_off_impact_diff"] == pytest.approx(12.5)
 
     @patch("src.feature_engineering.feature_builder.load_config")
-    def test_split_preference_vs_opponent_beats_venue_beats_overall(self, mock_config, tmp_path, monkeypatch):
-        """Same player has cached overall/home/vs_opponent values -- the most
-        specific available split (vs_opponent for the CORRECT opponent) must win,
-        not home (venue) or overall."""
+    def test_split_preference_venue_beats_overall(self, mock_config, tmp_path, monkeypatch):
+        """Same player has cached overall and home values -- the more specific
+        venue split must win over overall."""
         _setup(
             tmp_path, monkeypatch, mock_config,
             on_off_rows=[
@@ -191,12 +192,6 @@ class TestOnOffSplitsFeature:
                  "opponent_team_id": None, "as_of_date": "2024-01-05", "min_on": 200, "min_off": 100, "on_off_plus_minus": 5.0},
                 {"player_id": 501, "team_id": HOME_TEAM, "split_type": "home",
                  "opponent_team_id": None, "as_of_date": "2024-01-05", "min_on": 150, "min_off": 80, "on_off_plus_minus": 10.0},
-                # Wrong opponent -- must NOT be picked even though it's vs_opponent.
-                {"player_id": 501, "team_id": HOME_TEAM, "split_type": "vs_opponent",
-                 "opponent_team_id": OTHER_TEAM, "as_of_date": "2024-01-05", "min_on": 100, "min_off": 60, "on_off_plus_minus": 999.0},
-                # Correct opponent (AWAY_TEAM) -- this is the one that should win.
-                {"player_id": 501, "team_id": HOME_TEAM, "split_type": "vs_opponent",
-                 "opponent_team_id": AWAY_TEAM, "as_of_date": "2024-01-05", "min_on": 100, "min_off": 60, "on_off_plus_minus": 20.0},
             ],
             injury_rows=[("2024-01-10", HOME_TEAM, "Player One", "Out")],
             name_res_rows=[("Player One", 501, "high")],
@@ -206,7 +201,34 @@ class TestOnOffSplitsFeature:
         fb = FeatureBuilder(rolling_windows=[3])
         result = fb._add_on_off_splits_features(df)
 
-        assert result.loc[0, "home_team_missing_player_on_off_impact"] == pytest.approx(20.0)
+        assert result.loc[0, "home_team_missing_player_on_off_impact"] == pytest.approx(10.0)
+
+    @patch("src.feature_engineering.feature_builder.load_config")
+    def test_vs_opponent_rows_are_ignored_even_when_present(self, mock_config, tmp_path, monkeypatch):
+        """vs_opponent was deliberately dropped from this method (small per-season
+        samples, per-game checkpoints -> volatile). A vs_opponent row for this
+        exact matchup exists in the cache and would "win" under the old
+        preference order (most specific, most recent) -- it must be ignored
+        entirely, falling back to venue/overall instead."""
+        _setup(
+            tmp_path, monkeypatch, mock_config,
+            on_off_rows=[
+                {"player_id": 501, "team_id": HOME_TEAM, "split_type": "overall",
+                 "opponent_team_id": None, "as_of_date": "2024-01-05", "min_on": 200, "min_off": 100, "on_off_plus_minus": 5.0},
+                # Correct opponent, more recent checkpoint, would win under the old
+                # preference order -- must be ignored under the new one.
+                {"player_id": 501, "team_id": HOME_TEAM, "split_type": "vs_opponent",
+                 "opponent_team_id": AWAY_TEAM, "as_of_date": "2024-01-09", "min_on": 100, "min_off": 60, "on_off_plus_minus": 999.0},
+            ],
+            injury_rows=[("2024-01-10", HOME_TEAM, "Player One", "Out")],
+            name_res_rows=[("Player One", 501, "high")],
+        )
+
+        df = _query_df("2024-01-10", home_team_id=HOME_TEAM, away_team_id=AWAY_TEAM)
+        fb = FeatureBuilder(rolling_windows=[3])
+        result = fb._add_on_off_splits_features(df)
+
+        assert result.loc[0, "home_team_missing_player_on_off_impact"] == pytest.approx(5.0)
 
     @patch("src.feature_engineering.feature_builder.load_config")
     def test_min_on_off_minutes_gate_excludes_thin_sample(self, mock_config, tmp_path, monkeypatch):
@@ -298,39 +320,6 @@ class TestOnOffSplitsFeature:
         result = fb._add_on_off_splits_features(df)
 
         assert "home_team_missing_player_on_off_impact" not in result.columns
-
-    @patch("src.feature_engineering.feature_builder.load_config")
-    def test_dtype_mismatch_regression_mixed_opponent_team_id(self, mock_config, tmp_path, monkeypatch):
-        """Regression test for the dtype bug: opponent_team_id is non-null only
-        for vs_opponent rows and NULL for every other split_type in the SAME
-        table read -- pandas infers float64 for the whole column in that case,
-        which crashed the original merge_asof call with a dtype mismatch against
-        the int64 query-side column. Must not raise, and must still resolve to
-        the correct (vs_opponent) value."""
-        _setup(
-            tmp_path, monkeypatch, mock_config,
-            on_off_rows=[
-                # NULL opponent_team_id (overall/home/away rows) mixed with a
-                # non-null one (vs_opponent) in the same table/read -- this is
-                # exactly the condition that produced float64 inference.
-                {"player_id": 501, "team_id": HOME_TEAM, "split_type": "overall",
-                 "opponent_team_id": None, "as_of_date": "2024-01-05", "min_on": 200, "min_off": 100, "on_off_plus_minus": 5.0},
-                {"player_id": 501, "team_id": HOME_TEAM, "split_type": "home",
-                 "opponent_team_id": None, "as_of_date": "2024-01-05", "min_on": 150, "min_off": 80, "on_off_plus_minus": 10.0},
-                {"player_id": 501, "team_id": HOME_TEAM, "split_type": "vs_opponent",
-                 "opponent_team_id": AWAY_TEAM, "as_of_date": "2024-01-05", "min_on": 100, "min_off": 60, "on_off_plus_minus": 20.0},
-            ],
-            injury_rows=[("2024-01-10", HOME_TEAM, "Player One", "Out")],
-            name_res_rows=[("Player One", 501, "high")],
-        )
-
-        df = _query_df("2024-01-10", home_team_id=HOME_TEAM, away_team_id=AWAY_TEAM)
-        fb = FeatureBuilder(rolling_windows=[3])
-
-        # Must not raise pandas.errors.MergeError (the original bug).
-        result = fb._add_on_off_splits_features(df)
-
-        assert result.loc[0, "home_team_missing_player_on_off_impact"] == pytest.approx(20.0)
 
 
 if __name__ == "__main__":
