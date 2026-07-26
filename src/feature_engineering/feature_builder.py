@@ -874,7 +874,7 @@ class FeatureBuilder:
         Player on/off-court splits, integrated as an injury-aware team-level feature
         rather than raw per-player columns (per docs/on_off_splits_decisions.md's
         open design question and the coordinator's phase-2 direction): for each
-        team-game, sum the on/off plus-minus impact of that team's currently-`Out`
+        team-game, sum the on/off plus-minus impact of that team's currently-missing
         players (per `injury_features.sqlite`'s `player_injuries` table, already
         joined by `_add_injury_features` above via `(team_id, game_date)`) — an
         "expected point-differential impact from currently-missing players" signal,
@@ -882,6 +882,16 @@ class FeatureBuilder:
         introducing an arbitrary raw per-player aggregate or a single
         headline-player proxy (both considered and rejected — see the decisions
         doc's Open Risks §6.1).
+
+        `Out` players count at full weight; `Doubtful` players count at
+        `injury_features.doubtful_weight` (0.8) — the same fractional weight
+        `formula_scorer.compute_team_deficit` already applies to Doubtful players
+        for the unrelated team-deficit feature, reused here for consistency rather
+        than inventing a second weight. `Questionable`/`Day-To-Day` players are
+        still excluded entirely, mirroring `compute_team_deficit` again (which
+        counts them separately but never folds them into its weighted sum) —
+        players in that status usually do play, so treating them as partially
+        "missing" would mostly add noise rather than signal.
 
         Data source: `player_on_off_splits` (built by
         scripts/backfill_on_off_splits.py from nba_api's TeamPlayerOnOffSummary,
@@ -941,14 +951,15 @@ class FeatureBuilder:
         catches this; requiring only the sum does not.
 
         Adds, for each of home_team/away_team: `_missing_player_on_off_impact` (sum
-        of resolved Out players' on/off plus-minus — 0.0, not NaN, when no Out
-        players are resolved, since "no one out" is a legitimate zero-impact case,
-        not a missing-data case), `_n_out_total` (count of Out players found,
-        before resolution), and `_n_out_resolved_on_off` (how many of those were
-        successfully resolved to an on/off value — a confidence indicator, since a
-        large gap between the two counts means the sum understates the true
-        impact). Plus one differential column, `missing_player_on_off_impact_diff`
-        (home − away), mirroring `_add_matchup_features`'s differential pattern.
+        of resolved Out/Doubtful players' weighted on/off plus-minus — 0.0, not
+        NaN, when no missing players are resolved, since "no one out" is a
+        legitimate zero-impact case, not a missing-data case), `_n_missing_total`
+        (count of Out/Doubtful players found, before resolution), and
+        `_n_missing_resolved_on_off` (how many of those were successfully resolved
+        to an on/off value — a confidence indicator, since a large gap between the
+        two counts means the sum understates the true impact). Plus one
+        differential column, `missing_player_on_off_impact_diff` (home − away),
+        mirroring `_add_matchup_features`'s differential pattern.
 
         Soft-disabled (warn + skip, matching `_add_style_matchup_features`'s
         not-yet-adopted convention, not `_add_style_fingerprint_features`'s
@@ -996,9 +1007,12 @@ class FeatureBuilder:
         min_side_minutes = np.minimum(splits["min_on"].fillna(0), splits["min_off"].fillna(0))
         splits = splits[min_side_minutes >= min_minutes].copy()
 
+        doubtful_weight = cfg.injury_features.doubtful_weight if cfg.injury_features else 1.0
+
         with sqlite3.connect(f"file:{injury_db}?mode=ro", uri=True) as conn:
             out_players = pd.read_sql_query(
-                "SELECT game_date, team_id, player_name FROM player_injuries WHERE status = 'Out'",
+                "SELECT game_date, team_id, player_name, status FROM player_injuries "
+                "WHERE status IN ('Out', 'Doubtful')",
                 conn,
             )
         with sqlite3.connect(f"file:{name_res_db}?mode=ro", uri=True) as conn:
@@ -1008,6 +1022,7 @@ class FeatureBuilder:
                 conn,
             )
         out_players["game_date"] = pd.to_datetime(out_players["game_date"]).dt.normalize()
+        out_players["weight"] = np.where(out_players["status"] == "Out", 1.0, doubtful_weight)
         out_players_resolved = out_players.merge(name_res, on="player_name", how="inner")
 
         def _asof_lookup(rows: pd.DataFrame, pool: pd.DataFrame, split_type: str, by_cols: list[str]) -> pd.Series:
@@ -1043,14 +1058,14 @@ class FeatureBuilder:
                 "team_id": df[team_col].values,
             })
             rows = rows.merge(
-                out_players_resolved[["game_date", "team_id", "player_name", "player_id"]],
+                out_players_resolved[["game_date", "team_id", "player_name", "player_id", "weight"]],
                 on=["game_date", "team_id"], how="inner",
             )
 
             if rows.empty:
                 new_cols[f"{prefix}_missing_player_on_off_impact"] = 0.0
-                new_cols[f"{prefix}_n_out_total"] = 0
-                new_cols[f"{prefix}_n_out_resolved_on_off"] = 0
+                new_cols[f"{prefix}_n_missing_total"] = 0
+                new_cols[f"{prefix}_n_missing_resolved_on_off"] = 0
                 continue
 
             # Leakage guard: DateTo is confirmed INCLUSIVE of same-day games, so the
@@ -1064,16 +1079,17 @@ class FeatureBuilder:
 
             rows["impact"] = venue.combine_first(overall)
             rows["resolved"] = rows["impact"].notna().astype(int)
+            rows["weighted_impact"] = rows["impact"] * rows["weight"]
 
             agg = rows.groupby("row_id").agg(
-                impact_sum=("impact", "sum"),
+                impact_sum=("weighted_impact", "sum"),
                 resolved_n=("resolved", "sum"),
                 out_n=("player_id", "count"),
             )
             merged = pd.DataFrame(index=df.index).join(agg)
             new_cols[f"{prefix}_missing_player_on_off_impact"] = merged["impact_sum"].fillna(0.0).values
-            new_cols[f"{prefix}_n_out_total"] = merged["out_n"].fillna(0).astype(int).values
-            new_cols[f"{prefix}_n_out_resolved_on_off"] = merged["resolved_n"].fillna(0).astype(int).values
+            new_cols[f"{prefix}_n_missing_total"] = merged["out_n"].fillna(0).astype(int).values
+            new_cols[f"{prefix}_n_missing_resolved_on_off"] = merged["resolved_n"].fillna(0).astype(int).values
 
         new_cols["missing_player_on_off_impact_diff"] = (
             new_cols["home_team_missing_player_on_off_impact"] - new_cols["away_team_missing_player_on_off_impact"]

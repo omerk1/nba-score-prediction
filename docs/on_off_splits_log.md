@@ -527,3 +527,130 @@ dtype bug in a `merge_asof` `by`-column code path that no longer exists once
 only, explicitly not `vs_opponent`) to cover the five missing training seasons
 (2018-19 through 2022-23), which is the next step before re-running the MAE
 comparison at full training-window coverage.
+
+## 8. Second Follow-up Round — Full Training-Window Backfill, Expanding-Window CV, Doubtful Partial Weighting
+
+### 8.1 Extending the checkpoint backfill to the full training window
+
+Ran `scripts/backfill_on_off_splits.py --seasons 2018-19,2019-20,2020-21,2021-22,2022-23`
+(checkpoint-only, no `--vs-opponent`) to cover the five training seasons still
+missing after §7. 12,600 calls, 231,489 rows written, 428 legitimately-empty
+responses, **0 hard errors** (51 transient warnings, all auto-recovered via
+retry — mostly read-timeouts and a stretch of `NameResolutionError`s that
+correlated with the machine's network going down overnight; the run resumed on
+its own once connectivity returned, no data lost or corrupted). This closes the
+last real coverage gap: the checkpoint backfill (`overall`/`home`/`away`) now
+spans all 8 seasons the model's training/val/test window touches (2018-19
+through 2025-26, 25/25 weekly checkpoints each). `outputs/on_off_backfill_log.csv`
+now has 24,423 rows total.
+
+### 8.2 Updated single-split MAE comparison (full training-window coverage)
+
+Re-ran the baseline/treatment comparison at the default split (train through
+2023-24, val 2024-25, test 2025-26) with the extended backfill in place:
+
+| metric | baseline (125 feat) | treatment (132 feat) | delta |
+|---|---|---|---|
+| val diff_mae | 11.13 | 11.105 | -0.025 (better) |
+| test diff_mae | 11.592 | 11.509 | -0.083 (better) |
+| val total_mae | 14.752 | 14.805 | +0.053 (worse) |
+| test total_mae | 15.452 | 15.304 | -0.148 (better) |
+| val win_acc | 65.88% | 65.47% | -0.41pp (worse) |
+| test win_acc | 65.96% | 67.10% | +1.14pp (better) |
+| val brier | 0.2129 | 0.2125 | slightly better |
+| test brier | 0.2109 | 0.2085 | better |
+
+Logged as `on_off_splits_full_training_window_{baseline,treatment}` in the
+iteration scratch file. Same mixed pattern as every prior round: some metrics
+consistently favor the treatment (diff_mae, test_total_mae, brier), others
+don't (val_total_mae, val_win_acc) — full training-window coverage did not
+resolve the ambiguity, it just confirmed the pattern is stable rather than a
+coverage artifact.
+
+### 8.3 Expanding-window cross-validation (5 folds)
+
+To check whether the single val/test split's result was representative or a
+fluke of that particular split, ran an expanding-window walk-forward CV: for
+each fold, train on everything from `train_start_date` up to some cutoff, val =
+the next season, test = the season after that — 5 folds walking backward one
+season at a time from the current default split.
+
+**Important finding, not just noise:** `injury_features.sqlite` has zero rows
+before 2021-10-19 (the NBA's injury-report-PDF era starts with the 2021-22
+season — see `injury_features.pdf_era_start` in config). Since this feature is
+gated entirely through "which players are currently missing" (from injury
+data), any fold whose *training* window ends before that date has a perfectly
+constant (always-zero) feature throughout training — CatBoost never learns to
+split on a zero-variance column, so predictions come out **byte-identical**
+between baseline and treatment regardless of what the feature looks like on
+val/test. This is exactly what happened for the two earliest folds (train
+ending 2021-05-16 and 2020-08-14) — confirmed identical metrics down to every
+reported decimal, not an approximation. Those two folds are excluded from the
+comparison below as structurally uninformative; only the 3 folds whose training
+window includes at least some injury-report-era data are meaningful:
+
+| fold | train ends | val season | test season | val diff_mae Δ | test diff_mae Δ | val win_acc Δ | test win_acc Δ | val brier Δ | test brier Δ |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 (default split, §8.2) | 2024-04-14 | 2024-25 | 2025-26 | -0.025 | -0.083 | -0.41pp | +1.14pp | -0.0004 | -0.0024 |
+| 2 | 2023-04-09 | 2023-24 | 2024-25 | -0.013 | +0.070 | +1.55pp | -0.32pp | -0.0004 | +0.0016 |
+| 3 | 2022-04-10 | 2022-23 | 2023-24 | -0.068 | +0.092 | -0.16pp | +0.08pp | -0.0012 | +0.0019 |
+
+`val_diff_mae` and `val_brier` improve in all 3 valid folds — a small but
+consistent pattern. `test_diff_mae`, `win_acc`, and `test_brier` flip sign fold
+to fold. **Read: still not a clean, decisive result across folds, but the
+val-side consistency is somewhat more encouraging than the single-split number
+alone.** All 8 fold runs (5 folds × baseline/treatment, though folds 4-5 are the
+identical-by-construction ones) are logged in the iteration scratch file as
+`on_off_splits_cv_fold{2,3,4,5}_{baseline,treatment}`.
+
+### 8.4 Partial-weighting Doubtful players
+
+Per open question #1 in §6: `Out` players previously counted at full weight and
+`Questionable`/`Doubtful` were excluded entirely. Changed `Doubtful` to count at
+`injury_features.doubtful_weight` (0.8) instead of being excluded — mirrors
+`formula_scorer.compute_team_deficit`'s existing convention for the unrelated
+team-deficit feature (same config value, reused rather than inventing a second
+weight). `Questionable`/`Day-To-Day` remain excluded entirely (also matching
+`compute_team_deficit`, which counts them separately but never folds them into
+its weighted sum — those players usually do play, so partial-weighting them
+would mostly add noise).
+
+Renamed `_n_out_total`/`_n_out_resolved_on_off` to `_n_missing_total`/
+`_n_missing_resolved_on_off` since they now count Out+Doubtful together, not
+just Out — the old names would have been misleading. Two new tests added
+(`test_doubtful_player_counted_at_partial_weight`,
+`test_questionable_player_still_excluded_entirely`); the existing dtype/leakage
+tests were unaffected.
+
+Re-ran the comparison at the default split (Out+Doubtful vs. the prior Out-only
+version, both at full backfill coverage):
+
+| metric | Out-only (§8.2) | Out + Doubtful@0.8 | delta |
+|---|---|---|---|
+| val diff_mae | 11.105 | 11.104 | ~flat |
+| test diff_mae | 11.509 | 11.508 | ~flat |
+| val total_mae | 14.805 | 14.796 | slightly better |
+| test total_mae | 15.304 | 15.282 | slightly better |
+| val win_acc | 65.47% | 65.47% | identical |
+| test win_acc | 67.10% | 67.43% | +0.33pp better |
+| val brier | 0.2125 | 0.2125 | identical |
+| test brier | 0.2085 | 0.2084 | ~flat |
+
+Doubtful players are rare in the injury data (941 rows vs. 69,474 `Out` rows),
+so this refinement only touches a small slice of games — the near-flat result
+is expected, not a surprise. It's a correctness/consistency improvement (now
+matches the codebase's existing Doubtful-weighting convention) rather than a
+meaningful lever on its own. Logged as `on_off_splits_doubtful_weighted_treatment`
+in the iteration scratch file.
+
+### 8.5 Where this leaves the feature
+
+Across every angle tested so far — partial backfill, full backfill, a single
+split, 3 valid expanding-window CV folds, Out-only vs. Out+Doubtful weighting —
+the result is consistently small and mixed: some metrics lean toward the
+treatment (diff_mae, test_total_mae, brier, and now also val-side consistency
+across CV folds), others lean away (val_total_mae, val_win_acc). Nothing tested
+so far has produced the kind of clean, consistent improvement that got
+`style_matchup.raw_features_enabled` adopted. `on_off_splits.enabled` remains
+`false` pending either a more decisive result or an explicit decision to stop
+iterating and park the feature as-is.

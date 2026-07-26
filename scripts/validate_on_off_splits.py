@@ -34,8 +34,8 @@ logger = logging.getLogger(__name__)
 
 RESULTS_PATH = Path("outputs/on_off_splits_results.csv")
 ON_OFF_COLS = [
-    "home_team_missing_player_on_off_impact", "home_team_n_out_total", "home_team_n_out_resolved_on_off",
-    "away_team_missing_player_on_off_impact", "away_team_n_out_total", "away_team_n_out_resolved_on_off",
+    "home_team_missing_player_on_off_impact", "home_team_n_missing_total", "home_team_n_missing_resolved_on_off",
+    "away_team_missing_player_on_off_impact", "away_team_n_missing_total", "away_team_n_missing_resolved_on_off",
     "missing_player_on_off_impact_diff",
 ]
 

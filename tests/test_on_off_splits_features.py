@@ -12,19 +12,25 @@ volatility problem, not something more backfilling fixes. The already-backfilled
 (harmless) but must never be read by this method. These tests lock in:
 
   1. A cached on/off value for a resolved `Out` player flows through to the team-
-     level impact column correctly (not NaN, not the wrong value).
+     level impact column correctly (not NaN, not the wrong value), at full weight.
   2. Split preference: venue-specific (home/away) beats overall.
-  3. The min(on, off) noise gate excludes a player whose combined minutes look
+  3. A `Doubtful` player contributes at `injury_features.doubtful_weight` (0.8),
+     not the full value -- mirrors formula_scorer.compute_team_deficit's existing
+     Doubtful handling for the unrelated team-deficit feature.
+  4. A `Questionable`/`Day-To-Day` player is excluded entirely, not weighted at
+     all -- also mirrors compute_team_deficit, which counts them separately but
+     never folds them into its weighted sum.
+  5. The min(on, off) noise gate excludes a player whose combined minutes look
      ample but where one side alone is a tiny, noisy sample (the exact bug found
      and fixed in feature_builder.py).
-  4. The leakage guard: a checkpoint dated exactly on the target game's own date
+  6. The leakage guard: a checkpoint dated exactly on the target game's own date
      must NOT be used (DateTo was confirmed inclusive of that date at fetch time),
      only a checkpoint strictly before `game_date - 1 day` is eligible.
-  5. No `Out` players resolved -> 0.0 (not NaN) impact, since "nobody out" is a
-     legitimate zero-impact case, not missing data.
-  6. `on_off_splits.enabled=False` short-circuits before touching any cache file
+  7. No missing (`Out`/`Doubtful`) players resolved -> 0.0 (not NaN) impact,
+     since "nobody out" is a legitimate zero-impact case, not missing data.
+  8. `on_off_splits.enabled=False` short-circuits before touching any cache file
      at all.
-  7. `vs_opponent` rows present in the cache are correctly ignored, even when
+  9. `vs_opponent` rows present in the cache are correctly ignored, even when
      they'd otherwise "win" by being the most specific/recent match -- confirms
      the SQL-level exclusion actually works, not just that the method never
      reaches for that split_type in code.
@@ -44,12 +50,16 @@ AWAY_TEAM = 200
 OTHER_TEAM = 300
 
 
-def _mock_config(on_off_db_path, injury_db_path, enabled: bool = True, min_on_off_minutes: float = MIN_ON_OFF_MINUTES):
+DOUBTFUL_WEIGHT = 0.8
+
+
+def _mock_config(on_off_db_path, injury_db_path, enabled: bool = True, min_on_off_minutes: float = MIN_ON_OFF_MINUTES,
+                  doubtful_weight: float = DOUBTFUL_WEIGHT):
     mock_cfg = MagicMock()
     mock_cfg.on_off_splits = MagicMock(
         enabled=enabled, db_path=str(on_off_db_path), min_on_off_minutes=min_on_off_minutes,
     )
-    mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path))
+    mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path), doubtful_weight=doubtful_weight)
     return mock_cfg
 
 
@@ -176,8 +186,8 @@ class TestOnOffSplitsFeature:
         result = fb._add_on_off_splits_features(df)
 
         assert result.loc[0, "home_team_missing_player_on_off_impact"] == pytest.approx(12.5)
-        assert result.loc[0, "home_team_n_out_total"] == 1
-        assert result.loc[0, "home_team_n_out_resolved_on_off"] == 1
+        assert result.loc[0, "home_team_n_missing_total"] == 1
+        assert result.loc[0, "home_team_n_missing_resolved_on_off"] == 1
         assert result.loc[0, "away_team_missing_player_on_off_impact"] == 0.0
         assert result.loc[0, "missing_player_on_off_impact_diff"] == pytest.approx(12.5)
 
@@ -202,6 +212,56 @@ class TestOnOffSplitsFeature:
         result = fb._add_on_off_splits_features(df)
 
         assert result.loc[0, "home_team_missing_player_on_off_impact"] == pytest.approx(10.0)
+
+    @patch("src.feature_engineering.feature_builder.load_config")
+    def test_doubtful_player_counted_at_partial_weight(self, mock_config, tmp_path, monkeypatch):
+        """A `Doubtful` player must contribute injury_features.doubtful_weight
+        (0.8 here) times their on/off value, not the full value and not zero --
+        mirrors formula_scorer.compute_team_deficit's existing Doubtful handling."""
+        _setup(
+            tmp_path, monkeypatch, mock_config,
+            on_off_rows=[{
+                "player_id": 501, "team_id": HOME_TEAM, "split_type": "overall",
+                "opponent_team_id": None, "as_of_date": "2024-01-05",
+                "min_on": 200, "min_off": 100, "on_off_plus_minus": 10.0,
+            }],
+            injury_rows=[("2024-01-10", HOME_TEAM, "Player One", "Doubtful")],
+            name_res_rows=[("Player One", 501, "high")],
+        )
+
+        df = _query_df("2024-01-10")
+        fb = FeatureBuilder(rolling_windows=[3])
+        result = fb._add_on_off_splits_features(df)
+
+        assert result.loc[0, "home_team_missing_player_on_off_impact"] == pytest.approx(10.0 * DOUBTFUL_WEIGHT)
+        assert result.loc[0, "home_team_n_missing_total"] == 1
+        assert result.loc[0, "home_team_n_missing_resolved_on_off"] == 1
+
+    @patch("src.feature_engineering.feature_builder.load_config")
+    def test_questionable_player_still_excluded_entirely(self, mock_config, tmp_path, monkeypatch):
+        """`Questionable`/`Day-To-Day` players are not weighted at all (unlike
+        Doubtful) -- they usually play, so counting them as partially missing
+        would mostly add noise. Must not appear in the impact sum or the missing
+        counts at all, exactly like the pre-existing Out-only behavior for any
+        other untracked status."""
+        _setup(
+            tmp_path, monkeypatch, mock_config,
+            on_off_rows=[{
+                "player_id": 501, "team_id": HOME_TEAM, "split_type": "overall",
+                "opponent_team_id": None, "as_of_date": "2024-01-05",
+                "min_on": 200, "min_off": 100, "on_off_plus_minus": 10.0,
+            }],
+            injury_rows=[("2024-01-10", HOME_TEAM, "Player One", "Questionable")],
+            name_res_rows=[("Player One", 501, "high")],
+        )
+
+        df = _query_df("2024-01-10")
+        fb = FeatureBuilder(rolling_windows=[3])
+        result = fb._add_on_off_splits_features(df)
+
+        assert result.loc[0, "home_team_missing_player_on_off_impact"] == 0.0
+        assert result.loc[0, "home_team_n_missing_total"] == 0
+        assert result.loc[0, "home_team_n_missing_resolved_on_off"] == 0
 
     @patch("src.feature_engineering.feature_builder.load_config")
     def test_vs_opponent_rows_are_ignored_even_when_present(self, mock_config, tmp_path, monkeypatch):
@@ -252,8 +312,8 @@ class TestOnOffSplitsFeature:
         result = fb._add_on_off_splits_features(df)
 
         assert result.loc[0, "home_team_missing_player_on_off_impact"] == 0.0
-        assert result.loc[0, "home_team_n_out_total"] == 1  # still counted as Out
-        assert result.loc[0, "home_team_n_out_resolved_on_off"] == 0  # but not resolved
+        assert result.loc[0, "home_team_n_missing_total"] == 1  # still counted as Out
+        assert result.loc[0, "home_team_n_missing_resolved_on_off"] == 0  # but not resolved
 
     @patch("src.feature_engineering.feature_builder.load_config")
     def test_same_day_checkpoint_not_used_leakage_guard(self, mock_config, tmp_path, monkeypatch):
@@ -301,8 +361,8 @@ class TestOnOffSplitsFeature:
 
         assert result.loc[0, "home_team_missing_player_on_off_impact"] == 0.0
         assert not pd.isna(result.loc[0, "home_team_missing_player_on_off_impact"])
-        assert result.loc[0, "home_team_n_out_total"] == 0
-        assert result.loc[0, "home_team_n_out_resolved_on_off"] == 0
+        assert result.loc[0, "home_team_n_missing_total"] == 0
+        assert result.loc[0, "home_team_n_missing_resolved_on_off"] == 0
         assert result.loc[0, "missing_player_on_off_impact_diff"] == 0.0
 
     @patch("src.feature_engineering.feature_builder.load_config")
