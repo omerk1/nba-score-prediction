@@ -654,3 +654,29 @@ so far has produced the kind of clean, consistent improvement that got
 `style_matchup.raw_features_enabled` adopted. `on_off_splits.enabled` remains
 `false` pending either a more decisive result or an explicit decision to stop
 iterating and park the feature as-is.
+
+## Final Decision
+
+**Parked, not adopted.** Iteration stopped here: partial backfill → full
+8-season backfill → single split → 5-fold expanding-window CV → Doubtful
+partial-weighting all produced the same small, inconsistent result. The
+remaining item on the iteration list (checkpoint-cadence tuning) would require
+another multi-hour backfill and, given the pattern hasn't shifted across four
+prior rounds of real changes, is unlikely to change the verdict.
+
+This isn't a verdict on the implementation — the pipeline itself is solid
+(real leakage guards empirically confirmed, correct small-sample noise gating,
+full coverage, a natural-key `merge_asof` join safe for live prediction). It's
+more likely that the signal here mostly overlaps with what the model already
+captures via other features (rolling team performance, `team_deficit_diff` from
+the injury-quality feature, `n_out`/`n_questionable`), leaving little room for
+a per-player on/off layer to add on top.
+
+`on_off_splits.enabled` stays `false`. The code, backfilled data
+(`player_on_off_splits.sqlite`), and tests are merged as-is — the feature is a
+complete no-op while disabled, so this is safe to merge. Revisit if the
+underlying idea is worth another look later, e.g. with proper multi-season
+pooling for `vs_opponent` (never built — see §7.3) rather than dropping it.
+The shared `outputs/experiments.csv`'s `on_off_splits_treatment` row was
+updated in place with these final numbers rather than left pointing at the
+long-superseded ~11%-coverage result.
