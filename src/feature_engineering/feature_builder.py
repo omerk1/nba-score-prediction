@@ -92,6 +92,7 @@ class FeatureBuilder:
         df = self._add_injury_features(df)
         df = self._add_style_matchup_features(df)
         df = self._add_style_fingerprint_features(df)
+        df = self._add_on_off_splits_features(df)
 
         feature_cols = self._get_feature_columns(df)
         nan_games = df[feature_cols].isna().any(axis=1).sum()
@@ -865,6 +866,234 @@ class FeatureBuilder:
 
         for metric in all_metrics:
             new_cols[f"style_{metric}_diff"] = side_values["home"][metric] - side_values["away"][metric]
+
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_on_off_splits_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Player on/off-court splits, integrated as an injury-aware team-level feature
+        rather than raw per-player columns (per docs/on_off_splits_decisions.md's
+        open design question and the coordinator's phase-2 direction): for each
+        team-game, sum the on/off plus-minus impact of that team's currently-missing
+        players (per `injury_features.sqlite`'s `player_injuries` table, already
+        joined by `_add_injury_features` above via `(team_id, game_date)`) — an
+        "expected point-differential impact from currently-missing players" signal,
+        directly extending the existing injury-feature join pattern instead of
+        introducing an arbitrary raw per-player aggregate or a single
+        headline-player proxy (both considered and rejected — see the decisions
+        doc's Open Risks §6.1).
+
+        `Out` players count at full weight; `Doubtful` players count at
+        `injury_features.doubtful_weight` (0.8) — the same fractional weight
+        `formula_scorer.compute_team_deficit` already applies to Doubtful players
+        for the unrelated team-deficit feature, reused here for consistency rather
+        than inventing a second weight. `Questionable`/`Day-To-Day` players are
+        still excluded entirely, mirroring `compute_team_deficit` again (which
+        counts them separately but never folds them into its weighted sum) —
+        players in that status usually do play, so treating them as partially
+        "missing" would mostly add noise rather than signal.
+
+        Data source: `player_on_off_splits` (built by
+        scripts/backfill_on_off_splits.py from nba_api's TeamPlayerOnOffSummary,
+        see docs/on_off_splits_decisions.md), one row per
+        (player_id, team_id, split_type, opponent_team_id, as_of_date checkpoint).
+        Player identity for the "who's out" side comes from `player_injuries`
+        (game_date, team_id, player_name, status) — resolved to player_id via the
+        existing `player_name_resolution` table in the A7 style-fingerprint cache
+        (`CACHE_DB`, confidence in ('high','medium')), reusing the exact same
+        name-resolution table `src/matchups/injury_layer.py` already relies on for
+        its own Out-player lookup, rather than rebuilding a second resolution table.
+
+        Split preference per (out player, team-game): the venue-specific split
+        (`home` for the home team's rows, `away` for the away team's rows) beats
+        `overall` (always-available fallback). Implemented via two separate
+        `merge_asof` lookups combined with `combine_first`.
+
+        `vs_opponent` (this exact opponent) was deliberately dropped from this
+        preference chain (was: vs_opponent > venue > overall) after reviewing real
+        backfilled data: a single season only has 2-4 meetings between two specific
+        teams, and vs_opponent checkpoints are taken per-game rather than on the
+        same weekly cadence as venue/overall, so the value can swing enormously
+        from meeting to meeting purely from small-sample arithmetic (e.g. one
+        blowout as the only meeting so far dominates the number until enough games
+        accumulate to dilute it — there's no guarantee that ever happens within a
+        season). This is a real, structural volatility problem, not a coverage gap
+        that more backfilling fixes. A proper fix would need multi-season pooling
+        (mirroring `_add_h2h_features`'s 3-year lookback) — not implemented here;
+        the already-backfilled `player_on_off_splits` rows with `split_type=
+        'vs_opponent'` are left in place (harmless, reusable if that fix is ever
+        built) but are no longer read by this method.
+
+        Leakage guard: `date_to_nullable` was empirically confirmed INCLUSIVE of
+        games played on that exact calendar date (Boston's cumulative GP jumped
+        from 39 to 40 exactly on the date of an actual BOS game, not the day after
+        — see the decisions doc / backfill script docstring). So the lookup key
+        used here is `game_date - 1 day`, not `game_date` itself — this guarantees
+        no same-day leakage regardless of how a cached checkpoint's `as_of_date`
+        happens to line up with the target game's date. `merge_asof(direction=
+        "backward", allow_exact_matches=True)` then finds the most recent
+        checkpoint at or before that shifted date, working identically for
+        historical training rows and for a live/future prediction date (same
+        (team_id, game_date) natural-key join strategy `_add_injury_features` and
+        `_add_style_fingerprint_features` already use — never an exact `game_id`
+        match).
+
+        A player's on_off_plus_minus is only trusted if BOTH their on-court AND
+        off-court minutes independently meet `on_off_splits.min_on_off_minutes`
+        (small-sample noise gate, applied when the cache is loaded, before any
+        lookup). Gating on the min() of the two sides, not their sum, matters: a
+        rotation player can rack up hundreds of "on" minutes while having only a
+        handful of "off" minutes (rarely rested) — the combined total looks
+        large, but the tiny "off" side alone produces a wildly noisy plus-minus
+        (observed directly: a rookie with 620 on-minutes but only 4 off-minutes
+        produced an on/off swing over +150, which is not a real effect, just a
+        4-minute sample). Requiring both sides independently >= the threshold
+        catches this; requiring only the sum does not.
+
+        Adds, for each of home_team/away_team: `_missing_player_on_off_impact` (sum
+        of resolved Out/Doubtful players' weighted on/off plus-minus — 0.0, not
+        NaN, when no missing players are resolved, since "no one out" is a
+        legitimate zero-impact case, not a missing-data case), `_n_missing_total`
+        (count of Out/Doubtful players found, before resolution), and
+        `_n_missing_resolved_on_off` (how many of those were successfully resolved
+        to an on/off value — a confidence indicator, since a large gap between the
+        two counts means the sum understates the true impact). Plus one
+        differential column, `missing_player_on_off_impact_diff` (home − away),
+        mirroring `_add_matchup_features`'s differential pattern.
+
+        Soft-disabled (warn + skip, matching `_add_style_matchup_features`'s
+        not-yet-adopted convention, not `_add_style_fingerprint_features`'s
+        hard-raise) if any of the three required caches (on/off splits, injury
+        features, name resolution) is missing — this feature has not yet gone
+        through the ablation-pipeline adoption process those two features did.
+        """
+        cfg = load_config()
+        if not cfg.on_off_splits or not cfg.on_off_splits.enabled:
+            return df
+
+        on_off_db = Path(cfg.on_off_splits.db_path)
+        injury_db = Path(cfg.injury_features.db_path) if cfg.injury_features else None
+        name_res_db = Path(CACHE_DB)
+
+        if not on_off_db.exists() or injury_db is None or not injury_db.exists() or not name_res_db.exists():
+            logger.warning(
+                "On/off splits feature requires all of: "
+                f"{on_off_db} (on/off cache), {injury_db} (injury cache), "
+                f"{name_res_db} (name resolution) — one or more missing, skipping "
+                "on/off splits features."
+            )
+            return df
+
+        min_minutes = cfg.on_off_splits.min_on_off_minutes
+
+        with sqlite3.connect(f"file:{on_off_db}?mode=ro", uri=True) as conn:
+            # Only overall/home/away are read -- vs_opponent rows exist in this table
+            # (see method docstring for why they're no longer used) but are excluded
+            # here rather than fetched and ignored downstream.
+            splits = pd.read_sql_query(
+                "SELECT player_id, team_id, split_type, as_of_date, "
+                "min_on, min_off, on_off_plus_minus FROM player_on_off_splits "
+                "WHERE split_type != 'vs_opponent'",
+                conn,
+            )
+        if splits.empty:
+            logger.warning("player_on_off_splits cache is empty — skipping on/off splits features")
+            return df
+
+        splits["as_of_date"] = pd.to_datetime(splits["as_of_date"])
+        # Gate on min(on, off), not the sum — see method docstring: a player can have
+        # hundreds of "on" minutes and almost none "off" (or vice versa), which makes
+        # the combined total look ample while the thin side alone is pure noise.
+        min_side_minutes = np.minimum(splits["min_on"].fillna(0), splits["min_off"].fillna(0))
+        splits = splits[min_side_minutes >= min_minutes].copy()
+
+        doubtful_weight = cfg.injury_features.doubtful_weight if cfg.injury_features else 1.0
+
+        with sqlite3.connect(f"file:{injury_db}?mode=ro", uri=True) as conn:
+            out_players = pd.read_sql_query(
+                "SELECT game_date, team_id, player_name, status FROM player_injuries "
+                "WHERE status IN ('Out', 'Doubtful')",
+                conn,
+            )
+        with sqlite3.connect(f"file:{name_res_db}?mode=ro", uri=True) as conn:
+            name_res = pd.read_sql_query(
+                "SELECT player_name, player_id FROM player_name_resolution "
+                "WHERE confidence IN ('high', 'medium')",
+                conn,
+            )
+        out_players["game_date"] = pd.to_datetime(out_players["game_date"]).dt.normalize()
+        out_players["weight"] = np.where(out_players["status"] == "Out", 1.0, doubtful_weight)
+        out_players_resolved = out_players.merge(name_res, on="player_name", how="inner")
+
+        def _asof_lookup(rows: pd.DataFrame, pool: pd.DataFrame, split_type: str, by_cols: list[str]) -> pd.Series:
+            sub_pool = pool[pool["split_type"] == split_type].sort_values("as_of_date")
+            if sub_pool.empty:
+                return pd.Series([float("nan")] * len(rows), index=rows.index)
+            # merge_asof's `by` columns require matching dtypes on both sides -- cast
+            # explicitly rather than relying on pandas' inference (this caught a real
+            # bug when `by_cols` included opponent_team_id for the now-removed
+            # vs_opponent lookup: that column was NULL for every other split_type in
+            # the same SQL read, so pandas inferred float64 for the whole column even
+            # though it's non-null within the vs_opponent slice specifically).
+            left = rows[["lookup_date"] + by_cols].copy()
+            right = sub_pool[["as_of_date"] + by_cols + ["on_off_plus_minus"]].copy()
+            for col in by_cols:
+                left[col] = left[col].astype("int64")
+                right[col] = right[col].astype("int64")
+            merged = pd.merge_asof(
+                left, right,
+                left_on="lookup_date", right_on="as_of_date",
+                by=by_cols, direction="backward", allow_exact_matches=True,
+            )
+            return merged["on_off_plus_minus"]
+
+        new_cols = {}
+        for team_col, venue_split, prefix in [
+            ("HOME_TEAM_ID", "home", "home_team"),
+            ("AWAY_TEAM_ID", "away", "away_team"),
+        ]:
+            rows = pd.DataFrame({
+                "row_id": df.index,
+                "game_date": pd.to_datetime(df["GAME_DATE"]).dt.normalize().values,
+                "team_id": df[team_col].values,
+            })
+            rows = rows.merge(
+                out_players_resolved[["game_date", "team_id", "player_name", "player_id", "weight"]],
+                on=["game_date", "team_id"], how="inner",
+            )
+
+            if rows.empty:
+                new_cols[f"{prefix}_missing_player_on_off_impact"] = 0.0
+                new_cols[f"{prefix}_n_missing_total"] = 0
+                new_cols[f"{prefix}_n_missing_resolved_on_off"] = 0
+                continue
+
+            # Leakage guard: DateTo is confirmed INCLUSIVE of same-day games, so the
+            # lookup key must be the day BEFORE the target game, not the game date
+            # itself (see method docstring).
+            rows["lookup_date"] = rows["game_date"] - pd.Timedelta(days=1)
+            rows = rows.sort_values("lookup_date").reset_index(drop=True)
+
+            venue = _asof_lookup(rows, splits, venue_split, ["player_id", "team_id"])
+            overall = _asof_lookup(rows, splits, "overall", ["player_id", "team_id"])
+
+            rows["impact"] = venue.combine_first(overall)
+            rows["resolved"] = rows["impact"].notna().astype(int)
+            rows["weighted_impact"] = rows["impact"] * rows["weight"]
+
+            agg = rows.groupby("row_id").agg(
+                impact_sum=("weighted_impact", "sum"),
+                resolved_n=("resolved", "sum"),
+                out_n=("player_id", "count"),
+            )
+            merged = pd.DataFrame(index=df.index).join(agg)
+            new_cols[f"{prefix}_missing_player_on_off_impact"] = merged["impact_sum"].fillna(0.0).values
+            new_cols[f"{prefix}_n_missing_total"] = merged["out_n"].fillna(0).astype(int).values
+            new_cols[f"{prefix}_n_missing_resolved_on_off"] = merged["resolved_n"].fillna(0).astype(int).values
+
+        new_cols["missing_player_on_off_impact_diff"] = (
+            new_cols["home_team_missing_player_on_off_impact"] - new_cols["away_team_missing_player_on_off_impact"]
+        )
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

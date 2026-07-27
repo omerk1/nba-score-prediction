@@ -30,17 +30,14 @@
 ## Phase 2: Dependent Features (Group B)
 
 ### B1: Player On/Off Splits Analysis
-**Status:** Planned (depends on A3 player projections, A4 lineup data)
-**Goal:** Compute +/- impact of each player on team performance (home/away, vs specific opponents)
-**Data sources:** A3 (player stats), A4 (actual lineups from box scores)
-**Output:** DataFrame with player_id, on_off_plus_minus, vs_opponent splits
-**Note:** Use historical lineups from box scores; real-time injury data (future work)
+**Status:** ✅ Implemented and fully iterated (branch `feature/on-off-splits`), **not adopted** — `on_off_splits.enabled: false`. Full backfill, a 5-fold expanding-window CV, and a Doubtful-partial-weighting refinement all confirm the same small/mixed result; this cleared the "conclusive result" bar in the sense that the answer is now conclusively "no clear win," not "not decided yet." See `docs/on_off_splits_decisions.md` (phase 1 data-source investigation — the original "A4 lineup data" premise below turned out to be wrong, see Note) and `docs/on_off_splits_log.md` (phase 2 implementation + validation, sections 7-8 for the full backfill/CV/weighting rounds) for the full story.
+**What was actually built:** direct nba_api `TeamPlayerOnOffSummary` backfill at a checkpoint cadence (not per-game, not play-by-play reconstruction — `LastNGames` was confirmed unusable for leakage-safe historical queries) into a new `player_on_off_splits` cache; `_add_on_off_splits_features` in `feature_builder.py` sums currently-missing (`Out` full weight, `Doubtful` at `injury_features.doubtful_weight`) players' on/off plus-minus per team-game (folds B2's injury-tie-in framing directly into this one feature rather than a separate follow-on step). `vs_opponent` was fetched but ultimately dropped from the feature (small per-season samples, per-game not weekly checkpoints — real, structural volatility, not a coverage gap).
+**Real result:** full checkpoint backfill across all 8 seasons the model's training/val/test window touches (2018-19 through 2025-26). A real MAE comparison (`train_model.py`, baseline vs. treatment) and a 5-fold expanding-window CV both came back small and mixed — some metrics consistently favor the treatment (diff_mae, brier, val-side across CV folds), others don't (total_mae, win_acc on val) — not the kind of clean, consistent win that got `style_matchup.raw_features_enabled` adopted. New feature columns consistently rank in the bottom third of ~132 features by importance.
+**Decision:** parked, not adopted. Code, backfill data, and tests are merged and safe (feature is a no-op while `enabled: false`) in case the underlying idea is revisited later (e.g. with proper multi-season pooling for `vs_opponent`, which was never built).
+**Note (corrects the original plan below):** the original data-source assumption ("actual lineups from box scores" via A4) was wrong — A4's lineup collector only fetches season rosters (`CommonTeamRoster`), never in-game on-court/off-court state, and box scores have no on-court-time data either. nba_api's `TeamPlayerOnOffSummary` endpoint was the real, working data source, confirmed via live API calls.
 
 ### B2: Player Availability Impact on Model
-**Status:** Planned (depends on A3, B1)
-**Goal:** Integrate B1 on/off metrics into feature_builder.py as injury-aware features
-**Output:** New columns: player_availability_impact, team_roster_strength_delta
-**Integration:** _add_player_features() method in feature_builder.py
+**Status:** Folded into B1's actual implementation above — the injury-tie-in ("which currently-missing players, weighted by their on/off impact") IS `_add_on_off_splits_features`, not a separate later step. Not a distinct remaining backlog item.
 
 ### B3: Betting Data Integration (Real)
 **Status:** Planned (blocked on external data source)

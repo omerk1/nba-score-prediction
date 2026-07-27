@@ -222,3 +222,42 @@ style_matchup:
       paint_activity: -0.2729
     perimeter_specialist:
       defensive_rating: 0.2948
+
+on_off_splits:
+  # Player on/off court splits. See docs/on_off_splits_decisions.md (phase 1 data
+  # decisions, empirically tested against nba_api's TeamPlayerOnOffSummary) and
+  # docs/on_off_splits_log.md (phase 2 implementation + validation).
+  #
+  # `enabled` gates feature_builder.py's _add_on_off_splits_features, mirroring
+  # InjuryFeaturesConfig/StyleMatchupConfig's own `enabled` field. Same convention
+  # as `style_matchup.enabled` above: a feature only flips to `true` after a
+  # CONCLUSIVE ablation-pipeline comparison (compare `style_matchup.
+  # raw_features_enabled` above, which earned `true` from a real, consistent
+  # total_mae improvement across both val and test at full data coverage). This
+  # feature has now cleared that bar the other way: a full 8-season checkpoint
+  # backfill, a single-split comparison, a 5-fold expanding-window CV, and a
+  # Doubtful-partial-weighting refinement (see docs/on_off_splits_log.md
+  # sections 7-8) all produced the same small/mixed result -- some metrics
+  # consistently favor the treatment (diff_mae, brier), others don't (total_mae,
+  # win_acc) -- not the kind of clean, consistent win that got
+  # `style_matchup.raw_features_enabled` adopted. Conclusively PARKED, NOT
+  # adopted (see docs/backlog.md's B1 entry and the log's Final Decision
+  # section). Code/data/tests are merged for future revisit; stays `false`.
+  enabled: false
+  db_path: "data/raw/player_on_off_splits.sqlite"
+  # Checkpoint cadence for scripts/backfill_on_off_splits.py: TeamPlayerOnOffSummary
+  # returns a season-cumulative-to-date number for whatever DateTo cutoff is passed,
+  # so a fresh snapshot is only needed every `checkpoint_cadence_days`, not per game
+  # (the value barely moves between two adjacent games at any point past the first
+  # few weeks of a season) -- see the decisions doc's backfill-scope cost analysis.
+  checkpoint_cadence_days: 7
+  # Minimum minutes required on EACH side (on-court AND off-court independently,
+  # not their sum) before a player's on_off_plus_minus is trusted enough to feed
+  # the missing-player-impact feature -- guards against small-sample noise. Gating
+  # on the sum alone is NOT enough: a rotation player can have hundreds of "on"
+  # minutes and almost none "off" (rarely rested), which makes a combined total
+  # look ample while the thin side alone is pure noise -- observed directly in
+  # testing, a rookie with 620 on-minutes / 4 off-minutes produced a +150-point
+  # on/off "swing" from a 4-minute sample. See feature_builder.py's
+  # _add_on_off_splits_features docstring.
+  min_on_off_minutes: 50.0
