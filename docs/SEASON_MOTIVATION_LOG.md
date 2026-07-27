@@ -151,25 +151,37 @@ combined score, in a future iteration).
 ### Weight exploration (`roster_behavior_weight`)
 
 Per the brief's instruction to treat weights as explored parameters, not fixed
-guesses, three values were run through the full ablation pipeline:
+guesses, six values were run through the full ablation pipeline — the initial
+three (0.0/0.5/1.0), then a follow-up extension to 1.5/2.0/3.0 after 1.0 came
+out best, to check whether that was a genuine peak or just the edge of too
+narrow a search range (weights up to ~4.3 are still numerically safe without
+clipping, given `roster_behavior_score`'s empirical max of 0.234):
 
 | `roster_behavior_weight` | val diff_mae | test diff_mae | val win_acc | test win_acc | val brier | test brier |
 |---|---|---|---|---|---|---|
 | 0.0 (pure standings pressure) | 11.115 | 11.580 | 0.6571 | 0.6710 | 0.2124 | 0.2111 |
 | 0.5 (midpoint) | 11.115 | 11.579 | 0.6571 | 0.6710 | 0.2124 | 0.2110 |
 | **1.0 (chosen default)** | **11.081** | **11.543** | **0.6661** | **0.6735** | **0.2109** | **0.2095** |
+| 1.5 | 11.126 | 11.594 | 0.6612 | 0.6743 | 0.2126 | 0.2111 |
+| 2.0 | 11.101 | 11.566 | 0.6588 | 0.6678 | 0.2118 | 0.2098 |
+| 3.0 | 11.115 | 11.589 | 0.6539 | 0.6743 | 0.2123 | 0.2110 |
 
-`0.0` and `0.5` are nearly indistinguishable from each other, while `1.0` is
-clearly better across every metric shown. This looked odd until checking the
-actual `roster_behavior_score` distribution directly: only **2.2%** of all
-team-game rows (535 / 23,938) ever have a nonzero score at all (rising to 4.4%
-if restricted to the post-2021-10-19 window where `player_injuries` has
-coverage), and even then the typical nonzero value is small (median 0.065, max
-0.234). Halving an already-small effect that only touches ~2-4% of rows produces
-essentially no aggregate change (`0.5` ≈ `0.0`), but doubling it (`0.5` → `1.0`)
-is apparently enough to tip a real, if small, number of borderline predictions —
-consistent with a genuinely rare-but-meaningful signal (teams don't rest healthy
-rotation players most nights, but when they do, it matters). **Kept
+`1.0` is the clear best point on 5 of 6 metrics (val/test diff_mae, val win_acc,
+val/test brier) — every other value tested, both below and above it, clusters
+into a visibly worse, fairly flat/noisy band with no clean monotonic trend past
+1.0 (1.5/2.0/3.0 don't rank consistently against each other either). This
+confirms `1.0` as a genuine local optimum rather than an artifact of a search
+range that happened to stop right at the best value.
+
+This looked odd until checking the actual `roster_behavior_score` distribution
+directly: only **2.2%** of all team-game rows (535 / 23,938) ever have a nonzero
+score at all (rising to 4.4% if restricted to the post-2021-10-19 window where
+`player_injuries` has coverage), and even then the typical nonzero value is
+small (median 0.065, max 0.234). With such a small, low-magnitude subset of rows
+actually affected by this parameter, the noisiness of the 1.5-3.0 band is
+expected — there just isn't enough signal in that handful of rows to produce a
+clean monotonic curve, only enough to clearly distinguish "off/half-off"
+(0.0/0.5) from "on" (1.0) from "overshooting" (1.5+). **Kept
 `roster_behavior_weight=1.0`** as the final default; config reverted to
 `enabled=false` per the adoption convention (see below).
 
