@@ -261,3 +261,27 @@ on_off_splits:
   # on/off "swing" from a 4-minute sample. See feature_builder.py's
   # _add_on_off_splits_features docstring.
   min_on_off_minutes: 50.0
+
+season_motivation:
+  # Season motivation / seeding-incentive features. See
+  # docs/SEASON_MOTIVATION_DECISIONS.md for the full data audit and formulas.
+  #
+  # `enabled` gates feature_builder.py's _add_season_motivation_features, mirroring
+  # OnOffSplitsConfig/StyleMatchupConfig's own `enabled` field. Same convention: a
+  # feature only flips to `true` after a conclusive ablation-pipeline comparison.
+  # Stays `false` until that happens.
+  enabled: false
+  # Play-in cutoff seed under the current NBA format -- distance from this seed
+  # (not a top-6-only cutoff) drives the standings-pressure component, since a
+  # team at 9th/10th is still genuinely fighting for its season.
+  playoff_line_seed: 10
+  # How much a healthy-scratch signal (sitting rest/personal-reasons/coach's-decision
+  # players) suppresses the standings-pressure component of motivation_score.
+  # 1.0 = a team sitting 100% of its full-strength quality reads as zero motivation
+  # regardless of standings pressure. Explored empirically, see
+  # docs/SEASON_MOTIVATION_LOG.md's Phase 1 section.
+  roster_behavior_weight: 1.0
+  # A player needs at least this many weekly player_importance snapshots before
+  # counting toward full_strength_quality -- guards against a single-game callup's
+  # one noisy snapshot skewing the full-strength baseline.
+  min_importance_games: 5

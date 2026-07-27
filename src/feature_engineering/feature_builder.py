@@ -93,6 +93,7 @@ class FeatureBuilder:
         df = self._add_style_matchup_features(df)
         df = self._add_style_fingerprint_features(df)
         df = self._add_on_off_splits_features(df)
+        df = self._add_season_motivation_features(df)
 
         feature_cols = self._get_feature_columns(df)
         nan_games = df[feature_cols].isna().any(axis=1).sum()
@@ -1094,6 +1095,114 @@ class FeatureBuilder:
         new_cols["missing_player_on_off_impact_diff"] = (
             new_cols["home_team_missing_player_on_off_impact"] - new_cols["away_team_missing_player_on_off_impact"]
         )
+
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_season_motivation_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Season motivation / seeding-incentive features. See
+        docs/SEASON_MOTIVATION_DECISIONS.md for the full data audit and the
+        justification behind every formula referenced below.
+
+        Standings and remaining-schedule data need no new backfill or DB table --
+        every season this touches is already a completed historical season, so its
+        full schedule is already sitting in `game` (the point-in-time standings
+        computation only ever reads `game_date`/team-id columns from "future" rows
+        relative to a given training row, never their outcome columns -- schedule
+        metadata, not leaked results). Delegates the actual computation to
+        `src/feature_engineering/season_motivation.py`, same separation
+        `_add_elo_features` uses for its own sequential, season-wide computation.
+
+        Adds, for each of home_team/away_team:
+        - `_motivation_score` [0,1]: `pressure_raw * (1 - roster_behavior_weight *
+          roster_behavior_score)` -- standings pressure (distance from the
+          `season_motivation.playoff_line_seed` seed, moderated by games
+          remaining) suppressed by how much of the team's full-strength quality
+          is sitting out tonight for a non-injury reason (rest, personal reasons,
+          coach's decision -- see `season_motivation.NON_INJURY_REASONS`). Only
+          captures *behavioral* tanking (visibly sitting healthy players) --
+          pure strategic tanking (playing normally but not trying) has no
+          available data source and is a known, documented limitation, not
+          attempted here.
+        - `_games_to_clinch_ceiling` / `_games_to_clinch_floor`: continuous
+          countdowns (0 = locked), not binary flags -- games until this team can
+          no longer improve past / fall behind its current seed, using raw
+          win-count projections to season's end against the team currently
+          ranked one spot above/below. No head-to-head/division/conference
+          tiebreakers are modeled -- deliberately a continuous proxy, not exact
+          combinatorial seeding logic.
+
+        Soft-disabled (warn + skip) if the injury features cache is missing --
+        the roster-behavior component depends on it. This feature has not yet
+        gone through the ablation-pipeline adoption process, matching
+        `_add_on_off_splits_features`/`_add_style_matchup_features`'s convention.
+        """
+        cfg = load_config()
+        if not cfg.season_motivation or not cfg.season_motivation.enabled:
+            return df
+
+        injury_db = Path(cfg.injury_features.db_path) if cfg.injury_features else None
+        if injury_db is None or not injury_db.exists():
+            logger.warning(
+                f"Injury features DB not found at {injury_db} -- season motivation's "
+                "roster-behavior component depends on it, skipping season motivation features."
+            )
+            return df
+
+        from src.data_processing.data_loader import NBADataLoader
+        from src.feature_engineering.season_motivation import (
+            compute_standings_metrics,
+            compute_roster_behavior_scores,
+        )
+
+        sm_cfg = cfg.season_motivation
+        loader = NBADataLoader(db_path=cfg.data_paths.raw_db)
+        try:
+            all_games = loader.load_games(
+                start_date=cfg.datasets_loading.data_start_date,
+                end_date=cfg.datasets_loading.test_end_date,
+                allowed_season_types=cfg.datasets_loading.allowed_season_types,
+            )
+        finally:
+            loader.close()
+
+        standings = compute_standings_metrics(all_games, sm_cfg.playoff_line_seed)
+
+        season_start_by_season = (
+            all_games.assign(GAME_DATE=pd.to_datetime(all_games["GAME_DATE"]).dt.normalize())
+            .groupby("SEASON_ID")["GAME_DATE"].min().to_dict()
+        )
+
+        game_dates = pd.to_datetime(df["GAME_DATE"]).dt.normalize()
+        team_dates = pd.concat([
+            pd.DataFrame({"team_id": df["HOME_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
+            pd.DataFrame({"team_id": df["AWAY_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
+        ], ignore_index=True)
+
+        roster_behavior = compute_roster_behavior_scores(
+            team_dates, str(injury_db), cfg.injury_features.importance_weights,
+            sm_cfg.min_importance_games, season_start_by_season,
+        )
+
+        new_cols = {}
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            lookup = pd.DataFrame({
+                "season_id": df["SEASON_ID"].values,
+                "team_id": df[team_col].values,
+                "snapshot_date": game_dates.values,
+            })
+            standings_merged = lookup.merge(standings, on=["season_id", "team_id", "snapshot_date"], how="left")
+
+            rb_lookup = pd.DataFrame({"team_id": df[team_col].values, "game_date": game_dates.values})
+            rb_merged = rb_lookup.merge(roster_behavior, on=["team_id", "game_date"], how="left")
+            roster_score = rb_merged["roster_behavior_score"].fillna(0.0).values
+
+            pressure = standings_merged["pressure_raw"].fillna(0.0).values
+            motivation = np.clip(pressure * (1 - sm_cfg.roster_behavior_weight * roster_score), 0.0, 1.0)
+
+            new_cols[f"{prefix}_motivation_score"] = motivation
+            new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
+            new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

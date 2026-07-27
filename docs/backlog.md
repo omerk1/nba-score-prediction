@@ -51,7 +51,17 @@
 **Note:** Lower priority until data source identified
 
 ### B4: Season Motivation Signal (revised from an earlier "tanking/playoff status" idea)
-**Status:** Planned — revised before building, original spec was too rigid
+**Status:** 🔄 Phase 1 implemented and validated (branch `feature/season-motivation`),
+**not yet adopted** — `season_motivation.enabled: false`, pending Phase 2
+(`preferred_opponent_delta`, folds in B5's clinch-ceiling/floor concept below as a
+prerequisite input) before a combined adoption decision. See
+`docs/SEASON_MOTIVATION_DECISIONS.md` (data audit + formulas) and
+`docs/SEASON_MOTIVATION_LOG.md` (real validation results) for the full story.
+**Real result so far (unlike B1/on-off-splits' inconclusive verdict):** a genuine,
+if modest, improvement — 5 of 8 tracked metrics (diff_mae, win_acc, brier on both
+val and test) improved simultaneously, 3 of 6 new columns rank in the top third of
+feature importance. No new backfill or DB table was needed at all — standings,
+schedule, and roster-quality data all already existed in already-complete tables.
 **Original idea (dropped, found in earlier session history):** hard seed-range cutoffs
 (bottom-4 = tanking, top-4 = secure, 8-14 = playoff race, 8-10 = playin) producing binary
 `home_team_tanking`/`home_team_playoff_race` (0/1) columns.
@@ -73,7 +83,11 @@ hardcoded seed-bucket flag. Two data-driven ingredients to explore, not assume:
 the cutoffs as a tuned/explored parameter, not a guess.
 
 ### B5: Playoff Seed Already Clinched (split off from the same original idea)
-**Status:** Planned — split out because it's a genuinely different signal from B4
+**Status:** Folded into B4's actual implementation above —
+`games_to_clinch_ceiling`/`games_to_clinch_floor` (continuous countdowns, not a
+binary flag) were built as part of the same `feature/season-motivation` branch and
+Phase 1 round, sharing the same win-count/games-remaining machinery the
+standings-pressure component needs anyway. Not a distinct remaining backlog item.
 **Goal:** whether a team's playoff seed (or lottery position band) is already
 mathematically locked at the time of a given game, computed cleanly from standings +
 remaining schedule — distinct from B4's motivation signal, since a team can have nothing

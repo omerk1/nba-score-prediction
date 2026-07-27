@@ -144,6 +144,20 @@ class OnOffSplitsConfig(BaseModel):
     min_on_off_minutes: float = 0.0
 
 
+class SeasonMotivationConfig(BaseModel):
+    """Season motivation / seeding-incentive features (see
+    docs/SEASON_MOTIVATION_DECISIONS.md). Unlike OnOffSplitsConfig/StyleMatchupConfig,
+    this has no `db_path` of its own — it reads directly from `data_paths.raw_db`
+    (standings + schedule, derived from the `game` table) and `injury_features.db_path`
+    (`player_importance` + `player_injuries`, already backfilled). `enabled` gates
+    feature_builder.py's _add_season_motivation_features, mirroring the same
+    not-yet-adopted convention as OnOffSplitsConfig/StyleMatchupConfig."""
+    enabled: bool = False
+    playoff_line_seed: int = 10
+    roster_behavior_weight: float = 1.0
+    min_importance_games: int = 5
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -159,6 +173,7 @@ class Config(BaseModel):
     injury_features: Optional[InjuryFeaturesConfig] = None
     style_matchup: Optional[StyleMatchupConfig] = None
     on_off_splits: Optional[OnOffSplitsConfig] = None
+    season_motivation: Optional[SeasonMotivationConfig] = None
 
 
 # --- Loader Functions ---

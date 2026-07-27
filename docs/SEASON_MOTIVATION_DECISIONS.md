@@ -111,19 +111,29 @@ For team T as of date D (Regular Season games only, matching
   `game_date < D` in T's season.
 - `games_remaining(T, D)`: `total_games_in_season(T) - games_played(T, D)`, from
   the full (already-known) season schedule.
-- Conference standings rank computed from `wins/losses` for all 15 teams in T's
-  conference (`_TEAM_CONFERENCE`), using standard games-back (`GB`) arithmetic
-  against the **10th seed** (the actual play-in cutoff under the current format,
-  not a top-6-only cutoff — a team at 9th or 10th is still fighting for its season).
-- `pressure_raw(T, D) = clip(1 - GB_from_10_seed / (games_remaining(T, D) + 1), 0, 1)`
-  — the `+1` avoids a divide-by-zero on the last game of the season and makes a
-  1-game-back-with-1-to-play situation read as near-maximum pressure rather than
-  exactly 1.0/0.0 on a knife edge. Teams already comfortably in (GB negative /
-  clinched) or hopelessly out (GB larger than games left) both correctly clip to
-  the low end.
-- This reuses the exact same ceiling/floor win-count arithmetic as §3 below, so the
-  "team is already locked in either direction" case falls out for free instead of
-  needing a second special case.
+- Conference standings ranked by win percentage (`wins / games_played`, 0.5 default
+  before any games) for all 15 teams in T's conference (`_TEAM_CONFERENCE`) — the
+  standard early-season-safe ranking (raw win totals aren't comparable when teams
+  have played different numbers of games).
+- `GB_from_line(T, D)` = standard games-back arithmetic
+  (`((wins(line_team) - wins(T)) + (losses(T) - losses(line_team))) / 2`) against
+  whichever team currently holds the **10th seed** (the actual play-in cutoff
+  under the current format, not a top-6-only cutoff — a team at 9th or 10th is
+  still fighting for its season) — positive when T trails the line, negative when
+  T leads it, zero at the line itself.
+- `pressure_raw(T, D) = clip(1 - |GB_from_line(T, D)| / (games_remaining(T, D) + 1), 0, 1)`
+  — using the **absolute** gap is what gives the brief's required two-sided decay:
+  a team far *below* the line (hopelessly out) and a team far *above* it
+  (comfortably clinched) both correctly decay toward 0 pressure, while pressure
+  peaks at 1 exactly at the line. The `+1` avoids a divide-by-zero on the last
+  game of the season and keeps a 1-game-back-with-1-to-play situation reading as
+  near-maximum rather than sitting exactly on a knife edge.
+- Note this pressure formula and §3's ceiling/floor countdowns are deliberately
+  different arithmetic (win-percentage-based GB here vs. raw win-count projections
+  in §3) — GB against the line is the right tool for "how close is the race right
+  now," while raw win-count projection to season's end (§3) is the right tool for
+  "when does this mathematically stop being possible," and both are standard,
+  just answering different questions.
 
 ### 2b. Roster-behavior signal
 
