@@ -1114,16 +1114,16 @@ class FeatureBuilder:
         `_add_elo_features` uses for its own sequential, season-wide computation.
 
         Adds, for each of home_team/away_team:
-        - `_motivation_score` [0,1]: `pressure_raw * (1 - roster_behavior_weight *
-          roster_behavior_score)` -- standings pressure (distance from the
-          `season_motivation.playoff_line_seed` seed, moderated by games
-          remaining) suppressed by how much of the team's full-strength quality
-          is sitting out tonight for a non-injury reason (rest, personal reasons,
-          coach's decision -- see `season_motivation.NON_INJURY_REASONS`). Only
-          captures *behavioral* tanking (visibly sitting healthy players) --
-          pure strategic tanking (playing normally but not trying) has no
-          available data source and is a known, documented limitation, not
-          attempted here.
+        - `_standings_pressure` [0,1]: distance from the `season_motivation.
+          playoff_line_seed` seed, moderated by games remaining (see
+          `season_motivation.compute_standings_metrics`).
+        - `_roster_behavior_score` [0, ~0.23 empirically]: fraction of the
+          team's full-strength quality sitting out tonight for a non-injury
+          reason (rest, personal reasons, coach's decision -- see
+          `season_motivation.NON_INJURY_REASONS`). Only captures *behavioral*
+          tanking (visibly sitting healthy players) -- pure strategic tanking
+          (playing normally but not trying) has no available data source and
+          is a known, documented limitation, not attempted here.
         - `_games_to_clinch_ceiling` / `_games_to_clinch_floor`: continuous
           countdowns (0 = locked), not binary flags -- games until this team can
           no longer improve past / fall behind its current seed, using raw
@@ -1131,6 +1131,27 @@ class FeatureBuilder:
           ranked one spot above/below. No head-to-head/division/conference
           tiebreakers are modeled -- deliberately a continuous proxy, not exact
           combinatorial seeding logic.
+
+        Plus four home-minus-away differential columns (`standings_pressure_diff`,
+        `roster_behavior_score_diff`, `games_to_clinch_ceiling_diff`,
+        `games_to_clinch_floor_diff`), matching `_add_on_off_splits_features`'s/
+        `_add_style_fingerprint_features`'s differential-column convention.
+
+        These four raw signals are deliberately NOT pre-combined into a single
+        hand-picked `motivation_score` (an earlier version of this method did
+        exactly that, `pressure * (1 - roster_behavior_weight * roster_score)`)
+        -- CatBoost is left to find its own combination via splits instead.
+        This mirrors A7's own finding in this exact codebase: the KNN-similarity
+        *combined* style-matchup score showed no signal, while the raw
+        per-component fingerprint redesign became the #1/#2 most important
+        features in the model (see docs/backlog.md's A7 entry). Consistent with
+        that precedent, `_games_to_clinch_ceiling`/`floor` (already raw) ranked
+        top-third of 131 features in Phase 1's validation while the old combined
+        `motivation_score` ranked near the bottom -- the raw ingredients carried
+        the signal, the hand-picked combination didn't add anything the tree
+        couldn't already reconstruct itself, and diluted it in the one column
+        that mattered least. `season_motivation.roster_behavior_weight` (the old
+        combination formula's tunable weight) is retired along with it.
 
         Soft-disabled (warn + skip) if the injury features cache is missing --
         the roster-behavior component depends on it. This feature has not yet
@@ -1185,6 +1206,7 @@ class FeatureBuilder:
         )
 
         new_cols = {}
+        side_values = {}
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
             lookup = pd.DataFrame({
                 "season_id": df["SEASON_ID"].values,
@@ -1195,14 +1217,19 @@ class FeatureBuilder:
 
             rb_lookup = pd.DataFrame({"team_id": df[team_col].values, "game_date": game_dates.values})
             rb_merged = rb_lookup.merge(roster_behavior, on=["team_id", "game_date"], how="left")
-            roster_score = rb_merged["roster_behavior_score"].fillna(0.0).values
 
-            pressure = standings_merged["pressure_raw"].fillna(0.0).values
-            motivation = np.clip(pressure * (1 - sm_cfg.roster_behavior_weight * roster_score), 0.0, 1.0)
+            values = {
+                "standings_pressure": standings_merged["pressure_raw"].fillna(0.0).values,
+                "roster_behavior_score": rb_merged["roster_behavior_score"].fillna(0.0).values,
+                "games_to_clinch_ceiling": standings_merged["games_to_clinch_ceiling"].fillna(0.0).values,
+                "games_to_clinch_floor": standings_merged["games_to_clinch_floor"].fillna(0.0).values,
+            }
+            side_values[prefix] = values
+            for metric, arr in values.items():
+                new_cols[f"{prefix}_{metric}"] = arr
 
-            new_cols[f"{prefix}_motivation_score"] = motivation
-            new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
-            new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
+        for metric in ["standings_pressure", "roster_behavior_score", "games_to_clinch_ceiling", "games_to_clinch_floor"]:
+            new_cols[f"{metric}_diff"] = side_values["home_team"][metric] - side_values["away_team"][metric]
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

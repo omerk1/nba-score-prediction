@@ -7,8 +7,10 @@ justification behind every formula below. Two independent pieces:
 - `compute_standings_metrics`: point-in-time conference standings, derived
   entirely from the already-complete `game` table (no new backfill -- every
   season this touches is a completed historical season, so its full schedule
-  is already sitting in that table). Produces the standings-pressure component
-  of `motivation_score` plus `games_to_clinch_ceiling`/`games_to_clinch_floor`.
+  is already sitting in that table). Produces `standings_pressure` plus
+  `games_to_clinch_ceiling`/`games_to_clinch_floor` -- these are exposed as
+  separate raw feature columns (feature_builder.py's
+  `_add_season_motivation_features`), not pre-combined into a single score.
 - `compute_roster_behavior_scores`: per (team, game night), how much of a
   team's full-strength quality is sitting out for a non-injury reason (rest,
   personal reasons, coach's decision, ...), reusing the existing

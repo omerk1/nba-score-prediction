@@ -151,10 +151,13 @@ class SeasonMotivationConfig(BaseModel):
     (standings + schedule, derived from the `game` table) and `injury_features.db_path`
     (`player_importance` + `player_injuries`, already backfilled). `enabled` gates
     feature_builder.py's _add_season_motivation_features, mirroring the same
-    not-yet-adopted convention as OnOffSplitsConfig/StyleMatchupConfig."""
+    not-yet-adopted convention as OnOffSplitsConfig/StyleMatchupConfig.
+    `roster_behavior_weight` (Phase 1's original hand-picked combination-formula
+    weight) was retired when standings_pressure/roster_behavior_score were split
+    into separate raw columns instead of one combined motivation_score — see
+    docs/SEASON_MOTIVATION_LOG.md's Raw-Component Decomposition section."""
     enabled: bool = False
     playoff_line_seed: int = 10
-    roster_behavior_weight: float = 1.0
     min_importance_games: int = 5
 
 
