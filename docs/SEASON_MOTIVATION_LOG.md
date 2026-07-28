@@ -185,7 +185,65 @@ clean monotonic curve, only enough to clearly distinguish "off/half-off"
 `roster_behavior_weight=1.0`** as the final default; config reverted to
 `enabled=false` per the adoption convention (see below).
 
+## 4. Expanding-Window CV
+
+Same 5-fold walk-forward design used for on/off-splits' CV round (always 1
+season val + 1 season test, expanding backward): fold1 is the already-committed
+default split (train through 2023-24, val 2024-25, test 2025-26); fold2-5 each
+shift the whole window back one season. Exact Regular Season boundaries queried
+directly from `nba_api.sqlite`'s `game` table, `roster_behavior_weight=1.0`
+(the chosen default) throughout.
+
+| fold | train through | val | test | metrics favoring treatment |
+|---|---|---|---|---|
+| 1 (default) | 2023-24 | 2024-25 | 2025-26 | **6 / 6** |
+| 2 | 2022-23 | 2023-24 | 2024-25 | 1 / 6 |
+| 3 | 2021-22 | 2022-23 | 2023-24 | 2 / 6 |
+| 4 | 2020-21 | 2021-22 | 2022-23 | 5 / 6 |
+| 5 | 2019-20 | 2020-21 | 2021-22 | 2 / 6 |
+
+("metrics favoring treatment" = how many of {val/test diff_mae, val/test
+win_acc, val/test brier} moved the right direction vs. that fold's own
+baseline.)
+
+**Overall: 16 of 30 metric-instances (53%) favor treatment across all 5
+folds — essentially a coin flip, not a consistent win.** Fold1 (the split
+Phase 1's headline numbers came from) and fold4 look genuinely good; folds 2,
+3, and 5 lean the other way, sometimes clearly (fold3's test_diff_mae moves
+from 10.992 to 11.213, a real regression). **This materially changes the
+picture from the single-split result reported earlier in this document** —
+the improvement does not hold up consistently across time, the same kind of
+finding that ultimately kept on/off-splits parked rather than adopted (see
+`docs/on_off_splits_log.md`'s Final Decision).
+
+One structural difference from on/off-splits' own CV is worth noting: on/off-splits'
+folds 4-5 came back **byte-identical** between baseline and treatment, because
+that feature's entire signal depended on `player_injuries` (zero rows before
+2021-10-19) and those folds' training windows ended before that date, making the
+feature a structural no-op for the whole training period. Here, fold4's
+training window (through 2021-05-16, also before the `player_injuries` era)
+still shows real, non-identical differences between baseline and treatment —
+because `motivation_score`'s standings-pressure component and both
+`games_to_clinch_*` columns are computed purely from `game` results and never
+depend on injury data at all. Only the roster-behavior sub-signal is
+structurally zero that early; the rest of the feature is unaffected by this
+particular coverage gap. That partial independence is a genuine advantage over
+on/off-splits, but it doesn't rescue the overall CV result — the standings/clinch
+signal alone still isn't consistently helping across folds.
+
 ## FINAL SUMMARY (Phase 1)
+
+**Bottom line after the expanding-window CV: the single-split result does not
+generalize.** The headline fold (fold1, the branch's default train/val/test
+split) shows a clean win on every tracked metric, and three of six new columns
+rank in the top third of feature importance — genuinely more promising on paper
+than on/off-splits ever looked on a single split. But across all 5 CV folds,
+only 53% of metric-instances favor the treatment, with 2 of 5 folds clearly
+unfavorable. This is not a demonstrated, reproducible improvement — it's a
+result that happens to look good on the one split most casually checked first.
+`season_motivation.enabled` stays `false`; this should be treated the same way
+on/off-splits' single-split result was treated before its own CV round —
+promising, not yet earned adoption.
 
 **What was added:** `src/feature_engineering/season_motivation.py` (new module)
 plus `feature_builder.py`'s `_add_season_motivation_features`, adding 6 columns
@@ -201,12 +259,16 @@ tables (`nba_api.sqlite.game`, `injury_features.sqlite.player_importance`/
 `player_injuries`). This is a meaningfully cheaper story than on/off-splits,
 which needed a multi-thousand-call live API backfill.
 
-**Real result: a genuine, if modest, improvement — not the mixed/inconclusive
-picture on/off-splits ended on.** Five of eight tracked metrics (diff_mae,
-win_acc, brier — both val and test) move the right direction simultaneously;
-only total_mae moves slightly the wrong way. Three of the six new columns rank
-in the top third of feature importance. The `roster_behavior_weight` parameter
-was explored (0.0/0.5/1.0) rather than guessed, with `1.0` winning clearly.
+**Single-split result looked like a genuine improvement — the 5-fold CV shows
+it doesn't hold up.** On the default split, five of eight tracked metrics
+(diff_mae, win_acc, brier — both val and test) moved the right direction
+simultaneously, and three of six new columns ranked in the top third of feature
+importance. But §4's expanding-window CV puts this in context: only 53% of
+metric-instances favor the treatment across all 5 folds, with 2 of 5 clearly
+unfavorable. The `roster_behavior_weight` parameter itself was explored
+properly (0.0/0.5/1.0/1.5/2.0/3.0), with `1.0` a genuine, confirmed local
+optimum among those tested — the parameter tuning is sound, the underlying
+feature's overall value is not confirmed.
 
 **Known limitations (documented, not solved here):**
 1. No tiebreakers modeled (head-to-head, division, conference record) — a
@@ -223,10 +285,14 @@ was explored (0.0/0.5/1.0) rather than guessed, with `1.0` winning clearly.
    per-`(team, date)` Python loop. Acceptable for the offline ablation pipeline,
    worth revisiting if this becomes a bottleneck in more frequent iteration.
 
-**Open question before Phase 2 / merge:** given Phase 1's real improvement
-(unlike on/off-splits), should `season_motivation.enabled` be flipped to `true`
-as an adopted default before or after Phase 2's `preferred_opponent_delta` is
-built? Recommendation: finish and validate Phase 2 first (per the brief's
-"complete Phase 1 fully before starting Phase 2" — Phase 1 is now complete and
-validated), then make one combined adoption decision covering both, since
-Phase 2 depends on Phase 1's ceiling/floor context as a prerequisite input.
+**Open question before Phase 2 / merge:** given the CV's mixed result, should
+Phase 2 (`preferred_opponent_delta`) still be built on top of a Phase 1 that
+hasn't cleared the bar on its own? Recommendation: yes, still worth building —
+Phase 2 is a genuinely different signal (seeding-incentive targeting near the
+end of the season) that could independently carry its own weight even if
+Phase 1's standings-pressure/roster-behavior combination doesn't, and the brief
+called for completing both phases before an adoption decision. But the final
+adoption call should now explicitly weigh Phase 1's CV result, not just treat
+it as a foregone "already proven" prerequisite — `season_motivation.enabled`
+stays `false` regardless of Phase 2's outcome unless a future ablation round
+finds something the current CV didn't.
