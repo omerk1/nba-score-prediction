@@ -332,3 +332,111 @@ def compute_roster_behavior_scores(
             results.append((team_id, row.game_date, score))
 
     return pd.DataFrame(results, columns=["team_id", "game_date", "roster_behavior_score"])
+
+
+def compute_recent_minutes_trend_scores(
+    team_dates: pd.DataFrame,  # columns: team_id, game_date, season_id
+    injury_db_path: str,
+    importance_weights,
+    min_importance_games: int,
+    season_start_by_season: dict,
+    lookback_weeks: int = 4,
+) -> pd.DataFrame:
+    """Returns (team_id, game_date) -> recent_minutes_trend_score in [0, 1]:
+    how much of a team's full-strength quality has seen a meaningful minutes
+    REDUCTION over the last `lookback_weeks` weeks, relative to each
+    rostered player's own cumulative season average from before that window.
+
+    This is a genuinely different, complementary signal to
+    `roster_behavior_score` -- that one is a single-night snapshot (only sees
+    a player officially tagged `Out` for a non-injury reason *tonight*) and
+    completely misses "soft" tanking: a coach quietly cutting a star's
+    minutes over several games without ever putting them on the injury
+    report. See docs/SEASON_MOTIVATION_LOG.md section 6.2.
+
+    Data note: `player_importance` stores CUMULATIVE per-game averages with
+    no games-played column, so an exact "just this week's minutes" isn't
+    directly computable via a delta-of-cumulative-averages formula without a
+    new backfill. This instead compares each player's CURRENT cumulative
+    average against their own cumulative average from a snapshot at or
+    before `lookback_weeks` earlier -- a real drop over that window still
+    means their minutes have genuinely been trending down recently, without
+    needing to isolate one exact week.
+
+    0.0 (not NaN) whenever there's no player_importance history yet, or no
+    player has both a current and a prior-enough snapshot to compare -- both
+    are legitimate "nothing to report" cases, not missing-data cases (same
+    convention `compute_roster_behavior_scores` uses).
+    """
+    with sqlite3.connect(f"file:{injury_db_path}?mode=ro", uri=True) as conn:
+        importance = pd.read_sql_query(
+            "SELECT player_id, player_name, team_id, as_of_date, "
+            "minutes_per_game, pts_per_game, usage_rate FROM player_importance",
+            conn,
+        )
+    importance["as_of_date"] = pd.to_datetime(importance["as_of_date"])
+
+    unique_pairs = team_dates.drop_duplicates(subset=["team_id", "game_date"])
+    lookback = pd.Timedelta(weeks=lookback_weeks)
+
+    results = []
+    for team_id, team_pairs in unique_pairs.groupby("team_id"):
+        team_importance = importance[importance["team_id"] == team_id]
+
+        for row in team_pairs.itertuples():
+            season_start = season_start_by_season.get(row.season_id)
+            if season_start is None:
+                # Playoff-tagged season_ids show up as val/test warm-up context
+                # (see compute_roster_behavior_scores' identical guard) -- never
+                # reach the scored dataset, safe 0.0 default.
+                results.append((team_id, row.game_date, 0.0))
+                continue
+
+            pool = team_importance[
+                (team_importance["as_of_date"] < row.game_date)
+                & (team_importance["as_of_date"] >= season_start)
+            ]
+            if pool.empty:
+                results.append((team_id, row.game_date, 0.0))
+                continue
+
+            counts = pool.groupby("player_id").size()
+            eligible = counts[counts >= min_importance_games].index
+            eligible_pool = pool[pool["player_id"].isin(eligible)]
+            if eligible_pool.empty:
+                results.append((team_id, row.game_date, 0.0))
+                continue
+
+            current = eligible_pool.sort_values("as_of_date").groupby("player_id").tail(1)
+            current = current.assign(importance=_player_importance_score(current, importance_weights))
+            full_strength_quality = current["importance"].sum()
+            if full_strength_quality <= 0:
+                results.append((team_id, row.game_date, 0.0))
+                continue
+
+            prior_cutoff = row.game_date - lookback
+            prior_pool = eligible_pool[eligible_pool["as_of_date"] <= prior_cutoff]
+            if prior_pool.empty:
+                results.append((team_id, row.game_date, 0.0))
+                continue
+            prior = prior_pool.sort_values("as_of_date").groupby("player_id").tail(1)
+
+            merged = current[["player_id", "importance", "minutes_per_game"]].merge(
+                prior[["player_id", "minutes_per_game"]].rename(columns={"minutes_per_game": "prior_minutes"}),
+                on="player_id", how="inner",  # only players with a prior-enough snapshot to compare against
+            )
+            if merged.empty:
+                results.append((team_id, row.game_date, 0.0))
+                continue
+
+            drop = np.where(
+                merged["prior_minutes"] > 0,
+                ((merged["prior_minutes"] - merged["minutes_per_game"]) / merged["prior_minutes"]).clip(0.0, 1.0),
+                0.0,
+            )
+            weighted_drop = (merged["importance"] * drop).sum()
+
+            score = min(max(weighted_drop / full_strength_quality, 0.0), 1.0)
+            results.append((team_id, row.game_date, score))
+
+    return pd.DataFrame(results, columns=["team_id", "game_date", "recent_minutes_trend_score"])

@@ -302,3 +302,11 @@ season_motivation:
   # counting toward full_strength_quality -- guards against a single-game callup's
   # one noisy snapshot skewing the full-strength baseline.
   min_importance_games: 5
+  # Lookback window (weeks) for recent_minutes_trend_score: how much a player's
+  # CURRENT cumulative minutes-per-game average has dropped vs their own
+  # cumulative average from this many weeks earlier. Catches gradual,
+  # undeclared minutes reductions ("soft" tanking) that roster_behavior_score's
+  # single-night Out-list snapshot cannot -- see docs/SEASON_MOTIVATION_LOG.md
+  # section 6.2/9. Not yet adopted -- exposed as its own raw column, not folded
+  # into motivation_score, per the "let the tree combine raw signals" lesson.
+  recent_trend_lookback_weeks: 4

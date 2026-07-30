@@ -1135,6 +1135,16 @@ class FeatureBuilder:
           ranked one spot above/below. No head-to-head/division/conference
           tiebreakers are modeled -- deliberately a continuous proxy, not exact
           combinatorial seeding logic.
+        - `_recent_minutes_trend_score` [0,1]: a separate, complementary raw
+          column (not folded into `motivation_score`) -- how much of the
+          team's full-strength quality has seen a genuine minutes REDUCTION
+          over the last `season_motivation.recent_trend_lookback_weeks` weeks
+          (each rostered player's current cumulative average vs. their own
+          cumulative average from that many weeks earlier). Catches "soft"
+          tanking (undeclared, gradual minutes cuts) that
+          `_roster_behavior_score`'s single-night snapshot cannot -- see
+          `season_motivation.compute_recent_minutes_trend_scores` and
+          docs/SEASON_MOTIVATION_LOG.md section 6.2/9.
 
         Soft-disabled (warn + skip) if the injury features cache is missing --
         the roster-behavior component depends on it. This feature has not yet
@@ -1157,6 +1167,7 @@ class FeatureBuilder:
         from src.feature_engineering.season_motivation import (
             compute_standings_metrics,
             compute_roster_behavior_scores,
+            compute_recent_minutes_trend_scores,
         )
 
         sm_cfg = cfg.season_motivation
@@ -1189,6 +1200,10 @@ class FeatureBuilder:
             team_dates, str(injury_db), cfg.injury_features.importance_weights,
             sm_cfg.min_importance_games, season_start_by_season,
         )
+        recent_minutes_trend = compute_recent_minutes_trend_scores(
+            team_dates, str(injury_db), cfg.injury_features.importance_weights,
+            sm_cfg.min_importance_games, season_start_by_season, sm_cfg.recent_trend_lookback_weeks,
+        )
 
         new_cols = {}
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
@@ -1203,12 +1218,16 @@ class FeatureBuilder:
             rb_merged = rb_lookup.merge(roster_behavior, on=["team_id", "game_date"], how="left")
             roster_score = rb_merged["roster_behavior_score"].fillna(0.0).values
 
+            trend_merged = rb_lookup.merge(recent_minutes_trend, on=["team_id", "game_date"], how="left")
+            trend_score = trend_merged["recent_minutes_trend_score"].fillna(0.0).values
+
             pressure = standings_merged["pressure_raw"].fillna(0.0).values
             motivation = np.clip(pressure * (1 - sm_cfg.roster_behavior_weight * roster_score), 0.0, 1.0)
 
             new_cols[f"{prefix}_motivation_score"] = motivation
             new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
             new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
+            new_cols[f"{prefix}_recent_minutes_trend_score"] = trend_score
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

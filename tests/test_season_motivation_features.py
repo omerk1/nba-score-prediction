@@ -46,6 +46,7 @@ from src.feature_engineering.feature_builder import FeatureBuilder
 from src.feature_engineering.season_motivation import (
     compute_standings_metrics,
     compute_roster_behavior_scores,
+    compute_recent_minutes_trend_scores,
 )
 
 # Four real East-conference team IDs (per season_motivation._TEAM_CONFERENCE)
@@ -381,15 +382,101 @@ class TestRosterBehaviorScores:
         assert not pd.isna(row["roster_behavior_score"].iloc[0])
 
 
+class TestRecentMinutesTrendScores:
+
+    def test_genuine_minutes_drop_contributes_to_score(self, tmp_path):
+        """A player whose cumulative minutes-per-game average dropped
+        meaningfully between a snapshot >= lookback_weeks ago and the current
+        one must contribute a nonzero recent_minutes_trend_score -- the core
+        "soft tanking" signal, distinct from roster_behavior_score (which only
+        sees an official Out designation)."""
+        db_path = tmp_path / "injury_features.sqlite"
+        _write_injury_features_db(
+            db_path,
+            importance_rows=[
+                (501, "Star Player", TEAM_A, "2023-12-01", 35.0, 25.0, 0.30),  # prior (>=4 weeks before target)
+                (501, "Star Player", TEAM_A, "2023-12-08", 35.0, 25.0, 0.30),
+                (501, "Star Player", TEAM_A, "2024-01-08", 20.0, 14.0, 0.30),  # current -- minutes cut nearly in half
+            ],
+            injury_rows=[],
+        )
+        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
+
+        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
+                                                       season_start_by_season=season_start, lookback_weeks=4)
+        row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
+        assert row["recent_minutes_trend_score"].iloc[0] > 0.0
+
+    def test_flat_or_increased_minutes_gives_zero(self, tmp_path):
+        """A player whose minutes stayed flat or increased must contribute
+        exactly 0.0 -- no "bonus" for playing more than the season norm, only
+        reductions count."""
+        db_path = tmp_path / "injury_features.sqlite"
+        _write_injury_features_db(
+            db_path,
+            importance_rows=[
+                (501, "Star Player", TEAM_A, "2023-12-01", 30.0, 20.0, 0.28),
+                (501, "Star Player", TEAM_A, "2023-12-08", 30.0, 20.0, 0.28),
+                (501, "Star Player", TEAM_A, "2024-01-08", 34.0, 24.0, 0.30),  # up, not down
+            ],
+            injury_rows=[],
+        )
+        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
+
+        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
+                                                       season_start_by_season=season_start, lookback_weeks=4)
+        row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
+        assert row["recent_minutes_trend_score"].iloc[0] == 0.0
+
+    def test_no_prior_enough_snapshot_gives_zero(self, tmp_path):
+        """A player with only recent snapshots (nothing at or before the
+        lookback cutoff) has no valid comparison point -- must be excluded,
+        not treated as a drop from an implicit zero."""
+        db_path = tmp_path / "injury_features.sqlite"
+        _write_injury_features_db(
+            db_path,
+            importance_rows=[
+                (501, "Rookie", TEAM_A, "2024-01-01", 20.0, 12.0, 0.20),  # too recent for a 4-week lookback
+                (501, "Rookie", TEAM_A, "2024-01-08", 15.0, 9.0, 0.18),
+            ],
+            injury_rows=[],
+        )
+        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
+
+        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
+                                                       season_start_by_season=season_start, lookback_weeks=4)
+        row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
+        assert row["recent_minutes_trend_score"].iloc[0] == 0.0
+
+    def test_no_importance_history_returns_zero_not_nan(self, tmp_path):
+        """No player_importance rows at all -> 0.0, a legitimate "nothing to
+        report" case, not a missing-data/NaN case."""
+        db_path = tmp_path / "injury_features.sqlite"
+        _write_injury_features_db(db_path, importance_rows=[], injury_rows=[])
+        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
+
+        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
+                                                       season_start_by_season=season_start, lookback_weeks=4)
+        row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
+        assert row["recent_minutes_trend_score"].iloc[0] == 0.0
+        assert not pd.isna(row["recent_minutes_trend_score"].iloc[0])
+
+
 def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line_seed: int = 10,
                   direct_playoff_seed: int = None, direct_playoff_weight: float = 0.5,
-                  roster_behavior_weight: float = 1.0, min_importance_games: int = 5):
+                  roster_behavior_weight: float = 1.0, min_importance_games: int = 5,
+                  recent_trend_lookback_weeks: int = 4):
     mock_cfg = MagicMock()
     mock_cfg.data_paths = MagicMock(raw_db=str(raw_db_path))
     mock_cfg.season_motivation = MagicMock(
         enabled=enabled, playoff_line_seed=playoff_line_seed, direct_playoff_seed=direct_playoff_seed,
         direct_playoff_weight=direct_playoff_weight,
         roster_behavior_weight=roster_behavior_weight, min_importance_games=min_importance_games,
+        recent_trend_lookback_weeks=recent_trend_lookback_weeks,
     )
     mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path), importance_weights=IMPORTANCE_WEIGHTS)
     mock_cfg.datasets_loading = MagicMock(

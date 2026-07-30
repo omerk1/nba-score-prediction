@@ -158,6 +158,7 @@ class SeasonMotivationConfig(BaseModel):
     direct_playoff_weight: float = 0.5
     roster_behavior_weight: float = 1.0
     min_importance_games: int = 5
+    recent_trend_lookback_weeks: int = 4
 
 
 class Config(BaseModel):
