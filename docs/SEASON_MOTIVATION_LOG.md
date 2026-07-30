@@ -341,6 +341,16 @@ reductions that the current point-in-time signal cannot. This is a genuinely
 different, complementary signal to `roster_behavior_score`, not a tuning
 tweak — worth its own dedicated implementation and ablation round.
 
+## 7. Reverted Round 2, Restored Test Coverage
+
+Round 2's raw-component redesign (§5) was reverted — the combined
+`motivation_score` formula is back as the pipeline's current state
+(`motivation_score`, `roster_behavior_weight`, no diff columns). Also added
+`tests/test_season_motivation_features.py` (13 tests: standings
+pressure/clinch formulas, roster-behavior scoring, config-gating, and the
+`motivation_score` combination formula itself) — this had been missing since
+Phase 1 shipped, unlike every other comparable feature in this repo.
+
 ## FINAL SUMMARY (Phase 1)
 
 **Bottom line after the expanding-window CV: the single-split result does not
