@@ -231,19 +231,134 @@ particular coverage gap. That partial independence is a genuine advantage over
 on/off-splits, but it doesn't rescue the overall CV result — the standings/clinch
 signal alone still isn't consistently helping across folds.
 
+## 5. Raw-Component Decomposition (Round 2)
+
+**Motivation:** §3's feature-importance table already hinted at this —
+`games_to_clinch_ceiling`/`floor` (raw, un-combined) ranked top-third of 131
+features, while `motivation_score` (a hand-picked
+`pressure_raw * (1 - roster_behavior_weight * roster_behavior_score)`
+combination) ranked near the bottom. This exact pattern already has a direct,
+proven precedent in this repo: A7's KNN-similarity *combined* style-matchup
+score showed no signal (~29th of 109, ~zero importance), while the raw
+per-component fingerprint redesign — same underlying data, no hand-picked
+combination — became the #1/#2 most important features in the model (see
+`docs/backlog.md`'s A7 entry). Given the CV showed no generalized improvement
+anyway, this was worth trying before writing Phase 1 off entirely.
+
+**What changed:** `motivation_score` retired. `_add_season_motivation_features`
+now exposes `standings_pressure` and `roster_behavior_score` as two separate
+raw columns per team, instead of pre-combining them. Added home-minus-away
+differential columns for all four raw metrics (`standings_pressure_diff`,
+`roster_behavior_score_diff`, `games_to_clinch_ceiling_diff`,
+`games_to_clinch_floor_diff`), matching the differential-column convention
+every other comparable feature in this codebase already follows
+(`on_off_splits`, `style_matchup`) — `season_motivation` was the one feature
+missing it. `roster_behavior_weight` retired along with the old formula (no
+longer meaningful once nothing is being hand-combined). Net: 6 columns → 12
+columns (8 raw + 4 diffs). Also added `tests/test_season_motivation_features.py`
+(13 tests), which Phase 1 had shipped without, unlike every other comparable
+feature in this repo.
+
+**CV result (same 5-fold structure as §4, baseline unchanged since disabling
+the feature short-circuits before any of this code runs):**
+
+| fold | baseline val/test diff_mae | v2 treatment val/test diff_mae | baseline val/test win_acc | v2 treatment val/test win_acc | metrics favoring v2 (of 6) |
+|---|---|---|---|---|---|
+| 1 | 11.130 / 11.592 | 11.167 / 11.609 | 0.6588 / 0.6596 | 0.6571 / 0.6678 | 1/6 |
+| 2 | 11.053 / 11.118 | 11.131 / 11.150 | 0.6455 / 0.6563 | 0.6415 / 0.6563 | 0/6 |
+| 3 | 10.265 / 10.992 | 10.244 / 11.163 | 0.6252 / 0.6577 | 0.6244 / 0.6577 | 2/6 |
+| 4 | 11.299 / 10.355 | 11.294 / 10.385 | 0.6366 / 0.6130 | 0.6407 / 0.6106 | 2/6 |
+| 5 | 11.268 / 11.311 | 11.291 / 11.390 | 0.6241 / 0.6382 | 0.6306 / 0.6195 | 1/6 |
+
+**Verdict: this made things worse, not better — 6 of 30 metric-instances (20%)
+favor the redesign, down from the original combined-score design's 16/30
+(53%).** Fold1 (the branch's headline split, a clean 6/6 win for the original
+combined `motivation_score`) collapsed to 1/6 under the raw-component version.
+Feature count also grew from 131 to 137 (8 raw + 4 diffs vs. the old 6 combined
+columns) without a corresponding hyperparameter retune (the earlier
+`colsample_bylevel` investigation already showed the model's fixed
+hyperparameters aren't validated past 131 features either).
+
+**Why the A7 precedent didn't transfer:** A7's KNN-similarity score discarded
+a large amount of rich, genuinely independent information (five distinct style
+dimensions collapsed into one similarity/confidence number) before the raw
+per-component redesign gave it back — that's a case where decomposition
+restores real expressiveness the combined score had thrown away. Here,
+`motivation_score` combined exactly two already-simple signals
+(`pressure_raw`, `roster_behavior_score`) with a single multiplicative
+formula; splitting them apart doesn't reveal hidden structure the same way,
+and the four added `_diff` columns are largely redundant with the eight raw
+columns a tree can already combine via splits — more likely to have diluted
+`colsample_bylevel`'s per-split sampling further (exactly the mechanism
+flagged in the "too many features" discussion earlier) than to have added
+real signal. **Not adopting this redesign either** — reverting to the original
+combined-`motivation_score` design would need its own justification at this
+point too, since neither version clears the bar. Recorded as a genuine,
+informative negative result: not every "combined score → raw components"
+refactor is a win, even when a prior case in the same codebase suggested it
+would be.
+
+## 6. Open Improvement Ideas (documented, not yet tried)
+
+Two further gaps were identified during discussion but not yet implemented or
+tested. Recorded here so they aren't lost regardless of what happens to Round 2.
+
+### 6.1 Dual-threshold standings pressure (6-seed AND 10-seed)
+
+**Gap:** `standings_pressure` only measures distance from the 10-seed
+(play-in/postseason cutoff) via `playoff_line_seed`. It never separately
+considers the 6-seed (direct playoff berth vs. needing to survive the
+play-in). A team in a real fight for 6th vs. 7th, but comfortably clear of
+missing the postseason entirely (10th), currently reads as low-pressure even
+though avoiding the play-in is a genuine, separate stake. `games_to_clinch_ceiling`/
+`floor` partially compensate (they're always computed against whichever team
+is immediately adjacent in the standings, at any rank), but `standings_pressure`
+itself is blind to the 6-line specifically.
+
+**Candidate fix:** compute `GB_from_line` against whichever of {6th, 10th} is
+nearer to the team's current rank, not just the 10th unconditionally. Needs
+its own exploration round (which of the two lines "wins" when a team is
+roughly equidistant from both is itself a design choice worth testing a couple
+of variants on, same as `roster_behavior_weight`'s grid search).
+
+### 6.2 Recent-games actual-playing-time trend (deeper tanking detection)
+
+**Gap:** `roster_behavior_score` is a **single-night snapshot** — it only sees
+a player officially tagged `Out` for a non-injury reason *tonight*. It
+completely misses "soft" tanking: a coach quietly cutting a star's minutes
+from 35 to 15 over several games, or feeding bench players more run, without
+ever putting anyone on the official injury report. This is exactly the "pure
+strategic tanking" limitation flagged as unsolved in §5 of the decisions doc.
+
+**Candidate fix:** `player_importance` already stores **weekly cumulative**
+per-player minutes — no new backfill needed. A recent-week's *actual* (non-
+cumulative) average can be backed out from the delta between two consecutive
+weekly snapshots: `(cumulative_avg_N × games_N − cumulative_avg_N-1 × games_N-1)
+/ (games_N − games_N-1)`. Comparing that recent-week actual-minutes
+distribution against full-strength quality (rather than relying solely on
+tonight's official Out list) would catch gradual, undeclared minutes
+reductions that the current point-in-time signal cannot. This is a genuinely
+different, complementary signal to `roster_behavior_score`, not a tuning
+tweak — worth its own dedicated implementation and ablation round.
+
 ## FINAL SUMMARY (Phase 1)
 
 **Bottom line after the expanding-window CV: the single-split result does not
-generalize.** The headline fold (fold1, the branch's default train/val/test
-split) shows a clean win on every tracked metric, and three of six new columns
-rank in the top third of feature importance — genuinely more promising on paper
-than on/off-splits ever looked on a single split. But across all 5 CV folds,
-only 53% of metric-instances favor the treatment, with 2 of 5 folds clearly
-unfavorable. This is not a demonstrated, reproducible improvement — it's a
-result that happens to look good on the one split most casually checked first.
-`season_motivation.enabled` stays `false`; this should be treated the same way
-on/off-splits' single-split result was treated before its own CV round —
-promising, not yet earned adoption.
+generalize, and a raw-component redesign made the CV picture worse, not
+better.** The headline fold (fold1, the branch's default train/val/test split)
+shows a clean win on every tracked metric under the original combined-score
+design, and three of six new columns rank in the top third of feature
+importance — genuinely more promising on paper than on/off-splits ever looked
+on a single split. But across all 5 CV folds, only 53% of metric-instances
+favor the original design, with 2 of 5 folds clearly unfavorable. §5's
+follow-up attempt — decomposing `motivation_score` into raw
+`standings_pressure`/`roster_behavior_score` columns, motivated by a directly
+analogous precedent (A7's style-matchup redesign) that worked well elsewhere
+in this repo — dropped the result further, to 20% (6/30), and fold1's clean
+6/6 win collapsed to 1/6. Neither version is a demonstrated, reproducible
+improvement. `season_motivation.enabled` stays `false`, and so does its
+internal design choice (combined score vs. raw components) — both were tried,
+neither cleared the bar.
 
 **What was added:** `src/feature_engineering/season_motivation.py` (new module)
 plus `feature_builder.py`'s `_add_season_motivation_features`, adding 6 columns
