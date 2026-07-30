@@ -369,16 +369,16 @@ from 35 to 15 over several games, or feeding bench players more run, without
 ever putting anyone on the official injury report. This is exactly the "pure
 strategic tanking" limitation flagged as unsolved in §5 of the decisions doc.
 
-**Candidate fix:** `player_importance` already stores **weekly cumulative**
-per-player minutes — no new backfill needed. A recent-week's *actual* (non-
-cumulative) average can be backed out from the delta between two consecutive
-weekly snapshots: `(cumulative_avg_N × games_N − cumulative_avg_N-1 × games_N-1)
-/ (games_N − games_N-1)`. Comparing that recent-week actual-minutes
-distribution against full-strength quality (rather than relying solely on
-tonight's official Out list) would catch gradual, undeclared minutes
-reductions that the current point-in-time signal cannot. This is a genuinely
-different, complementary signal to `roster_behavior_score`, not a tuning
-tweak — worth its own dedicated implementation and ablation round.
+**Candidate fix (implemented and CV-tested, see §9):** the original idea
+sketched a delta-of-cumulative-averages formula
+(`(cumulative_avg_N × games_N − cumulative_avg_N-1 × games_N-1) / (games_N − games_N-1)`)
+to back out a single week's actual average from consecutive weekly
+snapshots — this turned out to need a `games_played` count `player_importance`
+doesn't store, so no new backfill was in fact needed by using a simpler proxy
+instead: comparing each player's current cumulative average directly against
+their own cumulative average from `recent_trend_lookback_weeks` (4) earlier.
+A real drop over that window still means genuinely reduced recent minutes,
+without isolating one exact week.
 
 ## 7. Reverted Round 2, Restored Test Coverage
 
@@ -421,6 +421,51 @@ adding these features at all (more model capacity for the same amount of
 real signal, slightly worse test generalization) rather than something a
 different combination formula is likely to fix. Strengthens "not adopted"
 well beyond what any single win-count number suggested on its own.
+
+## 9. Recent-Minutes-Trend Signal (Idea #3)
+
+`recent_minutes_trend_score` (§6.2) was implemented as its own raw column
+(not folded into `motivation_score`) and CV-tested on top of v1's base design
+(single-threshold pressure, `direct_playoff_seed` still `null` per §6.1's
+verdict). Smoke-tested on real data first: fires nonzero in ~99% of rows
+(mean 0.021) — much more often than `roster_behavior_score`'s ~2-4% rate,
+raising a real concern that it's picking up routine week-to-week minutes
+variance rather than deliberate role reduction specifically. One encouraging
+early sign: `home_team_recent_minutes_trend_score` ranked **6th of 133**
+features by importance in fold2's model — notably higher than any other
+`season_motivation` column has ranked all session.
+
+**CV result:**
+- vs baseline (no `season_motivation` at all): 8/30 (27%) win-count.
+- vs v1 treatment (isolating just this new column's own marginal effect):
+  11/30 (37%) win-count.
+- Magnitude (mean delta vs v1, across 5 folds): `val_diff_mae` −0.0416,
+  **`test_diff_mae` +0.0224**, `val_win_acc` −0.0038, `test_win_acc` +0.0041,
+  `val_brier` −0.0014, `test_brier` +0.0010 — at first glance, `test_diff_mae`
+  (the one metric that was consistently *negative* across every variant in
+  §8) looks like it improved here.
+
+**That average does not hold up fold-by-fold.** The isolated
+`test_diff_mae` delta per fold is −0.021, −0.014, **+0.081**, −0.043,
+**+0.109** — 3 of 5 folds are slightly worse, 2 are notably better, and the
+positive mean is entirely driven by those two larger swings, not a
+consistent effect. This is the same "noise happens to average out positive"
+pattern already seen on the val side in §8, just showing up here on the test
+side instead. The #6 feature-importance ranking similarly reflects the model
+finding *something* to split on in that fold's training data, not proof it
+generalizes — exactly the gap between "the tree used it" and "it helps"
+flagged when that ranking first came up.
+
+**Verdict: not adopted.** No clear win by any measure once checked
+carefully — win-count is worse than v1 alone (27-37% vs 53%), and the one
+metric whose average looked promising doesn't hold up fold-by-fold. The
+99%-nonzero firing rate suggests this proxy (comparing cumulative averages
+across a 4-week window) captures normal roster fluctuation more than
+deliberate tanking specifically — a real limitation of the no-new-backfill
+approach, not just an unlucky formula choice. Code and 4 tests are kept
+(computed whenever `season_motivation.enabled` is `true`, which stays
+`false` by default) in case a version gated to only fire on larger,
+rarer drops is worth trying later.
 
 ## FINAL SUMMARY (Phase 1)
 
