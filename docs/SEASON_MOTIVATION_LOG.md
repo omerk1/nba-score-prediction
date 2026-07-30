@@ -323,19 +323,42 @@ team wins. Verified directly on real data first: mean `standings_pressure`
 over a 2024-01-01→2024-04-14 slice rose from 0.617 (single-threshold) to 0.735
 (dual-threshold) — real, substantial movement, not a no-op.
 
-**CV result: 10/30 metric-instances (33%) favor the dual-threshold version —
-worse than the original single-threshold design's 53%, though not as bad as
-Round 2's raw-decomposition attempt (20%).** Fold1 (5/6) and fold4 (3/6) look
-decent; folds 2 and 5 are a clean 0/6 sweep the other way. This is a
-conceptually well-motivated fix — the 6-vs-7 stakes are real and the formula
-change is verifiably doing something (the mean-pressure shift above proves
-that) — but it doesn't translate into a more reliable model across time any
-more than the single-threshold version did. **Not adopted; reverted to
-single-threshold (`direct_playoff_seed: null`) as the committed default.**
-Code and the option itself are kept (harmless when `null`) along with the two
-tests locking in the dual-threshold formula, in case this is revisited with a
-different combination rule (e.g. a weighted blend of the two pressures
-instead of a hard max) rather than abandoned outright.
+**CV result (max-based combination): 10/30 metric-instances (33%) favor the
+dual-threshold version** — worse than the original single-threshold design's
+53%, though not as bad as Round 2's raw-decomposition attempt (20%). Fold1
+(5/6) and fold4 (3/6) look decent; folds 2 and 5 are a clean 0/6 sweep the
+other way.
+
+**Diagnosed directly, not just re-tried blindly.** Bucketing real data by
+games-played didn't show an early-vs-late-season noise split (both p6 and p10
+track closely across the whole season). Instead, comparing the two
+combination rules' distributions on real data (2018-19 through 2023-24)
+found the actual mechanism: `max(p10, p6)` systematically shifts pressure
+**upward** (mean 0.776 → 0.851) while **compressing its variance**
+(std 0.310 → 0.260) — max can only push a row's pressure up relative to using
+p10 alone, never down, and it disproportionately clips high-pressure rows
+together at the top of the range. Less spread means less for a tree to split
+on, regardless of how well-motivated the underlying idea is.
+
+**Sharpened fix: replaced `max` with a weighted average**
+(`direct_playoff_weight`, default 0.5) — `pressure_raw = weight * pressure_direct
++ (1 - weight) * pressure_postseason`. This leaves the mean almost unchanged
+(0.778 vs single-threshold's 0.776) while preserving much more of the original
+variance (std 0.282 vs max's 0.260).
+
+**CV result (weighted-average combination): 12/30 metric-instances (40%)
+favor the sharpened version** — improved from max's 33%, confirming the
+diagnosis was correct, but still below single-threshold's 53%. Fold1 (4/6)
+and fold4 (4/6) look decent; fold2 is still a clean 0/6 sweep the wrong way.
+
+**Verdict: the sharpening was a real, measurable improvement (33% → 40%) but
+not enough to beat plain single-threshold. Not adopted; `direct_playoff_seed`
+stays `null` (single-threshold) as the committed default.** Code, the
+weighted-average formula, and all four tests are kept (harmless when
+`direct_playoff_seed` is `null`) in case this is revisited later — e.g. tuning
+`direct_playoff_weight` itself (only 0.5 has been tried), or gating the
+direct-berth term to only apply once the season is far enough along to be
+meaningful, similar to Phase 2's own "final ~20 games" framing.
 
 ### 6.2 Recent-games actual-playing-time trend (deeper tanking detection)
 
