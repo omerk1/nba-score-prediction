@@ -315,11 +315,27 @@ though avoiding the play-in is a genuine, separate stake. `games_to_clinch_ceili
 is immediately adjacent in the standings, at any rank), but `standings_pressure`
 itself is blind to the 6-line specifically.
 
-**Candidate fix:** compute `GB_from_line` against whichever of {6th, 10th} is
-nearer to the team's current rank, not just the 10th unconditionally. Needs
-its own exploration round (which of the two lines "wins" when a team is
-roughly equidistant from both is itself a design choice worth testing a couple
-of variants on, same as `roster_behavior_weight`'s grid search).
+**Candidate fix (implemented and CV-tested):** `compute_standings_metrics`
+gained an optional `direct_playoff_seed` parameter — when set, `pressure_raw`
+becomes the MAX of the pressure computed against `playoff_line_seed` (10) and
+against `direct_playoff_seed` (6), so whichever boundary is more urgent for a
+team wins. Verified directly on real data first: mean `standings_pressure`
+over a 2024-01-01→2024-04-14 slice rose from 0.617 (single-threshold) to 0.735
+(dual-threshold) — real, substantial movement, not a no-op.
+
+**CV result: 10/30 metric-instances (33%) favor the dual-threshold version —
+worse than the original single-threshold design's 53%, though not as bad as
+Round 2's raw-decomposition attempt (20%).** Fold1 (5/6) and fold4 (3/6) look
+decent; folds 2 and 5 are a clean 0/6 sweep the other way. This is a
+conceptually well-motivated fix — the 6-vs-7 stakes are real and the formula
+change is verifiably doing something (the mean-pressure shift above proves
+that) — but it doesn't translate into a more reliable model across time any
+more than the single-threshold version did. **Not adopted; reverted to
+single-threshold (`direct_playoff_seed: null`) as the committed default.**
+Code and the option itself are kept (harmless when `null`) along with the two
+tests locking in the dual-threshold formula, in case this is revisited with a
+different combination rule (e.g. a weighted blend of the two pressures
+instead of a hard max) rather than abandoned outright.
 
 ### 6.2 Recent-games actual-playing-time trend (deeper tanking detection)
 
