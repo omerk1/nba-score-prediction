@@ -282,14 +282,19 @@ class TestDualThresholdPressure:
 
     def test_dual_threshold_catches_direct_berth_fight(self):
         """Same team/scenario, but with direct_playoff_seed=6 set -- pressure
-        should now be substantial, reflecting the real 6-vs-7 stakes the
-        single-threshold version missed. GB from the 6-line is 0.5 with 0
-        games remaining -> pressure = 1 - 0.5/1 = 0.5."""
+        should now be nonzero, reflecting the real 6-vs-7 stakes the
+        single-threshold version missed entirely. GB from the 6-line is 0.5
+        with 0 games remaining -> pressure_direct = 1 - 0.5/1 = 0.5;
+        pressure_postseason (from the 10-line) clips to 0.0 as in the test
+        above. Default direct_playoff_weight=0.5 -> weighted average =
+        0.5*0.5 + 0.5*0.0 = 0.25 (not the 0.5 a max-based combination would
+        give -- see compute_standings_metrics' docstring for why max was
+        replaced by a weighted average)."""
         games, snapshot_date = _fifteen_team_tiers_games()
         panel = compute_standings_metrics(games, playoff_line_seed=10, direct_playoff_seed=6)
         rank5_team = _EAST_15[4]
         row = panel[(panel["team_id"] == rank5_team) & (panel["snapshot_date"] == snapshot_date)]
-        assert row["pressure_raw"].iloc[0] == pytest.approx(0.5)
+        assert row["pressure_raw"].iloc[0] == pytest.approx(0.25)
 
 
 class TestRosterBehaviorScores:
@@ -377,11 +382,13 @@ class TestRosterBehaviorScores:
 
 
 def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line_seed: int = 10,
-                  direct_playoff_seed: int = None, roster_behavior_weight: float = 1.0, min_importance_games: int = 5):
+                  direct_playoff_seed: int = None, direct_playoff_weight: float = 0.5,
+                  roster_behavior_weight: float = 1.0, min_importance_games: int = 5):
     mock_cfg = MagicMock()
     mock_cfg.data_paths = MagicMock(raw_db=str(raw_db_path))
     mock_cfg.season_motivation = MagicMock(
         enabled=enabled, playoff_line_seed=playoff_line_seed, direct_playoff_seed=direct_playoff_seed,
+        direct_playoff_weight=direct_playoff_weight,
         roster_behavior_weight=roster_behavior_weight, min_importance_games=min_importance_games,
     )
     mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path), importance_weights=IMPORTANCE_WEIGHTS)

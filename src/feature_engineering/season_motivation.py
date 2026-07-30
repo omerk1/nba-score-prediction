@@ -168,20 +168,33 @@ def _pressure_from_seed(panel: pd.DataFrame, grp_cols: list[str], seed: int) -> 
     return (1 - gb_from_line.abs() / (panel["games_remaining"] + 1)).clip(0.0, 1.0)
 
 
-def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, direct_playoff_seed: int = None) -> pd.DataFrame:
+def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, direct_playoff_seed: int = None,
+                               direct_playoff_weight: float = 0.5) -> pd.DataFrame:
     """Returns (season_id, team_id, snapshot_date) -> pressure_raw,
     games_to_clinch_ceiling, games_to_clinch_floor. See
     docs/SEASON_MOTIVATION_DECISIONS.md sections 2a/3 for the formulas.
 
-    `direct_playoff_seed` (optional): if given, pressure_raw is the MAX of the
-    pressure computed against `playoff_line_seed` (the play-in/postseason
-    cutoff) and against `direct_playoff_seed` (the direct-berth cutoff,
-    e.g. 6th) -- whichever boundary is more urgent for a given team wins. A
-    team safely clear of missing the postseason (far from the 10-line) but in
-    a real fight for a direct berth (close to the 6-line) now correctly reads
-    as high-pressure, which a single-threshold formula misses entirely. If
-    omitted, behaves exactly as before (single-threshold against
-    `playoff_line_seed` only).
+    `direct_playoff_seed` (optional): if given, pressure_raw is a weighted
+    average of the pressure computed against `playoff_line_seed` (the
+    play-in/postseason cutoff) and against `direct_playoff_seed` (the
+    direct-berth cutoff, e.g. 6th) -- `direct_playoff_weight` on the direct
+    line, `1 - direct_playoff_weight` on the postseason line. A team safely
+    clear of missing the postseason (far from the 10-line) but in a real
+    fight for a direct berth (close to the 6-line) now correctly picks up
+    some pressure, which a single-threshold formula misses entirely.
+
+    An earlier version used `max(pressure_postseason, pressure_direct)`
+    instead of a weighted average -- CV-tested and found to perform worse
+    (33% of metrics favoring it vs the single-threshold design's 53%, see
+    docs/SEASON_MOTIVATION_LOG.md section 6.1). Diagnosed directly: `max`
+    systematically shifts pressure upward (mean 0.776 -> 0.851 on real data)
+    while COMPRESSING variance (std 0.310 -> 0.260) -- less differentiating
+    signal for the model to split on, not more. A weighted average leaves the
+    mean nearly unchanged (0.778) with much less variance loss (std 0.282),
+    so it was adopted as the combination rule instead of `max`.
+
+    If `direct_playoff_seed` is omitted, behaves exactly as before
+    (single-threshold against `playoff_line_seed` only).
     """
     team_games = _build_team_game_log(games_df)
     panel = _standings_panel(team_games)
@@ -208,7 +221,9 @@ def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, di
     else:
         pressure_postseason = _pressure_from_seed(panel, grp_cols, playoff_line_seed)
         pressure_direct = _pressure_from_seed(panel, grp_cols, direct_playoff_seed)
-        panel["pressure_raw"] = np.maximum(pressure_postseason, pressure_direct)
+        panel["pressure_raw"] = (
+            direct_playoff_weight * pressure_direct + (1 - direct_playoff_weight) * pressure_postseason
+        )
 
     max_final_wins = panel["wins"] + panel["games_remaining"]
     min_final_wins = panel["wins"]

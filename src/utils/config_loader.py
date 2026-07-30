@@ -155,6 +155,7 @@ class SeasonMotivationConfig(BaseModel):
     enabled: bool = False
     playoff_line_seed: int = 10
     direct_playoff_seed: Optional[int] = None
+    direct_playoff_weight: float = 0.5
     roster_behavior_weight: float = 1.0
     min_importance_games: int = 5
 
