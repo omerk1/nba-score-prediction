@@ -154,6 +154,7 @@ class SeasonMotivationConfig(BaseModel):
     not-yet-adopted convention as OnOffSplitsConfig/StyleMatchupConfig."""
     enabled: bool = False
     playoff_line_seed: int = 10
+    direct_playoff_seed: Optional[int] = None
     roster_behavior_weight: float = 1.0
     min_importance_games: int = 5
 

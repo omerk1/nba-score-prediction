@@ -155,10 +155,33 @@ def _standings_panel(team_games: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(panels, ignore_index=True)
 
 
-def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int) -> pd.DataFrame:
+def _pressure_from_seed(panel: pd.DataFrame, grp_cols: list[str], seed: int) -> pd.Series:
+    """clip(1 - |GB_from_seed| / (games_remaining + 1), 0, 1) against whichever
+    team currently holds `seed` in each (season_id, snapshot_date, conference)
+    group. Standard games-back arithmetic: positive when trailing the seed,
+    negative when leading it, zero at the seed itself."""
+    line = panel[panel["conf_rank"] == seed][grp_cols + ["wins", "losses"]].rename(
+        columns={"wins": "line_wins", "losses": "line_losses"}
+    )
+    merged = panel.merge(line, on=grp_cols, how="left")
+    gb_from_line = ((merged["line_wins"] - merged["wins"]) + (merged["losses"] - merged["line_losses"])) / 2
+    return (1 - gb_from_line.abs() / (panel["games_remaining"] + 1)).clip(0.0, 1.0)
+
+
+def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, direct_playoff_seed: int = None) -> pd.DataFrame:
     """Returns (season_id, team_id, snapshot_date) -> pressure_raw,
     games_to_clinch_ceiling, games_to_clinch_floor. See
     docs/SEASON_MOTIVATION_DECISIONS.md sections 2a/3 for the formulas.
+
+    `direct_playoff_seed` (optional): if given, pressure_raw is the MAX of the
+    pressure computed against `playoff_line_seed` (the play-in/postseason
+    cutoff) and against `direct_playoff_seed` (the direct-berth cutoff,
+    e.g. 6th) -- whichever boundary is more urgent for a given team wins. A
+    team safely clear of missing the postseason (far from the 10-line) but in
+    a real fight for a direct berth (close to the 6-line) now correctly reads
+    as high-pressure, which a single-threshold formula misses entirely. If
+    omitted, behaves exactly as before (single-threshold against
+    `playoff_line_seed` only).
     """
     team_games = _build_team_game_log(games_df)
     panel = _standings_panel(team_games)
@@ -180,13 +203,12 @@ def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int) ->
     panel["below_wins"] = g["wins"].shift(-1)
     panel["below_games_remaining"] = g["games_remaining"].shift(-1)
 
-    line = panel[panel["conf_rank"] == playoff_line_seed][grp_cols + ["wins", "losses"]].rename(
-        columns={"wins": "line_wins", "losses": "line_losses"}
-    )
-    panel = panel.merge(line, on=grp_cols, how="left")
-
-    gb_from_line = ((panel["line_wins"] - panel["wins"]) + (panel["losses"] - panel["line_losses"])) / 2
-    panel["pressure_raw"] = (1 - gb_from_line.abs() / (panel["games_remaining"] + 1)).clip(0.0, 1.0)
+    if direct_playoff_seed is None:
+        panel["pressure_raw"] = _pressure_from_seed(panel, grp_cols, playoff_line_seed)
+    else:
+        pressure_postseason = _pressure_from_seed(panel, grp_cols, playoff_line_seed)
+        pressure_direct = _pressure_from_seed(panel, grp_cols, direct_playoff_seed)
+        panel["pressure_raw"] = np.maximum(pressure_postseason, pressure_direct)
 
     max_final_wins = panel["wins"] + panel["games_remaining"]
     min_final_wins = panel["wins"]

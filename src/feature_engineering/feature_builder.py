@@ -1115,9 +1115,13 @@ class FeatureBuilder:
 
         Adds, for each of home_team/away_team:
         - `_motivation_score` [0,1]: `pressure_raw * (1 - roster_behavior_weight *
-          roster_behavior_score)` -- standings pressure (distance from the
-          `season_motivation.playoff_line_seed` seed, moderated by games
-          remaining) suppressed by how much of the team's full-strength quality
+          roster_behavior_score)` -- standings pressure (distance from
+          whichever is more urgent of the `season_motivation.playoff_line_seed`
+          seed, the postseason/play-in cutoff, and `direct_playoff_seed`, the
+          direct-berth cutoff -- see `season_motivation._pressure_from_seed`;
+          `direct_playoff_seed` is optional, omit for single-threshold behavior
+          -- moderated by games remaining) suppressed by how much of the team's
+          full-strength quality
           is sitting out tonight for a non-injury reason (rest, personal reasons,
           coach's decision -- see `season_motivation.NON_INJURY_REASONS`). Only
           captures *behavioral* tanking (visibly sitting healthy players) --
@@ -1166,7 +1170,7 @@ class FeatureBuilder:
         finally:
             loader.close()
 
-        standings = compute_standings_metrics(all_games, sm_cfg.playoff_line_seed)
+        standings = compute_standings_metrics(all_games, sm_cfg.playoff_line_seed, sm_cfg.direct_playoff_seed)
 
         season_start_by_season = (
             all_games.assign(GAME_DATE=pd.to_datetime(all_games["GAME_DATE"]).dt.normalize())

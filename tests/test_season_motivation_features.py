@@ -216,6 +216,82 @@ def _write_injury_features_db(path, importance_rows, injury_rows):
 IMPORTANCE_WEIGHTS = MagicMock(minutes_share=0.4, usage_rate=0.4, pts_share=0.2)
 
 
+# All 15 real East-conference team IDs (per season_motivation._TEAM_CONFERENCE),
+# used for the dual-threshold pressure test below -- need a realistically
+# full conference to have a meaningful, unambiguous rank 5/6/10.
+_EAST_15 = [
+    1610612737, 1610612738, 1610612739, 1610612741, 1610612748, 1610612749,
+    1610612751, 1610612752, 1610612753, 1610612754, 1610612755, 1610612761,
+    1610612764, 1610612765, 1610612766,
+]
+_FILLER_WEST_TEAM = 1610612744  # GSW -- West, never ranked within the East group
+
+
+def _fifteen_team_tiers_games():
+    """15 real East teams, each with a distinct win total against a shared West
+    filler (losses=20 for every team, so win_pct differs cleanly by win count
+    alone, no ties). Wins per team (rank1..rank15): a wide gap around the
+    playoff_line_seed=10 boundary but a narrow, 1-win gap between rank5 and
+    rank6 -- team at rank5 is comfortably clear of missing the postseason
+    (10th) but in a real fight for a direct playoff berth (6th vs 7th). One
+    game per calendar day (never two games the same day) to keep each team's
+    cumulative win/loss sequence unambiguous under date normalization."""
+    wins_by_rank = [50, 45, 40, 36, 33, 32, 20, 18, 16, 14, 12, 10, 8, 6, 4]
+    rows = []
+    gid = 0
+    date = pd.Timestamp("2024-01-01")
+    for team_id, wins in zip(_EAST_15, wins_by_rank):
+        for _ in range(wins):
+            rows.append({
+                "GAME_ID": f"g{gid}", "GAME_DATE": date, "SEASON_ID": SEASON_ID,
+                "HOME_TEAM_ID": team_id, "AWAY_TEAM_ID": _FILLER_WEST_TEAM, "HOME_TEAM_WINS": 1,
+            })
+            gid += 1
+            date += pd.Timedelta(days=1)
+        for _ in range(20):
+            rows.append({
+                "GAME_ID": f"g{gid}", "GAME_DATE": date, "SEASON_ID": SEASON_ID,
+                "HOME_TEAM_ID": team_id, "AWAY_TEAM_ID": _FILLER_WEST_TEAM, "HOME_TEAM_WINS": 0,
+            })
+            gid += 1
+            date += pd.Timedelta(days=1)
+    # Anchor game (rank1 team vs filler, one more win) strictly after every
+    # other row -- grounds a valid, unambiguous snapshot_date at which every
+    # team's full accumulated record above is already "final" (no more of
+    # their own games exist past this point).
+    snapshot_date = date
+    rows.append({
+        "GAME_ID": "anchor", "GAME_DATE": snapshot_date, "SEASON_ID": SEASON_ID,
+        "HOME_TEAM_ID": _EAST_15[0], "AWAY_TEAM_ID": _FILLER_WEST_TEAM, "HOME_TEAM_WINS": 1,
+    })
+    return pd.DataFrame(rows)[GAME_COLS], snapshot_date
+
+
+class TestDualThresholdPressure:
+
+    def test_single_threshold_misses_direct_berth_fight(self):
+        """rank5 team is far from the 10-line (postseason cutoff) but in a
+        real 1-win fight for the 6-line (direct berth) -- single-threshold
+        pressure (playoff_line_seed=10 only, direct_playoff_seed omitted)
+        reads this as near-zero, missing the real stakes entirely."""
+        games, snapshot_date = _fifteen_team_tiers_games()
+        panel = compute_standings_metrics(games, playoff_line_seed=10)
+        rank5_team = _EAST_15[4]
+        row = panel[(panel["team_id"] == rank5_team) & (panel["snapshot_date"] == snapshot_date)]
+        assert row["pressure_raw"].iloc[0] == pytest.approx(0.0)
+
+    def test_dual_threshold_catches_direct_berth_fight(self):
+        """Same team/scenario, but with direct_playoff_seed=6 set -- pressure
+        should now be substantial, reflecting the real 6-vs-7 stakes the
+        single-threshold version missed. GB from the 6-line is 0.5 with 0
+        games remaining -> pressure = 1 - 0.5/1 = 0.5."""
+        games, snapshot_date = _fifteen_team_tiers_games()
+        panel = compute_standings_metrics(games, playoff_line_seed=10, direct_playoff_seed=6)
+        rank5_team = _EAST_15[4]
+        row = panel[(panel["team_id"] == rank5_team) & (panel["snapshot_date"] == snapshot_date)]
+        assert row["pressure_raw"].iloc[0] == pytest.approx(0.5)
+
+
 class TestRosterBehaviorScores:
 
     def test_rest_reason_contributes_to_score(self, tmp_path):
@@ -301,11 +377,11 @@ class TestRosterBehaviorScores:
 
 
 def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line_seed: int = 10,
-                  roster_behavior_weight: float = 1.0, min_importance_games: int = 5):
+                  direct_playoff_seed: int = None, roster_behavior_weight: float = 1.0, min_importance_games: int = 5):
     mock_cfg = MagicMock()
     mock_cfg.data_paths = MagicMock(raw_db=str(raw_db_path))
     mock_cfg.season_motivation = MagicMock(
-        enabled=enabled, playoff_line_seed=playoff_line_seed,
+        enabled=enabled, playoff_line_seed=playoff_line_seed, direct_playoff_seed=direct_playoff_seed,
         roster_behavior_weight=roster_behavior_weight, min_importance_games=min_importance_games,
     )
     mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path), importance_weights=IMPORTANCE_WEIGHTS)

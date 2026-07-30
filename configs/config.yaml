@@ -275,6 +275,14 @@ season_motivation:
   # (not a top-6-only cutoff) drives the standings-pressure component, since a
   # team at 9th/10th is still genuinely fighting for its season.
   playoff_line_seed: 10
+  # Direct-playoff-berth cutoff (top-6, no play-in needed). If set, pressure is
+  # the MAX of the pressure computed against playoff_line_seed and against this
+  # seed -- whichever boundary is more urgent for a given team wins, so a team
+  # safely clear of missing the postseason but in a real fight for 6th vs 7th
+  # still reads as high-pressure. null = single-threshold (playoff_line_seed
+  # only), the original Phase 1 behavior. Not yet adopted -- being explored,
+  # see docs/SEASON_MOTIVATION_LOG.md.
+  direct_playoff_seed: null
   # How much a healthy-scratch signal (sitting rest/personal-reasons/coach's-decision
   # players) suppresses the standings-pressure component of motivation_score.
   # 1.0 = a team sitting 100% of its full-strength quality reads as zero motivation
