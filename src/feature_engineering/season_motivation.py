@@ -14,6 +14,23 @@ justification behind every formula below. Two independent pieces:
   personal reasons, coach's decision, ...), reusing the existing
   `player_importance` table and `_get_importance_map`-style weighted formula
   from `src/news_scraping/pipeline.py` rather than inventing a second one.
+- `compute_recent_minutes_trend_scores`: per (team, game night), how much of a
+  team's full-strength quality has seen a genuine multi-week minutes
+  reduction -- catches "soft" tanking the single-night snapshot above cannot.
+
+Every signal above measures an *input* to motivation (standings position,
+roster/rest decisions) rather than motivation as expressed in actual game
+behavior. docs/SEASON_MOTIVATION_LOG.md section 8 found this structural
+gap: `test_diff_mae` degrades by roughly the same amount across every
+formula variant of the signals above, which reads as a ceiling on what
+input-based signals alone can do. Two further, behavior-based signals:
+
+- `compute_performance_vs_expectation_scores`: rolling (actual margin - Elo-
+  implied expected margin), i.e. is a team over/underperforming its own
+  rating lately, independent of standings or roster state.
+- `compute_opponent_adjusted_form_scores`: rolling opponent-strength-weighted
+  record -- a loss to a weak team counts far more than a loss to a strong
+  one, and vice versa for wins.
 
 No tiebreakers (head-to-head, division, conference record) are modeled --
 deliberately a continuous proxy, not exact combinatorial seeding logic, per
@@ -440,3 +457,128 @@ def compute_recent_minutes_trend_scores(
             results.append((team_id, row.game_date, score))
 
     return pd.DataFrame(results, columns=["team_id", "game_date", "recent_minutes_trend_score"])
+
+
+def _fit_elo_margin_scale(games_df: pd.DataFrame, elo_ratings: pd.DataFrame, home_advantage: float) -> float:
+    """Least-squares slope (through the origin) of actual point margin on
+    Elo rating gap, fit once from the full historical game set. Elo's own
+    logistic formula converts a rating gap into a WIN PROBABILITY, not a
+    point margin -- there is no single universally-correct "N Elo points per
+    point of margin" constant, and this repo's own Elo params (k_factor,
+    home_advantage, mov_multiplier, season_regression) are independently
+    tuned via tune_elo.py, not borrowed from any external source, so an
+    external conversion constant (e.g. a commonly-cited 538-style heuristic)
+    would not necessarily match THIS repo's own tuned rating scale. Deriving
+    the scale directly from this repo's own historical
+    (elo_diff, actual_margin) relationship keeps the conversion internally
+    consistent instead of importing an unvalidated external number.
+    """
+    merged = games_df.merge(elo_ratings, on="GAME_ID", how="inner")
+    elo_diff = merged["home_team_elo"] + home_advantage - merged["away_team_elo"]
+    denom = (elo_diff ** 2).sum()
+    if denom <= 0:
+        return 0.0
+    return float((elo_diff * merged["POINT_DIFF"]).sum() / denom)
+
+
+def compute_team_performance_history(
+    games_df: pd.DataFrame, elo_ratings: pd.DataFrame, home_advantage: float, elo_margin_scale: float,
+) -> pd.DataFrame:
+    """Long-format per-team-per-game log of actual vs. Elo-expected margin and
+    opponent-adjusted outcome, from each team's own perspective -- the shared
+    input both `compute_performance_vs_expectation_scores` and
+    `compute_opponent_adjusted_form_scores` build their rolling windows from.
+
+    Per (team, game): `actual_margin` (signed, from this team's perspective),
+    `expected_margin` (`elo_diff * elo_margin_scale`, this team's Elo gap
+    including home advantage if applicable), `performance_residual`
+    (actual - expected), `win`, `opponent_win_pct` (the OPPONENT's own
+    cumulative win percentage entering this same game -- point-in-time,
+    leakage-safe, computed from games strictly before this one), and
+    `signed_opponent_adjusted_score` (`opponent_win_pct` for a win, negative
+    `1 - opponent_win_pct` for a loss -- a win over a strong team counts a lot,
+    a loss to a weak team counts a lot negatively, and vice versa).
+    """
+    merged = games_df.merge(elo_ratings, on="GAME_ID", how="left")
+    home = pd.DataFrame({
+        "game_id": merged["GAME_ID"].values,
+        "game_date": merged["GAME_DATE"].values,
+        "team_id": merged["HOME_TEAM_ID"].values,
+        "opponent_id": merged["AWAY_TEAM_ID"].values,
+        "actual_margin": merged["POINT_DIFF"].values,
+        "elo_diff": (merged["home_team_elo"] + home_advantage - merged["away_team_elo"]).values,
+        "win": (merged["POINT_DIFF"] > 0).values,
+    })
+    away = pd.DataFrame({
+        "game_id": merged["GAME_ID"].values,
+        "game_date": merged["GAME_DATE"].values,
+        "team_id": merged["AWAY_TEAM_ID"].values,
+        "opponent_id": merged["HOME_TEAM_ID"].values,
+        "actual_margin": (-merged["POINT_DIFF"]).values,
+        "elo_diff": (merged["away_team_elo"] - (merged["home_team_elo"] + home_advantage)).values,
+        "win": (merged["POINT_DIFF"] < 0).values,
+    })
+    team_games = pd.concat([home, away], ignore_index=True)
+    team_games["game_date"] = pd.to_datetime(team_games["game_date"]).dt.normalize()
+    team_games["expected_margin"] = team_games["elo_diff"] * elo_margin_scale
+    team_games["performance_residual"] = team_games["actual_margin"] - team_games["expected_margin"]
+
+    team_games = team_games.sort_values(["team_id", "game_date"]).reset_index(drop=True)
+    grp = team_games.groupby("team_id")
+    games_played_before = grp.cumcount()
+    wins_before = grp["win"].cumsum() - team_games["win"].astype(int)
+    team_games["win_pct_before"] = np.where(games_played_before > 0, wins_before / games_played_before, 0.5)
+
+    opponent_pct = team_games[["game_id", "team_id", "win_pct_before"]].rename(
+        columns={"team_id": "opponent_id", "win_pct_before": "opponent_win_pct"}
+    )
+    team_games = team_games.merge(opponent_pct, on=["game_id", "opponent_id"], how="left")
+
+    team_games["signed_opponent_adjusted_score"] = np.where(
+        team_games["win"], team_games["opponent_win_pct"], -(1 - team_games["opponent_win_pct"]),
+    )
+    return team_games
+
+
+def compute_performance_vs_expectation_scores(team_games: pd.DataFrame, window: int) -> pd.DataFrame:
+    """Returns (team_id, game_date) -> performance_vs_expectation_score: the
+    rolling mean of (actual_margin - Elo-expected_margin) over each team's
+    previous `window` games (never including tonight's own result --
+    `shift(1)`, same pre-game convention `_add_rolling_features` uses),
+    normalized by the global standard deviation of that residual so the
+    score is roughly scale-free regardless of `elo_margin_scale`'s magnitude.
+
+    A team consistently beating its own Elo expectation lately (positive) is
+    behaviorally "trying"; consistently underperforming it (negative,
+    especially against weaker opponents) is a demotivation signal standings
+    position and roster/rest decisions cannot see.
+    """
+    team_games = team_games.sort_values(["team_id", "game_date"])
+    rolling_mean = team_games.groupby("team_id")["performance_residual"].transform(
+        lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+    )
+    residual_std = team_games["performance_residual"].std() or 1.0
+    score = (rolling_mean / residual_std).fillna(0.0)
+    return pd.DataFrame({
+        "team_id": team_games["team_id"].values,
+        "game_date": team_games["game_date"].values,
+        "performance_vs_expectation_score": score.values,
+    })
+
+
+def compute_opponent_adjusted_form_scores(team_games: pd.DataFrame, window: int) -> pd.DataFrame:
+    """Returns (team_id, game_date) -> opponent_adjusted_form_score: the
+    rolling mean of `signed_opponent_adjusted_score` over each team's
+    previous `window` games (`shift(1)`, same pre-game convention as above).
+    High = recently winning the games a motivated team should win (and
+    beating good teams); low/negative = recently losing games a motivated
+    team shouldn't (especially to weak opponents)."""
+    team_games = team_games.sort_values(["team_id", "game_date"])
+    rolling_mean = team_games.groupby("team_id")["signed_opponent_adjusted_score"].transform(
+        lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+    )
+    return pd.DataFrame({
+        "team_id": team_games["team_id"].values,
+        "game_date": team_games["game_date"].values,
+        "opponent_adjusted_form_score": rolling_mean.fillna(0.0).values,
+    })

@@ -47,6 +47,10 @@ from src.feature_engineering.season_motivation import (
     compute_standings_metrics,
     compute_roster_behavior_scores,
     compute_recent_minutes_trend_scores,
+    compute_team_performance_history,
+    compute_performance_vs_expectation_scores,
+    compute_opponent_adjusted_form_scores,
+    _fit_elo_margin_scale,
 )
 
 # Four real East-conference team IDs (per season_motivation._TEAM_CONFERENCE)
@@ -466,10 +470,147 @@ class TestRecentMinutesTrendScores:
         assert not pd.isna(row["recent_minutes_trend_score"].iloc[0])
 
 
+PVE_GAME_COLS = ["GAME_ID", "GAME_DATE", "SEASON_ID", "HOME_TEAM_ID", "AWAY_TEAM_ID", "POINT_DIFF"]
+FILLER_1, FILLER_2 = 1610612751, 1610612752  # BKN, NYK -- unused elsewhere, real IDs not required to be East
+
+
+def _pve_game(game_id, game_date, home, away, point_diff):
+    return {
+        "GAME_ID": game_id, "GAME_DATE": pd.Timestamp(game_date), "SEASON_ID": SEASON_ID,
+        "HOME_TEAM_ID": home, "AWAY_TEAM_ID": away, "POINT_DIFF": point_diff,
+    }
+
+
+def _elo_row(game_id, home_elo, away_elo):
+    return {"GAME_ID": game_id, "home_team_elo": home_elo, "away_team_elo": away_elo}
+
+
+class TestEloMarginScale:
+
+    def test_fits_exact_linear_relationship(self):
+        """If POINT_DIFF == k * elo_diff exactly for every game, the fitted
+        scale must recover k (least-squares through the origin on a perfect
+        fit is exact)."""
+        k = 0.04
+        games, elos = [], []
+        for i, (home_elo, away_elo) in enumerate([(1600, 1500), (1550, 1620), (1500, 1500), (1700, 1400)]):
+            elo_diff = home_elo - away_elo  # home_advantage=0 for this test
+            games.append(_pve_game(f"g{i}", "2024-01-01", TEAM_A, TEAM_B, k * elo_diff))
+            elos.append(_elo_row(f"g{i}", home_elo, away_elo))
+        games_df = pd.DataFrame(games)[PVE_GAME_COLS]
+        elo_ratings = pd.DataFrame(elos)
+
+        scale = _fit_elo_margin_scale(games_df, elo_ratings, home_advantage=0.0)
+        assert scale == pytest.approx(k)
+
+
+class TestTeamPerformanceHistory:
+
+    def test_actual_margin_and_elo_diff_signs_for_both_sides(self):
+        """Home team's actual_margin == POINT_DIFF and elo_diff includes home
+        advantage; away team's are the exact negation (from their own
+        perspective), i.e. no sign errors on either side."""
+        games_df = pd.DataFrame([_pve_game("g1", "2024-01-01", TEAM_A, TEAM_B, 12.0)])[PVE_GAME_COLS]
+        elo_ratings = pd.DataFrame([_elo_row("g1", 1600, 1500)])
+
+        team_games = compute_team_performance_history(games_df, elo_ratings, home_advantage=100.0, elo_margin_scale=0.05)
+
+        home_row = team_games[team_games["team_id"] == TEAM_A].iloc[0]
+        away_row = team_games[team_games["team_id"] == TEAM_B].iloc[0]
+        assert home_row["actual_margin"] == pytest.approx(12.0)
+        assert away_row["actual_margin"] == pytest.approx(-12.0)
+        assert home_row["elo_diff"] == pytest.approx(1600 + 100.0 - 1500)
+        assert away_row["elo_diff"] == pytest.approx(1500 - (1600 + 100.0))
+        assert bool(home_row["win"]) is True
+        assert bool(away_row["win"]) is False
+
+    def test_beating_an_undefeated_opponent_scores_max_credit(self):
+        """TEAM_X upsets OPPONENT, who was 2-0 (win_pct 1.0) entering the
+        game -- signed_opponent_adjusted_score for TEAM_X's win must equal
+        opponent_win_pct = 1.0, the maximum credit a win can carry."""
+        opponent = TEAM_C
+        team_x = TEAM_D
+        games = [
+            _pve_game("g1", "2024-01-01", opponent, FILLER_1, 10.0),   # opponent wins
+            _pve_game("g2", "2024-01-02", opponent, FILLER_2, 10.0),   # opponent wins again (2-0)
+            _pve_game("g3", "2024-01-03", team_x, opponent, 5.0),      # team_x (home) beats opponent
+        ]
+        games_df = pd.DataFrame(games)[PVE_GAME_COLS]
+        elo_ratings = pd.DataFrame([_elo_row(g["GAME_ID"], 1500, 1500) for g in games])
+
+        team_games = compute_team_performance_history(games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0)
+        row = team_games[(team_games["team_id"] == team_x) & (team_games["game_id"] == "g3")].iloc[0]
+        assert row["opponent_win_pct"] == pytest.approx(1.0)
+        assert row["signed_opponent_adjusted_score"] == pytest.approx(1.0)
+
+    def test_losing_to_a_winless_opponent_scores_max_penalty(self):
+        """TEAM_Y loses to WEAK_OPP, who was 0-2 (win_pct 0.0) entering the
+        game -- signed_opponent_adjusted_score for TEAM_Y's loss must equal
+        -(1 - 0.0) = -1.0, the maximum penalty a loss can carry."""
+        weak_opp = TEAM_C
+        team_y = TEAM_D
+        games = [
+            _pve_game("g1", "2024-01-01", FILLER_1, weak_opp, 10.0),   # weak_opp (away) loses
+            _pve_game("g2", "2024-01-02", FILLER_2, weak_opp, 10.0),   # weak_opp (away) loses again (0-2)
+            _pve_game("g3", "2024-01-03", team_y, weak_opp, -5.0),     # team_y (home) loses to weak_opp
+        ]
+        games_df = pd.DataFrame(games)[PVE_GAME_COLS]
+        elo_ratings = pd.DataFrame([_elo_row(g["GAME_ID"], 1500, 1500) for g in games])
+
+        team_games = compute_team_performance_history(games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0)
+        row = team_games[(team_games["team_id"] == team_y) & (team_games["game_id"] == "g3")].iloc[0]
+        assert row["opponent_win_pct"] == pytest.approx(0.0)
+        assert row["signed_opponent_adjusted_score"] == pytest.approx(-1.0)
+
+
+class TestRollingBehaviorScores:
+
+    def _five_game_history(self, team_id, opponent_id, margins):
+        """TEAM_ID plays the same OPPONENT_ID five times (home each time,
+        elo_diff always 0 so expected_margin is always 0 -- performance_residual
+        == actual_margin directly, making the rolling mean hand-verifiable)."""
+        games = [
+            _pve_game(f"g{i}", f"2024-01-{i+1:02d}", team_id, opponent_id, m)
+            for i, m in enumerate(margins)
+        ]
+        games_df = pd.DataFrame(games)[PVE_GAME_COLS]
+        elo_ratings = pd.DataFrame([_elo_row(g["GAME_ID"], 1500, 1500) for g in games])
+        return compute_team_performance_history(games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0)
+
+    def test_performance_vs_expectation_excludes_current_game(self):
+        """Rolling window must use shift(1) -- the score attached to a game
+        reflects PRIOR games only, never that game's own result."""
+        team_games = self._five_game_history(TEAM_A, TEAM_B, margins=[10, 10, 10, 10, -100])
+        result = compute_performance_vs_expectation_scores(team_games, window=10)
+        # Last game's huge -100 margin must not appear in its OWN row's score
+        # (only in the games that come after it, which don't exist here).
+        last_row = result[result["game_date"] == pd.Timestamp("2024-01-05")].iloc[0]
+        residual_std = team_games["performance_residual"].std()
+        expected = (10 + 10 + 10 + 10) / 4 / residual_std  # mean of the 4 PRIOR games only
+        assert last_row["performance_vs_expectation_score"] == pytest.approx(expected)
+
+    def test_opponent_adjusted_form_rolling_mean_reflects_window(self):
+        """A small, exact window (2) must average only the 2 most recent
+        PRIOR games, dropping earlier ones."""
+        team_games = self._five_game_history(TEAM_A, TEAM_B, margins=[10, 10, 10, -10, -10])
+        result = compute_opponent_adjusted_form_scores(team_games, window=2)
+        last_row = result[result["game_date"] == pd.Timestamp("2024-01-05")].iloc[0]
+        # TEAM_B's own win_pct-before evolves as the games play out (0.5 ->
+        # 0.0 -> 0.0 -> 0.0 -> 0.25), so TEAM_A's per-game signed score is
+        # 0.5, 0.0, 0.0, -1.0, -0.75 across games 1-5 in order. window=2 at
+        # game5 uses only the 2 PRIOR games (3 and 4): win vs a 0-2 opponent
+        # (score 0.0) then loss vs a 0-3 opponent (score -(1-0.0) = -1.0) ->
+        # mean = (0.0 + -1.0) / 2 = -0.5. Verified independently by direct
+        # computation, not just hand-derivation.
+        assert last_row["opponent_adjusted_form_score"] == pytest.approx(-0.5)
+
+
 def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line_seed: int = 10,
                   direct_playoff_seed: int = None, direct_playoff_weight: float = 0.5,
                   roster_behavior_weight: float = 1.0, min_importance_games: int = 5,
-                  recent_trend_lookback_weeks: int = 4):
+                  recent_trend_lookback_weeks: int = 4,
+                  performance_vs_expectation_enabled: bool = False, performance_vs_expectation_window: int = 10,
+                  opponent_adjusted_form_enabled: bool = False, opponent_adjusted_form_window: int = 10):
     mock_cfg = MagicMock()
     mock_cfg.data_paths = MagicMock(raw_db=str(raw_db_path))
     mock_cfg.season_motivation = MagicMock(
@@ -477,6 +618,10 @@ def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line
         direct_playoff_weight=direct_playoff_weight,
         roster_behavior_weight=roster_behavior_weight, min_importance_games=min_importance_games,
         recent_trend_lookback_weeks=recent_trend_lookback_weeks,
+        performance_vs_expectation_enabled=performance_vs_expectation_enabled,
+        performance_vs_expectation_window=performance_vs_expectation_window,
+        opponent_adjusted_form_enabled=opponent_adjusted_form_enabled,
+        opponent_adjusted_form_window=opponent_adjusted_form_window,
     )
     mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path), importance_weights=IMPORTANCE_WEIGHTS)
     mock_cfg.datasets_loading = MagicMock(

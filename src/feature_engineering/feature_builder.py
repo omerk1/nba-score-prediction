@@ -1145,6 +1145,17 @@ class FeatureBuilder:
           `_roster_behavior_score`'s single-night snapshot cannot -- see
           `season_motivation.compute_recent_minutes_trend_scores` and
           docs/SEASON_MOTIVATION_LOG.md section 6.2/9.
+        - `_performance_vs_expectation_score` / `_opponent_adjusted_form_score`
+          (each independently gated by its own `..._enabled` flag): behavior-
+          based signals measuring motivation as expressed in actual recent
+          game results, not standings/roster inputs -- rolling (actual margin
+          - Elo-expected margin) and rolling opponent-strength-weighted record
+          respectively, over `..._window` games. Reuse `elo_features`' own
+          ratings (requires `elo_features.enabled=true`, soft-warns and skips
+          just these two columns otherwise). See
+          `season_motivation.compute_performance_vs_expectation_scores` /
+          `compute_opponent_adjusted_form_scores` and
+          docs/SEASON_MOTIVATION_LOG.md's Phase 1 Iteration section.
 
         Soft-disabled (warn + skip) if the injury features cache is missing --
         the roster-behavior component depends on it. This feature has not yet
@@ -1168,6 +1179,10 @@ class FeatureBuilder:
             compute_standings_metrics,
             compute_roster_behavior_scores,
             compute_recent_minutes_trend_scores,
+            compute_team_performance_history,
+            compute_performance_vs_expectation_scores,
+            compute_opponent_adjusted_form_scores,
+            _fit_elo_margin_scale,
         )
 
         sm_cfg = cfg.season_motivation
@@ -1205,6 +1220,36 @@ class FeatureBuilder:
             sm_cfg.min_importance_games, season_start_by_season, sm_cfg.recent_trend_lookback_weeks,
         )
 
+        performance_vs_expectation = None
+        opponent_adjusted_form = None
+        if sm_cfg.performance_vs_expectation_enabled or sm_cfg.opponent_adjusted_form_enabled:
+            if not cfg.elo_features or not cfg.elo_features.enabled:
+                logger.warning(
+                    "performance_vs_expectation/opponent_adjusted_form need elo_features.enabled=true "
+                    "(they reuse its ratings) -- skipping both, other season motivation columns unaffected."
+                )
+            else:
+                from src.feature_engineering.elo import compute_elo_ratings
+
+                elo_cfg = cfg.elo_features
+                elo_ratings = compute_elo_ratings(
+                    all_games, initial_rating=elo_cfg.initial_rating, k_factor=elo_cfg.k_factor,
+                    home_advantage=elo_cfg.home_advantage, mov_multiplier=elo_cfg.mov_multiplier,
+                    season_regression=elo_cfg.season_regression,
+                )
+                elo_margin_scale = _fit_elo_margin_scale(all_games, elo_ratings, elo_cfg.home_advantage)
+                team_performance = compute_team_performance_history(
+                    all_games, elo_ratings, elo_cfg.home_advantage, elo_margin_scale,
+                )
+                if sm_cfg.performance_vs_expectation_enabled:
+                    performance_vs_expectation = compute_performance_vs_expectation_scores(
+                        team_performance, sm_cfg.performance_vs_expectation_window,
+                    )
+                if sm_cfg.opponent_adjusted_form_enabled:
+                    opponent_adjusted_form = compute_opponent_adjusted_form_scores(
+                        team_performance, sm_cfg.opponent_adjusted_form_window,
+                    )
+
         new_cols = {}
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
             lookup = pd.DataFrame({
@@ -1228,6 +1273,13 @@ class FeatureBuilder:
             new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
             new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
             new_cols[f"{prefix}_recent_minutes_trend_score"] = trend_score
+
+            if performance_vs_expectation is not None:
+                pve_merged = rb_lookup.merge(performance_vs_expectation, on=["team_id", "game_date"], how="left")
+                new_cols[f"{prefix}_performance_vs_expectation_score"] = pve_merged["performance_vs_expectation_score"].fillna(0.0).values
+            if opponent_adjusted_form is not None:
+                oaf_merged = rb_lookup.merge(opponent_adjusted_form, on=["team_id", "game_date"], how="left")
+                new_cols[f"{prefix}_opponent_adjusted_form_score"] = oaf_merged["opponent_adjusted_form_score"].fillna(0.0).values
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

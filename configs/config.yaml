@@ -310,3 +310,23 @@ season_motivation:
   # section 6.2/9. Not yet adopted -- exposed as its own raw column, not folded
   # into motivation_score, per the "let the tree combine raw signals" lesson.
   recent_trend_lookback_weeks: 4
+  # Behavior-based signals (measure motivation as expressed in actual game
+  # results, not standings/roster inputs) -- see docs/SEASON_MOTIVATION_LOG.md's
+  # Phase 1 Iteration section. Each needs `enabled` above AND its own flag
+  # below, same independent-toggle convention as style_matchup's
+  # enabled/raw_features_enabled pair, so a signal that clears the ablation
+  # bar can ship without re-enabling everything else in this feature.
+  performance_vs_expectation_enabled: false
+  # Rolling window (games) for performance_vs_expectation_score: how many of a
+  # team's own past games feed the rolling mean of (actual margin - Elo-
+  # expected margin). Explored 5/10/15, see log doc.
+  performance_vs_expectation_window: 10
+  opponent_adjusted_form_enabled: false
+  # Rolling window (games) for opponent_adjusted_form_score. Explored 5/10/15,
+  # see log doc.
+  opponent_adjusted_form_window: 10
+  preferred_opponent_delta_enabled: false
+  # How many games before season's end preferred_opponent_delta starts
+  # computing (0.0 outside this window) -- only the seeding endgame carries
+  # this incentive. Explored 15/20/25, see log doc.
+  preferred_opponent_delta_window_games: 20

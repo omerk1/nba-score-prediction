@@ -159,6 +159,16 @@ class SeasonMotivationConfig(BaseModel):
     roster_behavior_weight: float = 1.0
     min_importance_games: int = 5
     recent_trend_lookback_weeks: int = 4
+    # Behavior-based signals (independently toggleable, same convention as
+    # StyleMatchupConfig's enabled/raw_features_enabled pair) -- each requires
+    # `enabled` above to be true AND its own flag, so a signal that clears the
+    # ablation bar can be turned on without re-enabling everything else.
+    performance_vs_expectation_enabled: bool = False
+    performance_vs_expectation_window: int = 10
+    opponent_adjusted_form_enabled: bool = False
+    opponent_adjusted_form_window: int = 10
+    preferred_opponent_delta_enabled: bool = False
+    preferred_opponent_delta_window_games: int = 20
 
 
 class Config(BaseModel):
