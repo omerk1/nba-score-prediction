@@ -390,6 +390,38 @@ pressure/clinch formulas, roster-behavior scoring, config-gating, and the
 `motivation_score` combination formula itself) — this had been missing since
 Phase 1 shipped, unlike every other comparable feature in this repo.
 
+## 8. Magnitude-Weighted Cross-Variant Comparison
+
+Every CV verdict so far (§4, §5, §6.1) used a win-count — how many of 30
+metric-instances favor the treatment — which treats a tiny loss the same as a
+large one. Redone with actual per-metric magnitudes (mean delta vs baseline,
+averaged across the 5 folds, `+` = better for the treatment) across all four
+variants tried:
+
+| variant (win-count) | val diff_mae | **test diff_mae** | val win_acc | test win_acc | val brier | test brier |
+|---|---|---|---|---|---|---|
+| v1 single-threshold (53%) | −0.0018 | **−0.0666** | +0.0023 | −0.0005 | +0.0001 | −0.0017 |
+| v2 raw-decomposition (20%) | −0.0224 | **−0.0658** | +0.0008 | −0.0026 | −0.0012 | −0.0016 |
+| dual-threshold MAX (33%) | −0.0266 | **−0.0628** | −0.0039 | −0.0006 | −0.0005 | −0.0018 |
+| dual-threshold AVG (40%) | −0.0054 | **−0.0766** | 0.0000 | −0.0049 | 0.0000 | −0.0020 |
+
+**Headline: `test_diff_mae` is negative by almost the same amount (−0.063 to
+−0.077) in every single variant, regardless of win-count percentage or
+formula design.** v1's "best" 53% win-count was not driven by a better
+`test_diff_mae` — it was driven by val-side metrics and win_acc, which are
+noisier and flip more favorably by chance from variant to variant (val-side
+deltas above bounce between roughly +0.002 and −0.027 with no consistent
+sign, while test_diff_mae is consistently negative across all four rows).
+This means the win-count differences between variants (20% / 33% / 40% / 53%)
+mostly reflect noise on the val side, not a real difference in how much any
+of them help — **the actual, more damning result is that the one metric
+staying consistently negative across every design tried is the one measuring
+held-out point-differential accuracy.** This reads as a structural cost of
+adding these features at all (more model capacity for the same amount of
+real signal, slightly worse test generalization) rather than something a
+different combination formula is likely to fix. Strengthens "not adopted"
+well beyond what any single win-count number suggested on its own.
+
 ## FINAL SUMMARY (Phase 1)
 
 **Bottom line after the expanding-window CV: the single-split result does not
