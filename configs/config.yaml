@@ -274,13 +274,13 @@ season_motivation:
   # Play-in cutoff seed under the current NBA format -- distance from this seed
   # (not a top-6-only cutoff) drives the standings-pressure component, since a
   # team at 9th/10th is still genuinely fighting for its season.
-  # KNOWN GAP (not yet fixed): this only checks distance from the 10-line, never
-  # the 6-line (direct playoff berth vs needing the play-in) -- a team
-  # comfortably clear of 10th but in a real dogfight for 6th vs 7th currently
-  # reads as low-pressure, which understates its actual stakes. Candidate fix:
-  # distance to whichever of {6, 10} is nearer, not just this one value. Not
-  # yet explored -- see docs/SEASON_MOTIVATION_LOG.md's open next-steps.
   playoff_line_seed: 10
+  # How much a healthy-scratch signal (sitting rest/personal-reasons/coach's-decision
+  # players) suppresses the standings-pressure component of motivation_score.
+  # 1.0 = a team sitting 100% of its full-strength quality reads as zero motivation
+  # regardless of standings pressure. Explored empirically, see
+  # docs/SEASON_MOTIVATION_LOG.md's Phase 1 section.
+  roster_behavior_weight: 1.0
   # A player needs at least this many weekly player_importance snapshots before
   # counting toward full_strength_quality -- guards against a single-game callup's
   # one noisy snapshot skewing the full-strength baseline.
