@@ -467,6 +467,91 @@ approach, not just an unlucky formula choice. Code and 4 tests are kept
 `false` by default) in case a version gated to only fire on larger,
 rarer drops is worth trying later.
 
+## 10. Phase 1 Iteration — Behavioral Signals
+
+Every signal tried through §9 measures an *input* to motivation (standings
+position, roster/rest decisions). §8's diagnosis was structural: `test_diff_mae`
+degraded by roughly the same amount (−0.063 to −0.077) across every formula
+variant of those inputs, regardless of design — a ceiling on what input-based
+signals alone can do. This round tests a different hypothesis: motivation
+should be detectable in recent *game behavior* directly, not just in standings
+and roster state.
+
+### Signals tried
+
+- **`performance_vs_expectation_score`**: rolling mean (window=10 games) of
+  `actual margin − Elo-expected margin` for a team's own past games,
+  normalized by the residual's global standard deviation. The Elo-diff-to-
+  margin conversion scale is fit once via least-squares from this repo's own
+  historical `(elo_diff, actual_margin)` relationship (`_fit_elo_margin_scale`)
+  rather than an external heuristic — this repo's Elo params are independently
+  tuned (`tune_elo.py`), so a borrowed constant wouldn't necessarily match its
+  scale. A team consistently beating its own rating lately reads as
+  motivated; consistently missing it reads as the opposite.
+- **`opponent_adjusted_form_score`**: rolling mean (window=10 games) of a
+  signed, opponent-strength-weighted outcome per game — `opponent_win_pct`
+  for a win, `-(1 - opponent_win_pct)` for a loss. A win over a strong team
+  counts far more than a win over a weak one; a loss to a weak team counts
+  far more negatively than a loss to a strong one.
+
+Both are exposed as independent raw columns (own `..._enabled` flag each,
+same convention as `style_matchup`'s `enabled`/`raw_features_enabled` pair),
+not combined with `motivation_score` or with each other — per the
+raw-decomposition lesson from §5, and to keep each individually ablatable.
+Both reuse `elo_features`' own ratings, recomputed once over full history,
+same pattern `_add_elo_features` already uses.
+
+### CV results (isolating each signal's own marginal effect on top of the
+current base design: `motivation_score` + clinch + `recent_minutes_trend_score`)
+
+| variant | win-count | test_diff_mae mean delta | test_diff_mae per-fold (fold1→5) |
+|---|---|---|---|
+| Signal 1 alone | 17/30 (57%) | **+0.0510** | −0.039, +0.045, +0.083, **+0.124**, +0.042 |
+| Signal 2 alone | 17/30 (57%) | **+0.0444** | +0.011, −0.012, +0.081, +0.092, +0.050 |
+| Both combined | 19/30 (63%) | −0.0076 | +0.041, −0.048, −0.007, +0.023, −0.047 |
+
+(vs. pure baseline — no `season_motivation` at all — win-counts are lower:
+43% / 40% / 57% respectively, and the picture is noisier, since that
+comparison also carries the existing base design's own already-mixed effect,
+not just each signal's marginal contribution. The isolation comparison above
+is the one that actually answers "does adding this signal help.")
+
+### Verdict per signal
+
+- **Signal 1 (`performance_vs_expectation_score`): passes.** `test_diff_mae`
+  improves in 4 of 5 folds, with the one exception (fold1, −0.039) small
+  relative to the four improvements (up to +0.124). This is the first signal
+  in this entire investigation to show a *consistent*, not just
+  average-favorable, `test_diff_mae` improvement across folds — the exact bar
+  every prior signal (combined score, raw decomposition, both dual-threshold
+  variants, recent-minutes-trend) failed on this same check.
+- **Signal 2 (`opponent_adjusted_form_score`): passes**, by the same
+  standard — 4 of 5 folds improve, one small exception (fold2, −0.012).
+- **Both combined: does not clearly pass.** Overall win-count is higher
+  (63%, the best of any variant this session on that measure alone), but the
+  specific bar both signals individually cleared — fold-consistent
+  `test_diff_mae` improvement — breaks down when stacked: only 2 of 5 folds
+  improve, and the mean turns slightly negative. Combining two things that
+  each individually help does not automatically help more; here it appears
+  to help *less* on the metric that mattered most for qualifying either one.
+
+### Structural findings
+
+The combined result is the more informative one, not just a disappointing
+footnote. Two signals both passing individually but failing to combine
+cleanly on `test_diff_mae` specifically (while combining fine, even
+favorably, on other metrics like win-count) is consistent with **redundancy,
+not complementarity** — both signals are built from largely the same
+underlying substrate (recent game outcomes and margins, one filtered through
+Elo expectation, the other through opponent strength), so they likely
+capture overlapping rather than additive information about a team's recent
+form. This doesn't invalidate either signal's individual result, but it
+means the model can't extract a bigger combined win from a bigger combined
+"amount of motivation information" the way two genuinely independent
+signals might. Whether one signal alone (not both) is worth adopting, and if
+so which, is an open question for human review before Phase 2 begins — see
+the note at the end of this document.
+
 ## FINAL SUMMARY (Phase 1)
 
 **Bottom line after the expanding-window CV: the single-split result does not
