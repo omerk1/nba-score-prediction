@@ -1155,7 +1155,16 @@ class FeatureBuilder:
           just these two columns otherwise). See
           `season_motivation.compute_performance_vs_expectation_scores` /
           `compute_opponent_adjusted_form_scores` and
-          docs/SEASON_MOTIVATION_LOG.md's Phase 1 Iteration section.
+          docs/SEASON_MOTIVATION_LOG.md's Phase 1 Iteration section. Neither
+          passed a window-robustness check -- both disabled by default.
+        - `_preferred_opponent_delta` (gated by `preferred_opponent_delta_enabled`):
+          how much a team's Round 1 opponent would change in strength if its
+          own seed shifted by exactly one spot, whichever direction is the
+          larger swing -- 0.0 unless the team currently holds a direct
+          playoff seed (1-8) with at most
+          `preferred_opponent_delta_window_games` games left in the season.
+          See `season_motivation.compute_preferred_opponent_delta_scores` and
+          docs/SEASON_MOTIVATION_LOG.md's Phase 2 section.
 
         Soft-disabled (warn + skip) if the injury features cache is missing --
         the roster-behavior component depends on it. This feature has not yet
@@ -1182,6 +1191,7 @@ class FeatureBuilder:
             compute_team_performance_history,
             compute_performance_vs_expectation_scores,
             compute_opponent_adjusted_form_scores,
+            compute_preferred_opponent_delta_scores,
             _fit_elo_margin_scale,
         )
 
@@ -1250,6 +1260,12 @@ class FeatureBuilder:
                         team_performance, sm_cfg.opponent_adjusted_form_window,
                     )
 
+        preferred_opponent_delta = None
+        if sm_cfg.preferred_opponent_delta_enabled:
+            preferred_opponent_delta = compute_preferred_opponent_delta_scores(
+                all_games, sm_cfg.preferred_opponent_delta_window_games,
+            )
+
         new_cols = {}
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
             lookup = pd.DataFrame({
@@ -1280,6 +1296,10 @@ class FeatureBuilder:
             if opponent_adjusted_form is not None:
                 oaf_merged = rb_lookup.merge(opponent_adjusted_form, on=["team_id", "game_date"], how="left")
                 new_cols[f"{prefix}_opponent_adjusted_form_score"] = oaf_merged["opponent_adjusted_form_score"].fillna(0.0).values
+
+            if preferred_opponent_delta is not None:
+                pod_merged = lookup.merge(preferred_opponent_delta, on=["season_id", "team_id", "snapshot_date"], how="left")
+                new_cols[f"{prefix}_preferred_opponent_delta"] = pod_merged["preferred_opponent_delta"].fillna(0.0).values
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

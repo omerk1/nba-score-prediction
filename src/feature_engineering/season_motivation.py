@@ -32,6 +32,20 @@ input-based signals alone can do. Two further, behavior-based signals:
   record -- a loss to a weak team counts far more than a loss to a strong
   one, and vice versa for wins.
 
+Neither of those two passed a window-robustness check (see
+docs/SEASON_MOTIVATION_LOG.md section 10) -- both remain disabled by default.
+A third, standings-based signal returns to the "input to motivation" side of
+the ledger, but targets a specific documented seeding phenomenon standings
+pressure alone does not capture:
+
+- `compute_preferred_opponent_delta_scores`: how much a team's Round 1
+  opponent would change in strength if its own seed shifted by exactly one
+  spot. A team is sometimes better off NOT chasing the best seed it can
+  reach, because a one-seed swing can swap in a much easier or much harder
+  Round 1 opponent than "higher seed = better" would suggest -- a distinct
+  incentive from plain standings pressure, only live in the season's final
+  stretch and only for teams currently holding a direct playoff seed.
+
 No tiebreakers (head-to-head, division, conference record) are modeled --
 deliberately a continuous proxy, not exact combinatorial seeding logic, per
 docs/SEASON_MOTIVATION_DECISIONS.md.
@@ -172,6 +186,29 @@ def _standings_panel(team_games: pd.DataFrame) -> pd.DataFrame:
     return pd.concat(panels, ignore_index=True)
 
 
+def _ranked_standings_panel(games_df: pd.DataFrame) -> pd.DataFrame:
+    """(season_id, team_id, snapshot_date) -> wins, losses, games_remaining,
+    conference, win_pct, conf_rank. Shared standings computation underneath
+    both `compute_standings_metrics` and `compute_preferred_opponent_delta_scores`
+    -- `conf_rank` is each team's rank within its own conference on that date
+    (1 = best record), broken by `win_pct` only, same as both callers rely on.
+    """
+    team_games = _build_team_game_log(games_df)
+    panel = _standings_panel(team_games)
+    panel["conference"] = panel["team_id"].map(_TEAM_CONFERENCE)
+
+    panel["win_pct"] = np.where(
+        (panel["wins"] + panel["losses"]) > 0,
+        panel["wins"] / (panel["wins"] + panel["losses"]),
+        0.5,
+    )
+
+    grp_cols = ["season_id", "snapshot_date", "conference"]
+    panel = panel.sort_values(grp_cols + ["win_pct"], ascending=[True, True, True, False])
+    panel["conf_rank"] = panel.groupby(grp_cols).cumcount() + 1
+    return panel.sort_values(grp_cols + ["conf_rank"]).reset_index(drop=True)
+
+
 def _pressure_from_seed(panel: pd.DataFrame, grp_cols: list[str], seed: int) -> pd.Series:
     """clip(1 - |GB_from_seed| / (games_remaining + 1), 0, 1) against whichever
     team currently holds `seed` in each (season_id, snapshot_date, conference)
@@ -213,21 +250,8 @@ def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, di
     If `direct_playoff_seed` is omitted, behaves exactly as before
     (single-threshold against `playoff_line_seed` only).
     """
-    team_games = _build_team_game_log(games_df)
-    panel = _standings_panel(team_games)
-    panel["conference"] = panel["team_id"].map(_TEAM_CONFERENCE)
-
-    panel["win_pct"] = np.where(
-        (panel["wins"] + panel["losses"]) > 0,
-        panel["wins"] / (panel["wins"] + panel["losses"]),
-        0.5,
-    )
-
+    panel = _ranked_standings_panel(games_df)
     grp_cols = ["season_id", "snapshot_date", "conference"]
-    panel = panel.sort_values(grp_cols + ["win_pct"], ascending=[True, True, True, False])
-    panel["conf_rank"] = panel.groupby(grp_cols).cumcount() + 1
-
-    panel = panel.sort_values(grp_cols + ["conf_rank"]).reset_index(drop=True)
     g = panel.groupby(grp_cols)
     panel["above_wins"] = g["wins"].shift(1)
     panel["below_wins"] = g["wins"].shift(-1)
@@ -581,4 +605,87 @@ def compute_opponent_adjusted_form_scores(team_games: pd.DataFrame, window: int)
         "team_id": team_games["team_id"].values,
         "game_date": team_games["game_date"].values,
         "opponent_adjusted_form_score": rolling_mean.fillna(0.0).values,
+    })
+
+
+def compute_preferred_opponent_delta_scores(games_df: pd.DataFrame, games_remaining_window: int) -> pd.DataFrame:
+    """Returns (season_id, team_id, snapshot_date) -> preferred_opponent_delta.
+
+    The standard NBA bracket pairs conference seed s against seed (9 - s) in
+    Round 1. This measures how much that Round 1 opponent's strength
+    (`win_pct`, the same point-in-time metric `compute_standings_metrics`
+    already ranks teams by) would change if the team's OWN seed shifted by
+    exactly one spot -- up or down, whichever is the larger swing. A team is
+    sometimes better off NOT chasing the best seed it can reach, because a
+    one-seed swing can swap in a materially easier or harder Round 1
+    opponent than "higher seed = better" suggests -- a real, seed-specific
+    incentive distinct from `motivation_score`'s standings pressure, which
+    only cares about distance from a cutoff, not which specific opponent is
+    on the other side of it.
+
+    Sign: positive means the available one-seed move faces a STRONGER
+    opponent than the current seed does (current draw is already the more
+    favorable of the two -- no incentive to jockey). Negative means the
+    available one-seed move faces a WEAKER opponent (a real incentive to
+    shift seed by exactly one spot, independent of standings pressure
+    alone).
+
+    0.0 whenever: the team is not currently holding a direct playoff seed
+    (conf_rank 1-8 -- seeds 9+ have no fixed Round 1 opponent to compare
+    against), OR more than `games_remaining_window` games remain in the
+    season -- this is a late-season phenomenon; a hypothetical one-seed
+    swing 50 games out is not a meaningful behavioral signal, same
+    reasoning `compute_recent_minutes_trend_scores` uses for its own
+    lookback bound.
+
+    Known, deliberate limitations (a continuous proxy, not exact
+    combinatorial seeding logic, per docs/SEASON_MOTIVATION_DECISIONS.md):
+    - Only a single seed step is considered in each direction (no 2+-seed
+      jumps), even though a team could realistically move further than one
+      seed before the season ends.
+    - The adjacent seed's occupant is read directly off the CURRENT
+      standings snapshot, not resimulated -- swapping seeds would also
+      shift who else in the conference lands at each rank (a full
+      conference picture); this only asks "who is there right now."
+    """
+    panel = _ranked_standings_panel(games_df)
+    join_cols = ["season_id", "snapshot_date", "conference"]
+
+    seed_win_pct = panel[join_cols + ["conf_rank", "win_pct"]].rename(
+        columns={"conf_rank": "seed", "win_pct": "seed_win_pct"}
+    )
+
+    def _opponent_win_pct_at_seed(hypothetical_seed: pd.Series) -> pd.Series:
+        # hypothetical_seed itself must be a real direct-playoff seed (1-8)
+        # for "9 - hypothetical_seed" to mean anything -- e.g. hypothetical
+        # seed 0 (a seed-1 team's invalid "one better") maps to 9 - 0 = 9,
+        # and seed 9 IS a real team (just outside the playoff bracket), so
+        # without this guard the lookup would silently return a real but
+        # meaningless value instead of correctly invalidating that direction.
+        lookup = panel[join_cols].copy()
+        lookup["seed"] = 9 - hypothetical_seed
+        merged = lookup.merge(seed_win_pct, on=join_cols + ["seed"], how="left")
+        return merged["seed_win_pct"].where(hypothetical_seed.between(1, 8).values)
+
+    current_opponent_win_pct = _opponent_win_pct_at_seed(panel["conf_rank"])
+    opponent_win_pct_up = _opponent_win_pct_at_seed(panel["conf_rank"] - 1)
+    opponent_win_pct_down = _opponent_win_pct_at_seed(panel["conf_rank"] + 1)
+
+    # NaN (no team at that hypothetical seed, e.g. seed 0 or seed 9 from the
+    # edge of the 1-8 range) means that direction's swing isn't available --
+    # 0.0 correctly keeps it from ever being picked as the larger-magnitude one.
+    delta_up = (opponent_win_pct_up - current_opponent_win_pct).fillna(0.0)
+    delta_down = (opponent_win_pct_down - current_opponent_win_pct).fillna(0.0)
+    use_up = delta_up.abs() >= delta_down.abs()
+    delta = np.where(use_up, delta_up, delta_down)
+
+    in_playoff_seed = panel["conf_rank"].between(1, 8)
+    late_season = panel["games_remaining"] <= games_remaining_window
+    delta = np.where(in_playoff_seed & late_season, delta, 0.0)
+
+    return pd.DataFrame({
+        "season_id": panel["season_id"].values,
+        "team_id": panel["team_id"].values,
+        "snapshot_date": panel["snapshot_date"].values,
+        "preferred_opponent_delta": delta,
     })

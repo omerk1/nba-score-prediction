@@ -50,6 +50,7 @@ from src.feature_engineering.season_motivation import (
     compute_team_performance_history,
     compute_performance_vs_expectation_scores,
     compute_opponent_adjusted_form_scores,
+    compute_preferred_opponent_delta_scores,
     _fit_elo_margin_scale,
 )
 
@@ -300,6 +301,62 @@ class TestDualThresholdPressure:
         rank5_team = _EAST_15[4]
         row = panel[(panel["team_id"] == rank5_team) & (panel["snapshot_date"] == snapshot_date)]
         assert row["pressure_raw"].iloc[0] == pytest.approx(0.25)
+
+
+class TestPreferredOpponentDelta:
+    """Uses `_fifteen_team_tiers_games` (15 real East teams, distinct win
+    totals, losses=20 for every team) -- same fixture `TestDualThresholdPressure`
+    uses, gives a clean 15-team conference with unambiguous ranks 1-15 and
+    hand-computable win_pct per rank. wins_by_rank = [50, 45, 40, 36, 33, 32,
+    20, 18, 16, 14, 12, 10, 8, 6, 4], win_pct = wins / (wins + 20)."""
+
+    def test_seed_one_delta_is_positive_current_draw_already_favorable(self):
+        """rank1 (seed 1): current R1 opponent is seed 8 (rank8, wp=18/38=
+        0.473684). Moving 'up' to seed 0 is invalid (masked to NaN/0).
+        Moving 'down' to seed 2 swaps in seed 7's occupant (rank7,
+        wp=20/40=0.5) as the new opponent -- STRONGER than seed 8's occupant,
+        so delta is positive: the only available one-seed move makes the
+        draw harder, meaning the current (seed-1) draw is already the more
+        favorable of the two -- no incentive to jockey."""
+        games, snapshot_date = _fifteen_team_tiers_games()
+        panel = compute_preferred_opponent_delta_scores(games, games_remaining_window=200)
+        row = panel[(panel["team_id"] == _EAST_15[0]) & (panel["snapshot_date"] == snapshot_date)]
+        expected = 20 / 40 - 18 / 38
+        assert row["preferred_opponent_delta"].iloc[0] == pytest.approx(expected, abs=1e-6)
+
+    def test_seed_eight_delta_is_negative_a_weaker_opponent_is_available(self):
+        """rank8 (seed 8): current R1 opponent is seed 1 (rank1, wp=50/70=
+        0.714286). Moving 'up' to seed 7 swaps in seed 2's occupant (rank2,
+        wp=45/65=0.692308) -- WEAKER than seed 1's occupant. Moving 'down' to
+        seed 9 is not a real direct-playoff seed (masked to NaN/0). The larger
+        (only real) swing is negative: a real incentive to move up exactly one
+        seed for an easier draw, independent of standings pressure alone."""
+        games, snapshot_date = _fifteen_team_tiers_games()
+        panel = compute_preferred_opponent_delta_scores(games, games_remaining_window=200)
+        row = panel[(panel["team_id"] == _EAST_15[7]) & (panel["snapshot_date"] == snapshot_date)]
+        expected = 45 / 65 - 50 / 70
+        assert row["preferred_opponent_delta"].iloc[0] == pytest.approx(expected, abs=1e-6)
+        assert row["preferred_opponent_delta"].iloc[0] < 0
+
+    def test_seeds_outside_direct_playoff_range_are_zero(self):
+        """rank9..15 (conf_rank 9-15) hold no direct playoff seed (1-8) --
+        no fixed Round 1 opponent exists to compare against, so
+        preferred_opponent_delta must be exactly 0.0 for all of them."""
+        games, snapshot_date = _fifteen_team_tiers_games()
+        panel = compute_preferred_opponent_delta_scores(games, games_remaining_window=200)
+        for team_id in _EAST_15[8:]:
+            row = panel[(panel["team_id"] == team_id) & (panel["snapshot_date"] == snapshot_date)]
+            assert row["preferred_opponent_delta"].iloc[0] == 0.0
+
+    def test_games_remaining_window_gates_to_zero(self):
+        """Same seed-1 team as the first test above, but with a window
+        smaller than its actual games_remaining at the snapshot date --
+        the late-season gate must force the delta to exactly 0.0 even
+        though the team holds a direct playoff seed."""
+        games, snapshot_date = _fifteen_team_tiers_games()
+        panel = compute_preferred_opponent_delta_scores(games, games_remaining_window=-1)
+        row = panel[(panel["team_id"] == _EAST_15[0]) & (panel["snapshot_date"] == snapshot_date)]
+        assert row["preferred_opponent_delta"].iloc[0] == 0.0
 
 
 class TestRosterBehaviorScores:
@@ -610,7 +667,8 @@ def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line
                   roster_behavior_weight: float = 1.0, min_importance_games: int = 5,
                   recent_trend_lookback_weeks: int = 4,
                   performance_vs_expectation_enabled: bool = False, performance_vs_expectation_window: int = 10,
-                  opponent_adjusted_form_enabled: bool = False, opponent_adjusted_form_window: int = 10):
+                  opponent_adjusted_form_enabled: bool = False, opponent_adjusted_form_window: int = 10,
+                  preferred_opponent_delta_enabled: bool = False, preferred_opponent_delta_window_games: int = 20):
     mock_cfg = MagicMock()
     mock_cfg.data_paths = MagicMock(raw_db=str(raw_db_path))
     mock_cfg.season_motivation = MagicMock(
@@ -622,6 +680,8 @@ def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line
         performance_vs_expectation_window=performance_vs_expectation_window,
         opponent_adjusted_form_enabled=opponent_adjusted_form_enabled,
         opponent_adjusted_form_window=opponent_adjusted_form_window,
+        preferred_opponent_delta_enabled=preferred_opponent_delta_enabled,
+        preferred_opponent_delta_window_games=preferred_opponent_delta_window_games,
     )
     mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path), importance_weights=IMPORTANCE_WEIGHTS)
     mock_cfg.datasets_loading = MagicMock(
@@ -751,3 +811,51 @@ class TestAddSeasonMotivationFeatures:
         ]["pressure_raw"].iloc[0]
 
         assert result.loc[0, "home_team_motivation_score"] == pytest.approx(pressure)
+
+    @patch("src.feature_engineering.feature_builder.load_config")
+    def test_preferred_opponent_delta_wired_end_to_end(self, mock_config, tmp_path):
+        """preferred_opponent_delta_enabled=True must produce
+        home_team_preferred_opponent_delta matching
+        compute_preferred_opponent_delta_scores directly -- same rank-1 team,
+        same fixture, same expected value as
+        TestPreferredOpponentDelta.test_seed_one_delta_is_positive_current_draw_already_favorable."""
+        raw_db = tmp_path / "nba_api.sqlite"
+        injury_db = tmp_path / "injury_features.sqlite"
+        games, snapshot_date = _fifteen_team_tiers_games()
+        _write_game_db(raw_db, games)
+        _write_injury_features_db(injury_db, importance_rows=[], injury_rows=[])
+        mock_config.return_value = _mock_config(
+            raw_db, injury_db, enabled=True,
+            preferred_opponent_delta_enabled=True, preferred_opponent_delta_window_games=200,
+        )
+        # _fifteen_team_tiers_games schedules ~650 days of games (15 teams x
+        # up to 70 games each, one game per calendar day) before its anchor
+        # snapshot_date -- well past _mock_config's hardcoded 2024-06-01
+        # test_end_date, which would truncate the loaded games and silently
+        # change the standings. Extend it past the fixture's own snapshot_date.
+        mock_config.return_value.datasets_loading.test_end_date = (snapshot_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+        df = _query_df(snapshot_date, home_team_id=_EAST_15[0], away_team_id=_FILLER_WEST_TEAM)
+        fb = FeatureBuilder(rolling_windows=[3])
+        result = fb._add_season_motivation_features(df)
+
+        expected = 20 / 40 - 18 / 38
+        assert result.loc[0, "home_team_preferred_opponent_delta"] == pytest.approx(expected, abs=1e-6)
+
+    @patch("src.feature_engineering.feature_builder.load_config")
+    def test_preferred_opponent_delta_disabled_by_default_omits_column(self, mock_config, tmp_path):
+        """preferred_opponent_delta_enabled=False (the default) must not add
+        the column at all -- matches performance_vs_expectation/
+        opponent_adjusted_form's own disabled-by-default convention."""
+        raw_db = tmp_path / "nba_api.sqlite"
+        injury_db = tmp_path / "injury_features.sqlite"
+        games, snapshot_date = _fifteen_team_tiers_games()
+        _write_game_db(raw_db, games)
+        _write_injury_features_db(injury_db, importance_rows=[], injury_rows=[])
+        mock_config.return_value = _mock_config(raw_db, injury_db, enabled=True)
+
+        df = _query_df(snapshot_date, home_team_id=_EAST_15[0], away_team_id=_FILLER_WEST_TEAM)
+        fb = FeatureBuilder(rolling_windows=[3])
+        result = fb._add_season_motivation_features(df)
+
+        assert "home_team_preferred_opponent_delta" not in result.columns
