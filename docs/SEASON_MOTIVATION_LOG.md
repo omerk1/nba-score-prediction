@@ -552,6 +552,62 @@ signals might. Whether one signal alone (not both) is worth adopting, and if
 so which, is an open question for human review before Phase 2 begins — see
 the note at the end of this document.
 
+### Window sensitivity sweep
+
+Both signals passed their individual `test_diff_mae` fold-consistency bar at
+`window=10`. Before treating that as a real, adoptable effect, the same
+isolated CV (each signal alone, on top of the current base design, compared
+against `season_motivation_recenttrend_{fold}_treatment`) was repeated at
+`window=5` and `window=15` for each signal — 4 sweep points × 5 folds = 20
+additional runs.
+
+| variant | win-count | test_diff_mae mean delta | test_diff_mae per-fold (fold1→5) | folds improved |
+|---|---|---|---|---|
+| Signal 1, window=5 | 17/30 (57%) | −0.0384 | +0.040, −0.097, −0.005, −0.102, −0.028 | 1/5 |
+| Signal 1, window=10 | 17/30 (57%) | **+0.0510** | −0.039, +0.045, +0.083, +0.124, +0.042 | 4/5 |
+| Signal 1, window=15 | 19/30 (63%) | −0.0586 | +0.010, −0.057, −0.074, −0.130, −0.042 | 1/5 |
+| Signal 2, window=5 | 13/30 (43%) | −0.0386 | +0.016, −0.072, −0.024, −0.089, −0.024 | 1/5 |
+| Signal 2, window=10 | 17/30 (57%) | **+0.0444** | +0.011, −0.012, +0.081, +0.092, +0.050 | 4/5 |
+| Signal 2, window=15 | 15/30 (50%) | −0.0498 | +0.042, −0.067, −0.064, −0.111, −0.049 | 1/5 |
+
+Full test suite: 150/150 passing after this sweep. `configs/config.yaml`
+verified byte-identical to HEAD once the sweep finished (each of the 20 runs
+patches and restores it in a `finally` block, same pattern as prior CV
+drivers).
+
+**This result overturns the window=10 verdict above.** It is not a case of
+window=10 being merely the best of three reasonable choices — at both
+neighboring windows, for both signals, `test_diff_mae` flips to *consistently
+negative* (4 of 5 folds worse, not better) and the magnitude is comparable to
+or larger than window=10's improvement. The fold that stays positive is the
+same one (fold1, the most recent test period) at window=5/15 for every
+sweep point, while the folds that were the source of window=10's "passes"
+(folds 2–5, or fold3–5 for Signal 2) all reverse sign. Win-count alone does
+not surface this — `pve_w15`'s 63% win-count is the highest of any variant in
+this entire investigation, yet its `test_diff_mae` fold-consistency is the
+worst (1/5), which is exactly the win-count-vs-magnitude divergence §8
+warned about.
+
+A signal whose fold-consistency bar is only cleared at one specific window
+value out of three tested, and is cleared *oppositely* (worst not just
+absent) at the neighboring values, is much more consistent with **window=10
+having been a favorable draw against these specific 5 expanding-window
+splits** than with a real, robust behavioral-motivation effect at that
+window. Nothing here rules out that a real effect exists at window=10
+specifically for some substantive reason (e.g. it happens to match a
+meaningful "recent stretch" length), but that would need a mechanism, not
+just this data, to be credible — the sweep as run cannot distinguish "real
+effect, oddly window-specific" from "overfit to one hyperparameter draw."
+
+**Revised verdict:** Signal 1 and Signal 2 do **not** pass a window-robustness
+check. Neither is being enabled by default. Both remain in the codebase,
+fully implemented and tested, gated behind their own `..._enabled` flags
+(default `false`) — available for future re-evaluation (e.g. against a larger
+number of folds, or a fold-count/window combination chosen to reduce this
+kind of single-draw sensitivity) but not adopted on the strength of the
+current evidence. This finding, not the individually-passing window=10
+result above, is the one that should inform any adoption decision.
+
 ## FINAL SUMMARY (Phase 1)
 
 **Bottom line after the expanding-window CV: the single-split result does not
