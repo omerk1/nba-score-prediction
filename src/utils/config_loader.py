@@ -146,21 +146,17 @@ class OnOffSplitsConfig(BaseModel):
 
 class SeasonMotivationConfig(BaseModel):
     """Season motivation / seeding-incentive features (see
-    docs/SEASON_MOTIVATION_DECISIONS.md). Unlike OnOffSplitsConfig/StyleMatchupConfig,
-    this has no `db_path` of its own — it reads directly from `data_paths.raw_db`
-    (standings + schedule, derived from the `game` table) and `injury_features.db_path`
-    (`player_importance` + `player_injuries`, already backfilled). `enabled` gates
-    feature_builder.py's _add_season_motivation_features, mirroring the same
-    not-yet-adopted convention as OnOffSplitsConfig/StyleMatchupConfig."""
+    docs/SEASON_MOTIVATION_DECISIONS.md). No `db_path` of its own — reads
+    `data_paths.raw_db` (standings/schedule, from `game`) and
+    `injury_features.db_path` (`player_importance`/`player_injuries`)
+    directly. `enabled` gates `_add_season_motivation_features`."""
     enabled: bool = False
-    # Gates motivation_score/games_to_clinch_ceiling/games_to_clinch_floor/
-    # recent_minutes_trend_score -- the original Phase 1 combined-score design,
-    # which did NOT clear the ablation bar (see docs/SEASON_MOTIVATION_LOG.md
-    # FINAL SUMMARY). Separate from `enabled` (which just gates the whole
-    # function) so a signal that DID clear the bar (e.g. preferred_opponent_delta)
-    # can ship without dragging these non-adopted columns in too. Defaults to
-    # True (the original always-on behavior) so this is opt-out, not opt-in --
-    # nothing changes unless a config explicitly sets this to False.
+    # Gates motivation_score/games_to_clinch_*/recent_minutes_trend_score --
+    # the original Phase 1 design, which did NOT clear the ablation bar (see
+    # log FINAL SUMMARY). Separate from `enabled` so a signal that DID clear
+    # the bar (preferred_opponent_delta) can ship without these non-adopted
+    # columns. Defaults True (opt-out, not opt-in) so nothing changes unless
+    # explicitly set False.
     motivation_score_enabled: bool = True
     playoff_line_seed: int = 10
     direct_playoff_seed: Optional[int] = None

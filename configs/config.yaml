@@ -264,86 +264,50 @@ on_off_splits:
 
 season_motivation:
   # Season motivation / seeding-incentive features. See
-  # docs/SEASON_MOTIVATION_DECISIONS.md for the full data audit and formulas.
+  # docs/SEASON_MOTIVATION_DECISIONS.md (formulas) and
+  # docs/SEASON_MOTIVATION_LOG.md (CV results + adoption decisions).
   #
-  # `enabled` gates feature_builder.py's _add_season_motivation_features, mirroring
-  # OnOffSplitsConfig/StyleMatchupConfig's own `enabled` field. Same convention: a
-  # feature only flips to `true` after a conclusive ablation-pipeline comparison --
-  # true here because preferred_opponent_delta below cleared that bar (see
-  # docs/SEASON_MOTIVATION_LOG.md FINAL SUMMARY); every other sub-signal this
-  # flag would otherwise expose is independently gated back off by its own
-  # `..._enabled` flag (motivation_score_enabled, performance_vs_expectation_enabled,
-  # opponent_adjusted_form_enabled), none of which cleared the bar.
+  # Gates _add_season_motivation_features. true because preferred_opponent_delta
+  # below cleared the ablation bar; every other sub-signal is independently
+  # gated back off by its own flag (none of those cleared the bar).
   enabled: true
-  # Gates motivation_score/games_to_clinch_ceiling/games_to_clinch_floor/
-  # recent_minutes_trend_score specifically -- the original Phase 1 design,
-  # which did NOT clear the ablation bar across nine sections of formula
-  # variants (see docs/SEASON_MOTIVATION_LOG.md FINAL SUMMARY). false so
-  # `enabled` above can stay true for preferred_opponent_delta (which DID
-  # clear the bar) without also shipping these non-adopted columns.
+  # Gates motivation_score/games_to_clinch_ceiling/floor/recent_minutes_trend_score
+  # (the original Phase 1 design -- did not clear the bar, see log FINAL SUMMARY).
   motivation_score_enabled: false
-  # Play-in cutoff seed under the current NBA format -- distance from this seed
-  # (not a top-6-only cutoff) drives the standings-pressure component, since a
-  # team at 9th/10th is still genuinely fighting for its season.
+  # Play-in cutoff seed (not top-6-only) -- a team at 9th/10th is still fighting.
   playoff_line_seed: 10
-  # Direct-playoff-berth cutoff (top-6, no play-in needed). If set, pressure is
-  # a weighted average (direct_playoff_weight below) of the pressure computed
-  # against playoff_line_seed and against this seed, so a team safely clear of
-  # missing the postseason but in a real fight for 6th vs 7th picks up some
-  # pressure instead of reading as zero. null = single-threshold
-  # (playoff_line_seed only), the original Phase 1 behavior. Not yet adopted --
-  # being explored, see docs/SEASON_MOTIVATION_LOG.md section 6.1. (An earlier
-  # `max(pressure_postseason, pressure_direct)` combination was CV-tested and
-  # found to systematically bias pressure upward while compressing its
-  # variance -- worse for the model, not better -- so a weighted average
-  # replaced it.)
+  # Direct-berth (top-6) cutoff. If set, pressure is a weighted average
+  # (direct_playoff_weight) of pressure vs. playoff_line_seed and vs. this seed.
+  # null = single-threshold (the adopted behavior). Not adopted -- log section 6.1
+  # (a max-based combination was tried first, found to bias pressure upward while
+  # compressing variance; weighted-average fixed that but still fell short).
   direct_playoff_seed: null
-  # Weight on the direct-berth (6-seed) pressure in the average above; the
-  # remainder (1 - this) weights the postseason (10-seed) pressure. Only used
-  # when direct_playoff_seed is set. 0.5 = equal weight, the value CV-tested
-  # so far.
+  # Weight on the direct-berth pressure above (remainder weights postseason
+  # pressure). Only used when direct_playoff_seed is set. 0.5 = only value tried.
   direct_playoff_weight: 0.5
-  # How much a healthy-scratch signal (sitting rest/personal-reasons/coach's-decision
-  # players) suppresses the standings-pressure component of motivation_score.
-  # 1.0 = a team sitting 100% of its full-strength quality reads as zero motivation
-  # regardless of standings pressure. Explored empirically, see
-  # docs/SEASON_MOTIVATION_LOG.md's Phase 1 section.
+  # How much sitting healthy-scratch players suppresses motivation_score's
+  # standings-pressure term. 1.0 = fully suppresses. Explored empirically, log doc.
   roster_behavior_weight: 1.0
-  # A player needs at least this many weekly player_importance snapshots before
-  # counting toward full_strength_quality -- guards against a single-game callup's
-  # one noisy snapshot skewing the full-strength baseline.
+  # Min weekly player_importance snapshots before a player counts toward
+  # full_strength_quality -- guards against a 1-game callup skewing the baseline.
   min_importance_games: 5
-  # Lookback window (weeks) for recent_minutes_trend_score: how much a player's
-  # CURRENT cumulative minutes-per-game average has dropped vs their own
-  # cumulative average from this many weeks earlier. Catches gradual,
-  # undeclared minutes reductions ("soft" tanking) that roster_behavior_score's
-  # single-night Out-list snapshot cannot -- see docs/SEASON_MOTIVATION_LOG.md
-  # section 6.2/9. Not yet adopted -- exposed as its own raw column, not folded
-  # into motivation_score, per the "let the tree combine raw signals" lesson.
+  # Lookback (weeks) for recent_minutes_trend_score: current vs. N-weeks-ago
+  # cumulative minutes average, catching gradual "soft" tanking
+  # roster_behavior_score's single-night snapshot misses. Not adopted, log 6.2/9.
   recent_trend_lookback_weeks: 4
-  # Behavior-based signals (measure motivation as expressed in actual game
-  # results, not standings/roster inputs) -- see docs/SEASON_MOTIVATION_LOG.md's
-  # Phase 1 Iteration section. Each needs `enabled` above AND its own flag
-  # below, same independent-toggle convention as style_matchup's
-  # enabled/raw_features_enabled pair, so a signal that clears the ablation
-  # bar can ship without re-enabling everything else in this feature.
+  # Behavior-based signals (motivation as expressed in game results, not
+  # standings/roster inputs) -- log's Phase 1 Iteration section. Each needs
+  # `enabled` above AND its own flag, style_matchup's enabled/raw_features_enabled
+  # convention. Passed CV at window=10 but inverted at neighboring windows
+  # (5/15) -- not adopted.
   performance_vs_expectation_enabled: false
-  # Rolling window (games) for performance_vs_expectation_score: how many of a
-  # team's own past games feed the rolling mean of (actual margin - Elo-
-  # expected margin). Explored 5/10/15, see log doc.
-  performance_vs_expectation_window: 10
+  performance_vs_expectation_window: 10  # rolling window, games. Explored 5/10/15.
   opponent_adjusted_form_enabled: false
-  # Rolling window (games) for opponent_adjusted_form_score. Explored 5/10/15,
-  # see log doc.
-  opponent_adjusted_form_window: 10
-  # Passed the fold-consistency bar AND held up across all three tested
-  # windows (15/20/25) -- unlike performance_vs_expectation/
-  # opponent_adjusted_form above, which only passed at one window value and
-  # inverted at the others. See docs/SEASON_MOTIVATION_LOG.md section 11 and
-  # FINAL SUMMARY. Adopted.
+  opponent_adjusted_form_window: 10      # rolling window, games. Explored 5/10/15.
+  # Passed CV AND held up across all three tested windows (15/20/25), unlike
+  # the two signals above. Log section 11 + FINAL SUMMARY. Adopted.
   preferred_opponent_delta_enabled: true
-  # How many games before season's end preferred_opponent_delta starts
-  # computing (0.0 outside this window) -- only the seeding endgame carries
-  # this incentive. Explored 15/20/25 (all three passed); 20 chosen as the
-  # middle value with no CV-based tiebreaker favoring 15 or 25 specifically.
+  # Games before season's end this starts computing (0.0 outside it) -- only
+  # the seeding endgame carries this incentive. All of 15/20/25 passed; 20
+  # chosen as the middle value, no CV tiebreaker favored 15 or 25.
   preferred_opponent_delta_window_games: 20

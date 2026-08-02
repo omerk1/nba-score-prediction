@@ -1,54 +1,35 @@
 """
 Season motivation & seeding-incentive computation.
 
-See docs/SEASON_MOTIVATION_DECISIONS.md for the full data audit and the
-justification behind every formula below. Two independent pieces:
+See docs/SEASON_MOTIVATION_DECISIONS.md for formulas and
+docs/SEASON_MOTIVATION_LOG.md for CV results / adoption decisions.
 
-- `compute_standings_metrics`: point-in-time conference standings, derived
-  entirely from the already-complete `game` table (no new backfill -- every
-  season this touches is a completed historical season, so its full schedule
-  is already sitting in that table). Produces the standings-pressure component
-  of `motivation_score` plus `games_to_clinch_ceiling`/`games_to_clinch_floor`.
-- `compute_roster_behavior_scores`: per (team, game night), how much of a
-  team's full-strength quality is sitting out for a non-injury reason (rest,
-  personal reasons, coach's decision, ...), reusing the existing
-  `player_importance` table and `_get_importance_map`-style weighted formula
-  from `src/news_scraping/pipeline.py` rather than inventing a second one.
-- `compute_recent_minutes_trend_scores`: per (team, game night), how much of a
-  team's full-strength quality has seen a genuine multi-week minutes
-  reduction -- catches "soft" tanking the single-night snapshot above cannot.
+Standings/roster inputs (not adopted -- log FINAL SUMMARY):
+- `compute_standings_metrics`: point-in-time conference standings from the
+  already-complete `game` table. Feeds `motivation_score`'s pressure term
+  plus `games_to_clinch_ceiling`/`games_to_clinch_floor`.
+- `compute_roster_behavior_scores`: per (team, game night), how much
+  full-strength quality is sitting out for a non-injury reason, reusing
+  `_get_importance_map`'s weighted formula from `src/news_scraping/pipeline.py`.
+- `compute_recent_minutes_trend_scores`: per (team, game night), genuine
+  multi-week minutes reduction -- catches "soft" tanking the single-night
+  snapshot above cannot.
 
-Every signal above measures an *input* to motivation (standings position,
-roster/rest decisions) rather than motivation as expressed in actual game
-behavior. docs/SEASON_MOTIVATION_LOG.md section 8 found this structural
-gap: `test_diff_mae` degrades by roughly the same amount across every
-formula variant of the signals above, which reads as a ceiling on what
-input-based signals alone can do. Two further, behavior-based signals:
-
-- `compute_performance_vs_expectation_scores`: rolling (actual margin - Elo-
-  implied expected margin), i.e. is a team over/underperforming its own
-  rating lately, independent of standings or roster state.
+Behavior-based signals (log section 10, not adopted -- passed CV at one
+window value, inverted at neighboring ones):
+- `compute_performance_vs_expectation_scores`: rolling (actual margin -
+  Elo-implied expected margin).
 - `compute_opponent_adjusted_form_scores`: rolling opponent-strength-weighted
-  record -- a loss to a weak team counts far more than a loss to a strong
-  one, and vice versa for wins.
+  record.
 
-Neither of those two passed a window-robustness check (see
-docs/SEASON_MOTIVATION_LOG.md section 10) -- both remain disabled by default.
-A third, standings-based signal returns to the "input to motivation" side of
-the ledger, but targets a specific documented seeding phenomenon standings
-pressure alone does not capture:
-
+Seeding-target signal (log section 11, adopted):
 - `compute_preferred_opponent_delta_scores`: how much a team's Round 1
-  opponent would change in strength if its own seed shifted by exactly one
-  spot. A team is sometimes better off NOT chasing the best seed it can
-  reach, because a one-seed swing can swap in a much easier or much harder
-  Round 1 opponent than "higher seed = better" would suggest -- a distinct
-  incentive from plain standings pressure, only live in the season's final
-  stretch and only for teams currently holding a direct playoff seed.
+  opponent would change in strength if its own seed shifted by one spot --
+  passed CV *and* held up across all three tested windows, unlike the two
+  behavior-based signals above.
 
-No tiebreakers (head-to-head, division, conference record) are modeled --
-deliberately a continuous proxy, not exact combinatorial seeding logic, per
-docs/SEASON_MOTIVATION_DECISIONS.md.
+No tiebreakers modeled (head-to-head, division, conference record) --
+deliberate continuous proxy, per docs/SEASON_MOTIVATION_DECISIONS.md.
 """
 
 import sqlite3
@@ -228,27 +209,14 @@ def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, di
     games_to_clinch_ceiling, games_to_clinch_floor. See
     docs/SEASON_MOTIVATION_DECISIONS.md sections 2a/3 for the formulas.
 
-    `direct_playoff_seed` (optional): if given, pressure_raw is a weighted
-    average of the pressure computed against `playoff_line_seed` (the
-    play-in/postseason cutoff) and against `direct_playoff_seed` (the
-    direct-berth cutoff, e.g. 6th) -- `direct_playoff_weight` on the direct
-    line, `1 - direct_playoff_weight` on the postseason line. A team safely
-    clear of missing the postseason (far from the 10-line) but in a real
-    fight for a direct berth (close to the 6-line) now correctly picks up
-    some pressure, which a single-threshold formula misses entirely.
-
-    An earlier version used `max(pressure_postseason, pressure_direct)`
-    instead of a weighted average -- CV-tested and found to perform worse
-    (33% of metrics favoring it vs the single-threshold design's 53%, see
-    docs/SEASON_MOTIVATION_LOG.md section 6.1). Diagnosed directly: `max`
-    systematically shifts pressure upward (mean 0.776 -> 0.851 on real data)
-    while COMPRESSING variance (std 0.310 -> 0.260) -- less differentiating
-    signal for the model to split on, not more. A weighted average leaves the
-    mean nearly unchanged (0.778) with much less variance loss (std 0.282),
-    so it was adopted as the combination rule instead of `max`.
-
-    If `direct_playoff_seed` is omitted, behaves exactly as before
-    (single-threshold against `playoff_line_seed` only).
+    `direct_playoff_seed` (optional): weighted average (`direct_playoff_weight`)
+    of pressure vs. `playoff_line_seed` (postseason cutoff) and vs. this seed
+    (direct-berth cutoff, e.g. 6th) -- so a team clear of missing the
+    postseason but fighting for a direct berth picks up pressure a
+    single-threshold formula misses. `null` = single-threshold (unchanged
+    behavior). A `max()`-based combination was tried first and found to bias
+    pressure upward while compressing variance (log section 6.1); weighted
+    average fixed that but is still not adopted.
     """
     panel = _ranked_standings_panel(games_df)
     grp_cols = ["season_id", "snapshot_date", "conference"]
@@ -337,11 +305,8 @@ def compute_roster_behavior_scores(
         for row in team_pairs.itertuples():
             season_start = season_start_by_season.get(row.season_id)
             if season_start is None:
-                # Playoff-tagged season_ids (e.g. 42023) show up here as val/test
-                # warm-up context (see datasets_loading.context_season_types) --
-                # they never reach the scored dataset, and standings/motivation
-                # aren't meaningful once a team is already in the playoffs, so a
-                # safe 0.0 default (not a crash) is correct here.
+                # Playoff-tagged season_ids (e.g. 42023) are val/test warm-up
+                # context only (never scored) -- safe 0.0 default, not a crash.
                 results.append((team_id, row.game_date, 0.0))
                 continue
             pool = team_importance[
@@ -385,29 +350,22 @@ def compute_recent_minutes_trend_scores(
 ) -> pd.DataFrame:
     """Returns (team_id, game_date) -> recent_minutes_trend_score in [0, 1]:
     how much of a team's full-strength quality has seen a meaningful minutes
-    REDUCTION over the last `lookback_weeks` weeks, relative to each
-    rostered player's own cumulative season average from before that window.
+    REDUCTION over the last `lookback_weeks` weeks, vs. each rostered
+    player's own cumulative average from before that window.
 
-    This is a genuinely different, complementary signal to
-    `roster_behavior_score` -- that one is a single-night snapshot (only sees
-    a player officially tagged `Out` for a non-injury reason *tonight*) and
-    completely misses "soft" tanking: a coach quietly cutting a star's
-    minutes over several games without ever putting them on the injury
-    report. See docs/SEASON_MOTIVATION_LOG.md section 6.2.
+    Complementary to `roster_behavior_score` -- that one is a single-night
+    snapshot and misses "soft" tanking (minutes quietly cut over several
+    games without an official injury-report tag). See log section 6.2.
 
-    Data note: `player_importance` stores CUMULATIVE per-game averages with
-    no games-played column, so an exact "just this week's minutes" isn't
-    directly computable via a delta-of-cumulative-averages formula without a
-    new backfill. This instead compares each player's CURRENT cumulative
-    average against their own cumulative average from a snapshot at or
-    before `lookback_weeks` earlier -- a real drop over that window still
-    means their minutes have genuinely been trending down recently, without
-    needing to isolate one exact week.
+    `player_importance` stores CUMULATIVE per-game averages with no
+    games-played column, so an exact "this week's minutes" isn't directly
+    computable -- instead compares current cumulative average against the
+    snapshot from `lookback_weeks` earlier; a real drop still signals
+    genuinely reduced recent minutes without isolating one exact week.
 
-    0.0 (not NaN) whenever there's no player_importance history yet, or no
-    player has both a current and a prior-enough snapshot to compare -- both
-    are legitimate "nothing to report" cases, not missing-data cases (same
-    convention `compute_roster_behavior_scores` uses).
+    0.0 (not NaN) when there's no history or no prior-enough snapshot to
+    compare -- legitimate "nothing to report," same convention
+    `compute_roster_behavior_scores` uses.
     """
     with sqlite3.connect(f"file:{injury_db_path}?mode=ro", uri=True) as conn:
         importance = pd.read_sql_query(
@@ -486,16 +444,10 @@ def compute_recent_minutes_trend_scores(
 def _fit_elo_margin_scale(games_df: pd.DataFrame, elo_ratings: pd.DataFrame, home_advantage: float) -> float:
     """Least-squares slope (through the origin) of actual point margin on
     Elo rating gap, fit once from the full historical game set. Elo's own
-    logistic formula converts a rating gap into a WIN PROBABILITY, not a
-    point margin -- there is no single universally-correct "N Elo points per
-    point of margin" constant, and this repo's own Elo params (k_factor,
-    home_advantage, mov_multiplier, season_regression) are independently
-    tuned via tune_elo.py, not borrowed from any external source, so an
-    external conversion constant (e.g. a commonly-cited 538-style heuristic)
-    would not necessarily match THIS repo's own tuned rating scale. Deriving
-    the scale directly from this repo's own historical
-    (elo_diff, actual_margin) relationship keeps the conversion internally
-    consistent instead of importing an unvalidated external number.
+    formula converts a rating gap into a win probability, not a point
+    margin -- no universal "N Elo points per point of margin" constant
+    exists, and this repo's Elo params are independently tuned (`tune_elo.py`),
+    so a borrowed external constant wouldn't match this repo's own scale.
     """
     merged = games_df.merge(elo_ratings, on="GAME_ID", how="inner")
     elo_diff = merged["home_team_elo"] + home_advantage - merged["away_team_elo"]
@@ -508,20 +460,16 @@ def _fit_elo_margin_scale(games_df: pd.DataFrame, elo_ratings: pd.DataFrame, hom
 def compute_team_performance_history(
     games_df: pd.DataFrame, elo_ratings: pd.DataFrame, home_advantage: float, elo_margin_scale: float,
 ) -> pd.DataFrame:
-    """Long-format per-team-per-game log of actual vs. Elo-expected margin and
-    opponent-adjusted outcome, from each team's own perspective -- the shared
-    input both `compute_performance_vs_expectation_scores` and
-    `compute_opponent_adjusted_form_scores` build their rolling windows from.
+    """Long-format per-team-per-game log of actual vs. Elo-expected margin
+    and opponent-adjusted outcome, from each team's own perspective -- shared
+    input for `compute_performance_vs_expectation_scores` and
+    `compute_opponent_adjusted_form_scores`.
 
-    Per (team, game): `actual_margin` (signed, from this team's perspective),
-    `expected_margin` (`elo_diff * elo_margin_scale`, this team's Elo gap
-    including home advantage if applicable), `performance_residual`
-    (actual - expected), `win`, `opponent_win_pct` (the OPPONENT's own
-    cumulative win percentage entering this same game -- point-in-time,
-    leakage-safe, computed from games strictly before this one), and
-    `signed_opponent_adjusted_score` (`opponent_win_pct` for a win, negative
-    `1 - opponent_win_pct` for a loss -- a win over a strong team counts a lot,
-    a loss to a weak team counts a lot negatively, and vice versa).
+    Per (team, game): `actual_margin` (signed), `expected_margin`
+    (`elo_diff * elo_margin_scale`), `performance_residual` (actual -
+    expected), `win`, `opponent_win_pct` (opponent's own cumulative win% pre-game,
+    leakage-safe), `signed_opponent_adjusted_score` (`opponent_win_pct` for a
+    win, `-(1 - opponent_win_pct)` for a loss).
     """
     merged = games_df.merge(elo_ratings, on="GAME_ID", how="left")
     home = pd.DataFrame({
@@ -565,17 +513,11 @@ def compute_team_performance_history(
 
 
 def compute_performance_vs_expectation_scores(team_games: pd.DataFrame, window: int) -> pd.DataFrame:
-    """Returns (team_id, game_date) -> performance_vs_expectation_score: the
-    rolling mean of (actual_margin - Elo-expected_margin) over each team's
-    previous `window` games (never including tonight's own result --
-    `shift(1)`, same pre-game convention `_add_rolling_features` uses),
-    normalized by the global standard deviation of that residual so the
-    score is roughly scale-free regardless of `elo_margin_scale`'s magnitude.
-
-    A team consistently beating its own Elo expectation lately (positive) is
-    behaviorally "trying"; consistently underperforming it (negative,
-    especially against weaker opponents) is a demotivation signal standings
-    position and roster/rest decisions cannot see.
+    """Returns (team_id, game_date) -> performance_vs_expectation_score:
+    rolling mean of (actual_margin - Elo-expected_margin) over the previous
+    `window` games (`shift(1)`, excludes tonight's own result -- same
+    pre-game convention `_add_rolling_features` uses), normalized by the
+    residual's global std so the score is roughly scale-free.
     """
     team_games = team_games.sort_values(["team_id", "game_date"])
     rolling_mean = team_games.groupby("team_id")["performance_residual"].transform(
@@ -612,41 +554,28 @@ def compute_preferred_opponent_delta_scores(games_df: pd.DataFrame, games_remain
     """Returns (season_id, team_id, snapshot_date) -> preferred_opponent_delta.
 
     The standard NBA bracket pairs conference seed s against seed (9 - s) in
-    Round 1. This measures how much that Round 1 opponent's strength
-    (`win_pct`, the same point-in-time metric `compute_standings_metrics`
-    already ranks teams by) would change if the team's OWN seed shifted by
-    exactly one spot -- up or down, whichever is the larger swing. A team is
-    sometimes better off NOT chasing the best seed it can reach, because a
-    one-seed swing can swap in a materially easier or harder Round 1
-    opponent than "higher seed = better" suggests -- a real, seed-specific
-    incentive distinct from `motivation_score`'s standings pressure, which
-    only cares about distance from a cutoff, not which specific opponent is
-    on the other side of it.
+    Round 1. Measures how much that Round 1 opponent's `win_pct` would
+    change if the team's OWN seed shifted by one spot (up or down,
+    whichever is the larger swing) -- a team can be better off NOT chasing
+    the best seed it can reach, since a one-seed swing can swap in a
+    materially easier or harder opponent than "higher seed = better"
+    suggests. Distinct from `motivation_score`, which only cares about
+    distance from a cutoff, not which specific opponent is on the other side.
 
-    Sign: positive means the available one-seed move faces a STRONGER
-    opponent than the current seed does (current draw is already the more
-    favorable of the two -- no incentive to jockey). Negative means the
-    available one-seed move faces a WEAKER opponent (a real incentive to
-    shift seed by exactly one spot, independent of standings pressure
-    alone).
+    Sign: positive = the available move faces a STRONGER opponent (current
+    draw already favorable, no incentive to jockey). Negative = a WEAKER
+    opponent (real incentive to shift one seed).
 
-    0.0 whenever: the team is not currently holding a direct playoff seed
-    (conf_rank 1-8 -- seeds 9+ have no fixed Round 1 opponent to compare
-    against), OR more than `games_remaining_window` games remain in the
-    season -- this is a late-season phenomenon; a hypothetical one-seed
-    swing 50 games out is not a meaningful behavioral signal, same
-    reasoning `compute_recent_minutes_trend_scores` uses for its own
+    0.0 unless holding a direct playoff seed (conf_rank 1-8) within
+    `games_remaining_window` of season's end -- a late-season phenomenon,
+    same reasoning `compute_recent_minutes_trend_scores` uses for its
     lookback bound.
 
-    Known, deliberate limitations (a continuous proxy, not exact
-    combinatorial seeding logic, per docs/SEASON_MOTIVATION_DECISIONS.md):
-    - Only a single seed step is considered in each direction (no 2+-seed
-      jumps), even though a team could realistically move further than one
-      seed before the season ends.
-    - The adjacent seed's occupant is read directly off the CURRENT
-      standings snapshot, not resimulated -- swapping seeds would also
-      shift who else in the conference lands at each rank (a full
-      conference picture); this only asks "who is there right now."
+    Known limitations (continuous proxy, not exact combinatorial seeding
+    logic, per docs/SEASON_MOTIVATION_DECISIONS.md): only a single seed
+    step considered (no 2+-seed jumps); the adjacent seed's occupant is
+    read off the current snapshot, not resimulated (no full conference
+    picture).
     """
     panel = _ranked_standings_panel(games_df)
     join_cols = ["season_id", "snapshot_date", "conference"]

@@ -1101,81 +1101,25 @@ class FeatureBuilder:
     def _add_season_motivation_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Season motivation / seeding-incentive features. See
-        docs/SEASON_MOTIVATION_DECISIONS.md for the full data audit and the
-        justification behind every formula referenced below.
+        `season_motivation.py`'s module docstring for what each signal
+        computes and docs/SEASON_MOTIVATION_LOG.md for CV results/adoption.
 
-        Standings and remaining-schedule data need no new backfill or DB table --
-        every season this touches is already a completed historical season, so its
-        full schedule is already sitting in `game` (the point-in-time standings
-        computation only ever reads `game_date`/team-id columns from "future" rows
-        relative to a given training row, never their outcome columns -- schedule
-        metadata, not leaked results). Delegates the actual computation to
-        `src/feature_engineering/season_motivation.py`, same separation
-        `_add_elo_features` uses for its own sequential, season-wide computation.
+        No new backfill needed -- standings/schedule derive in-memory from
+        `game` (only `game_date`/team-id columns read from "future" rows,
+        never outcomes). Delegates to `src/feature_engineering/season_motivation.py`,
+        same separation `_add_elo_features` uses.
 
-        Adds, for each of home_team/away_team (all of the below except
-        `_preferred_opponent_delta` are additionally gated by
-        `season_motivation.motivation_score_enabled` -- the original Phase 1
-        design did not clear the ablation bar across nine sections of formula
-        variants, see docs/SEASON_MOTIVATION_LOG.md's FINAL SUMMARY, so
-        `enabled` can stay true for `preferred_opponent_delta` alone without
-        dragging these non-adopted columns in too):
-        - `_motivation_score` [0,1]: `pressure_raw * (1 - roster_behavior_weight *
-          roster_behavior_score)` -- standings pressure (a weighted average,
-          per `direct_playoff_weight`, of distance from
-          `season_motivation.playoff_line_seed` -- the postseason/play-in
-          cutoff -- and from `direct_playoff_seed` -- the direct-berth cutoff,
-          optional, omit for single-threshold behavior -- see
-          `season_motivation.compute_standings_metrics` -- moderated by games
-          remaining) suppressed by how much of the team's full-strength quality
-          is sitting out tonight for a non-injury reason (rest, personal reasons,
-          coach's decision -- see `season_motivation.NON_INJURY_REASONS`). Only
-          captures *behavioral* tanking (visibly sitting healthy players) --
-          pure strategic tanking (playing normally but not trying) has no
-          available data source and is a known, documented limitation, not
-          attempted here.
-        - `_games_to_clinch_ceiling` / `_games_to_clinch_floor`: continuous
-          countdowns (0 = locked), not binary flags -- games until this team can
-          no longer improve past / fall behind its current seed, using raw
-          win-count projections to season's end against the team currently
-          ranked one spot above/below. No head-to-head/division/conference
-          tiebreakers are modeled -- deliberately a continuous proxy, not exact
-          combinatorial seeding logic.
-        - `_recent_minutes_trend_score` [0,1]: a separate, complementary raw
-          column (not folded into `motivation_score`) -- how much of the
-          team's full-strength quality has seen a genuine minutes REDUCTION
-          over the last `season_motivation.recent_trend_lookback_weeks` weeks
-          (each rostered player's current cumulative average vs. their own
-          cumulative average from that many weeks earlier). Catches "soft"
-          tanking (undeclared, gradual minutes cuts) that
-          `_roster_behavior_score`'s single-night snapshot cannot -- see
-          `season_motivation.compute_recent_minutes_trend_scores` and
-          docs/SEASON_MOTIVATION_LOG.md section 6.2/9.
-        - `_performance_vs_expectation_score` / `_opponent_adjusted_form_score`
-          (each independently gated by its own `..._enabled` flag): behavior-
-          based signals measuring motivation as expressed in actual recent
-          game results, not standings/roster inputs -- rolling (actual margin
-          - Elo-expected margin) and rolling opponent-strength-weighted record
-          respectively, over `..._window` games. Reuse `elo_features`' own
-          ratings (requires `elo_features.enabled=true`, soft-warns and skips
-          just these two columns otherwise). See
-          `season_motivation.compute_performance_vs_expectation_scores` /
-          `compute_opponent_adjusted_form_scores` and
-          docs/SEASON_MOTIVATION_LOG.md's Phase 1 Iteration section. Neither
-          passed a window-robustness check -- both disabled by default.
-        - `_preferred_opponent_delta` (gated by `preferred_opponent_delta_enabled`):
-          how much a team's Round 1 opponent would change in strength if its
-          own seed shifted by exactly one spot, whichever direction is the
-          larger swing -- 0.0 unless the team currently holds a direct
-          playoff seed (1-8) with at most
-          `preferred_opponent_delta_window_games` games left in the season.
-          See `season_motivation.compute_preferred_opponent_delta_scores` and
-          docs/SEASON_MOTIVATION_LOG.md's Phase 2 section.
+        Adds, for each of home_team/away_team: `_motivation_score`,
+        `_games_to_clinch_ceiling`/`_games_to_clinch_floor`,
+        `_recent_minutes_trend_score` (all gated by
+        `motivation_score_enabled` -- not adopted, see FINAL SUMMARY);
+        `_performance_vs_expectation_score`/`_opponent_adjusted_form_score`
+        (each independently gated, requires `elo_features.enabled=true` --
+        not adopted, failed a window-robustness check); and
+        `_preferred_opponent_delta` (gated by `preferred_opponent_delta_enabled`
+        -- adopted, the only signal to pass that check).
 
-        Soft-disabled (warn + skip) if the injury features cache is missing --
-        the roster-behavior component depends on it. This feature has not yet
-        gone through the ablation-pipeline adoption process, matching
-        `_add_on_off_splits_features`/`_add_style_matchup_features`'s convention.
+        Soft-disabled (warn + skip) if the injury features cache is missing.
         """
         cfg = load_config()
         if not cfg.season_motivation or not cfg.season_motivation.enabled:
