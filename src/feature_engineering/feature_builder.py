@@ -1113,7 +1113,13 @@ class FeatureBuilder:
         `src/feature_engineering/season_motivation.py`, same separation
         `_add_elo_features` uses for its own sequential, season-wide computation.
 
-        Adds, for each of home_team/away_team:
+        Adds, for each of home_team/away_team (all of the below except
+        `_preferred_opponent_delta` are additionally gated by
+        `season_motivation.motivation_score_enabled` -- the original Phase 1
+        design did not clear the ablation bar across nine sections of formula
+        variants, see docs/SEASON_MOTIVATION_LOG.md's FINAL SUMMARY, so
+        `enabled` can stay true for `preferred_opponent_delta` alone without
+        dragging these non-adopted columns in too):
         - `_motivation_score` [0,1]: `pressure_raw * (1 - roster_behavior_weight *
           roster_behavior_score)` -- standings pressure (a weighted average,
           per `direct_playoff_weight`, of distance from
@@ -1206,29 +1212,33 @@ class FeatureBuilder:
         finally:
             loader.close()
 
-        standings = compute_standings_metrics(
-            all_games, sm_cfg.playoff_line_seed, sm_cfg.direct_playoff_seed, sm_cfg.direct_playoff_weight,
-        )
-
-        season_start_by_season = (
-            all_games.assign(GAME_DATE=pd.to_datetime(all_games["GAME_DATE"]).dt.normalize())
-            .groupby("SEASON_ID")["GAME_DATE"].min().to_dict()
-        )
-
         game_dates = pd.to_datetime(df["GAME_DATE"]).dt.normalize()
-        team_dates = pd.concat([
-            pd.DataFrame({"team_id": df["HOME_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
-            pd.DataFrame({"team_id": df["AWAY_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
-        ], ignore_index=True)
 
-        roster_behavior = compute_roster_behavior_scores(
-            team_dates, str(injury_db), cfg.injury_features.importance_weights,
-            sm_cfg.min_importance_games, season_start_by_season,
-        )
-        recent_minutes_trend = compute_recent_minutes_trend_scores(
-            team_dates, str(injury_db), cfg.injury_features.importance_weights,
-            sm_cfg.min_importance_games, season_start_by_season, sm_cfg.recent_trend_lookback_weeks,
-        )
+        standings = None
+        roster_behavior = None
+        recent_minutes_trend = None
+        if sm_cfg.motivation_score_enabled:
+            standings = compute_standings_metrics(
+                all_games, sm_cfg.playoff_line_seed, sm_cfg.direct_playoff_seed, sm_cfg.direct_playoff_weight,
+            )
+
+            season_start_by_season = (
+                all_games.assign(GAME_DATE=pd.to_datetime(all_games["GAME_DATE"]).dt.normalize())
+                .groupby("SEASON_ID")["GAME_DATE"].min().to_dict()
+            )
+            team_dates = pd.concat([
+                pd.DataFrame({"team_id": df["HOME_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
+                pd.DataFrame({"team_id": df["AWAY_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
+            ], ignore_index=True)
+
+            roster_behavior = compute_roster_behavior_scores(
+                team_dates, str(injury_db), cfg.injury_features.importance_weights,
+                sm_cfg.min_importance_games, season_start_by_season,
+            )
+            recent_minutes_trend = compute_recent_minutes_trend_scores(
+                team_dates, str(injury_db), cfg.injury_features.importance_weights,
+                sm_cfg.min_importance_games, season_start_by_season, sm_cfg.recent_trend_lookback_weeks,
+            )
 
         performance_vs_expectation = None
         opponent_adjusted_form = None
@@ -1273,22 +1283,23 @@ class FeatureBuilder:
                 "team_id": df[team_col].values,
                 "snapshot_date": game_dates.values,
             })
-            standings_merged = lookup.merge(standings, on=["season_id", "team_id", "snapshot_date"], how="left")
-
             rb_lookup = pd.DataFrame({"team_id": df[team_col].values, "game_date": game_dates.values})
-            rb_merged = rb_lookup.merge(roster_behavior, on=["team_id", "game_date"], how="left")
-            roster_score = rb_merged["roster_behavior_score"].fillna(0.0).values
 
-            trend_merged = rb_lookup.merge(recent_minutes_trend, on=["team_id", "game_date"], how="left")
-            trend_score = trend_merged["recent_minutes_trend_score"].fillna(0.0).values
+            if standings is not None:
+                standings_merged = lookup.merge(standings, on=["season_id", "team_id", "snapshot_date"], how="left")
+                rb_merged = rb_lookup.merge(roster_behavior, on=["team_id", "game_date"], how="left")
+                roster_score = rb_merged["roster_behavior_score"].fillna(0.0).values
 
-            pressure = standings_merged["pressure_raw"].fillna(0.0).values
-            motivation = np.clip(pressure * (1 - sm_cfg.roster_behavior_weight * roster_score), 0.0, 1.0)
+                trend_merged = rb_lookup.merge(recent_minutes_trend, on=["team_id", "game_date"], how="left")
+                trend_score = trend_merged["recent_minutes_trend_score"].fillna(0.0).values
 
-            new_cols[f"{prefix}_motivation_score"] = motivation
-            new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
-            new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
-            new_cols[f"{prefix}_recent_minutes_trend_score"] = trend_score
+                pressure = standings_merged["pressure_raw"].fillna(0.0).values
+                motivation = np.clip(pressure * (1 - sm_cfg.roster_behavior_weight * roster_score), 0.0, 1.0)
+
+                new_cols[f"{prefix}_motivation_score"] = motivation
+                new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
+                new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
+                new_cols[f"{prefix}_recent_minutes_trend_score"] = trend_score
 
             if performance_vs_expectation is not None:
                 pve_merged = rb_lookup.merge(performance_vs_expectation, on=["team_id", "game_date"], how="left")

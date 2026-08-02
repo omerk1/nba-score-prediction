@@ -270,7 +270,14 @@ season_motivation:
   # OnOffSplitsConfig/StyleMatchupConfig's own `enabled` field. Same convention: a
   # feature only flips to `true` after a conclusive ablation-pipeline comparison.
   # Stays `false` until that happens.
-  enabled: false
+  enabled: true
+  # Gates motivation_score/games_to_clinch_ceiling/games_to_clinch_floor/
+  # recent_minutes_trend_score specifically -- the original Phase 1 design,
+  # which did NOT clear the ablation bar across nine sections of formula
+  # variants (see docs/SEASON_MOTIVATION_LOG.md FINAL SUMMARY). false so
+  # `enabled` above can stay true for preferred_opponent_delta (which DID
+  # clear the bar) without also shipping these non-adopted columns.
+  motivation_score_enabled: false
   # Play-in cutoff seed under the current NBA format -- distance from this seed
   # (not a top-6-only cutoff) drives the standings-pressure component, since a
   # team at 9th/10th is still genuinely fighting for its season.
@@ -325,8 +332,14 @@ season_motivation:
   # Rolling window (games) for opponent_adjusted_form_score. Explored 5/10/15,
   # see log doc.
   opponent_adjusted_form_window: 10
-  preferred_opponent_delta_enabled: false
+  # Passed the fold-consistency bar AND held up across all three tested
+  # windows (15/20/25) -- unlike performance_vs_expectation/
+  # opponent_adjusted_form above, which only passed at one window value and
+  # inverted at the others. See docs/SEASON_MOTIVATION_LOG.md section 11 and
+  # FINAL SUMMARY. Adopted.
+  preferred_opponent_delta_enabled: true
   # How many games before season's end preferred_opponent_delta starts
   # computing (0.0 outside this window) -- only the seeding endgame carries
-  # this incentive. Explored 15/20/25, see log doc.
+  # this incentive. Explored 15/20/25 (all three passed); 20 chosen as the
+  # middle value with no CV-based tiebreaker favoring 15 or 25 specifically.
   preferred_opponent_delta_window_games: 20

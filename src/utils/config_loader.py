@@ -153,6 +153,15 @@ class SeasonMotivationConfig(BaseModel):
     feature_builder.py's _add_season_motivation_features, mirroring the same
     not-yet-adopted convention as OnOffSplitsConfig/StyleMatchupConfig."""
     enabled: bool = False
+    # Gates motivation_score/games_to_clinch_ceiling/games_to_clinch_floor/
+    # recent_minutes_trend_score -- the original Phase 1 combined-score design,
+    # which did NOT clear the ablation bar (see docs/SEASON_MOTIVATION_LOG.md
+    # FINAL SUMMARY). Separate from `enabled` (which just gates the whole
+    # function) so a signal that DID clear the bar (e.g. preferred_opponent_delta)
+    # can ship without dragging these non-adopted columns in too. Defaults to
+    # True (the original always-on behavior) so this is opt-out, not opt-in --
+    # nothing changes unless a config explicitly sets this to False.
+    motivation_score_enabled: bool = True
     playoff_line_seed: int = 10
     direct_playoff_seed: Optional[int] = None
     direct_playoff_weight: float = 0.5

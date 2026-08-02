@@ -662,7 +662,8 @@ class TestRollingBehaviorScores:
         assert last_row["opponent_adjusted_form_score"] == pytest.approx(-0.5)
 
 
-def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line_seed: int = 10,
+def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, motivation_score_enabled: bool = True,
+                  playoff_line_seed: int = 10,
                   direct_playoff_seed: int = None, direct_playoff_weight: float = 0.5,
                   roster_behavior_weight: float = 1.0, min_importance_games: int = 5,
                   recent_trend_lookback_weeks: int = 4,
@@ -672,7 +673,8 @@ def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, playoff_line
     mock_cfg = MagicMock()
     mock_cfg.data_paths = MagicMock(raw_db=str(raw_db_path))
     mock_cfg.season_motivation = MagicMock(
-        enabled=enabled, playoff_line_seed=playoff_line_seed, direct_playoff_seed=direct_playoff_seed,
+        enabled=enabled, motivation_score_enabled=motivation_score_enabled,
+        playoff_line_seed=playoff_line_seed, direct_playoff_seed=direct_playoff_seed,
         direct_playoff_weight=direct_playoff_weight,
         roster_behavior_weight=roster_behavior_weight, min_importance_games=min_importance_games,
         recent_trend_lookback_weeks=recent_trend_lookback_weeks,
@@ -859,3 +861,32 @@ class TestAddSeasonMotivationFeatures:
         result = fb._add_season_motivation_features(df)
 
         assert "home_team_preferred_opponent_delta" not in result.columns
+
+    @patch("src.feature_engineering.feature_builder.load_config")
+    def test_motivation_score_enabled_false_omits_base_columns_but_keeps_preferred_opponent_delta(self, mock_config, tmp_path):
+        """motivation_score_enabled=False must drop motivation_score/
+        games_to_clinch_ceiling/games_to_clinch_floor/recent_minutes_trend_score
+        (the non-adopted Phase 1 design) while preferred_opponent_delta (which
+        DID clear the ablation bar) still computes normally -- this is exactly
+        the config this branch ships: enabled=true, motivation_score_enabled=
+        false, preferred_opponent_delta_enabled=true."""
+        raw_db = tmp_path / "nba_api.sqlite"
+        injury_db = tmp_path / "injury_features.sqlite"
+        games, snapshot_date = _fifteen_team_tiers_games()
+        _write_game_db(raw_db, games)
+        _write_injury_features_db(injury_db, importance_rows=[], injury_rows=[])
+        mock_config.return_value = _mock_config(
+            raw_db, injury_db, enabled=True, motivation_score_enabled=False,
+            preferred_opponent_delta_enabled=True, preferred_opponent_delta_window_games=200,
+        )
+        mock_config.return_value.datasets_loading.test_end_date = (snapshot_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
+        df = _query_df(snapshot_date, home_team_id=_EAST_15[0], away_team_id=_FILLER_WEST_TEAM)
+        fb = FeatureBuilder(rolling_windows=[3])
+        result = fb._add_season_motivation_features(df)
+
+        for col in ["home_team_motivation_score", "home_team_games_to_clinch_ceiling",
+                    "home_team_games_to_clinch_floor", "home_team_recent_minutes_trend_score"]:
+            assert col not in result.columns
+        expected = 20 / 40 - 18 / 38
+        assert result.loc[0, "home_team_preferred_opponent_delta"] == pytest.approx(expected, abs=1e-6)
