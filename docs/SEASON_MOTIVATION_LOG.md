@@ -692,8 +692,21 @@ matters, not a case needing a tie-break sweep the way §10's window=10 did.
 signal in the entire investigation to clear the fold-consistency bar
 robustly, on a signal deliberately built around a specific, well-defined
 mechanism (which team occupies the adjacent seed) rather than a general
-"more motivation information" attempt.** Whether to enable it, and at which
-window value, is left for human review — see the FINAL SUMMARY below.
+"more motivation information" attempt.**
+
+### Adopted
+
+`preferred_opponent_delta_enabled=true`, `preferred_opponent_delta_window_games=20`
+(the middle of the three passing values — no CV-based tiebreaker favored 15
+or 25 specifically). `season_motivation.enabled=true` to allow this, with the
+new `motivation_score_enabled=false` (see FINAL SUMMARY) keeping every
+non-adopted §1-10 column out of the shipped feature set.
+
+A real (non-CV) training run on the default split confirmed the direction
+holds outside the CV harness: `preferred_opponent_delta_treatment` in
+`outputs/experiments.csv` — test diff_mae 11.54 (vs. 11.592 on the
+style-matchup-raw-fingerprint baseline it sits on top of), test win_acc
+67.8% (vs. 65.96%), val win_acc 66.3% (vs. 65.88%).
 
 ## FINAL SUMMARY
 
@@ -704,11 +717,13 @@ One thing cleared the bar robustly. Here is the complete picture.
 
 ### What's enabled vs. parked, and why
 
-**Nothing is enabled by default in this branch's committed config** —
-`season_motivation.enabled` is `false`, and every sub-signal's own
-`..._enabled` flag is `false`. That has not changed as a result of this
-investigation; every adoption decision below is a recommendation for human
-sign-off, not a change already made.
+**One signal is enabled in this branch's committed config:**
+`season_motivation.enabled=true`, `preferred_opponent_delta_enabled=true`
+(`preferred_opponent_delta_window_games=20`). Every other sub-signal's own
+`..._enabled` flag — including the new `motivation_score_enabled`, added
+specifically to keep the non-adopted Phase 1 columns (`motivation_score`,
+`games_to_clinch_ceiling`/`games_to_clinch_floor`, `recent_minutes_trend_score`)
+out of the shipped feature set now that `enabled` is `true` — stays `false`.
 
 **Parked (implemented, tested, disabled by default, available for future
 reconsideration):**
@@ -739,17 +754,19 @@ reconsideration):**
   (2-5) reversed sign entirely. Both remain implemented, tested, and
   disabled.
 
-**Recommended for enabling, pending your decision — `preferred_opponent_delta`
-(§11):** the one signal in this entire investigation that passed the
-fold-consistency bar *and* held up under the window-robustness check that
-killed §10's signals. All three tested windows (15/20/25) show `test_diff_mae`
-improving in the same 4 of 5 folds, with the same small exception (fold1)
-each time, and comparable improvement magnitude across all three — the
-opposite of §10's window=10-only, sign-inverting pattern. This is a
-meaningfully different kind of evidence: a specific, mechanistically-motivated
-signal (which team occupies the adjacent seed) that a same-shaped robustness
-check couldn't break. Nothing has been enabled in config as a result of this
-finding — see "Open questions" below for what's left for you to decide.
+**Enabled — `preferred_opponent_delta` (§11), window=20:** the one signal in
+this entire investigation that passed the fold-consistency bar *and* held up
+under the window-robustness check that killed §10's signals. All three
+tested windows (15/20/25) show `test_diff_mae` improving in the same 4 of 5
+folds, with the same small exception (fold1) each time, and comparable
+improvement magnitude across all three — the opposite of §10's
+window=10-only, sign-inverting pattern. This is a meaningfully different
+kind of evidence: a specific, mechanistically-motivated signal (which team
+occupies the adjacent seed) that a same-shaped robustness check couldn't
+break. A real training run on the default split confirmed the direction
+outside the CV harness (`preferred_opponent_delta_treatment` in
+`outputs/experiments.csv`: test diff_mae 11.54 vs. 11.592 baseline, test
+win_acc 67.8% vs. 65.96%).
 
 ### Honest CV picture across the whole investigation
 
@@ -783,23 +800,23 @@ identified in §8 persists for `motivation_score` and its variants; it does
 not appear to constrain `preferred_opponent_delta`, which measures something
 else entirely.
 
-### Recommended next step
+### Next step
 
-Enable `preferred_opponent_delta_enabled=true` with one of the three
-window values that passed (15, 20, or 25 — all three are legitimate,
-fold-consistent choices; §11 has the full breakdown of win-count vs.
-magnitude tradeoffs between them). Everything else stays disabled. This is
-a recommendation, not an action taken — `configs/config.yaml` has not been
-changed by this investigation.
+Done: `preferred_opponent_delta_enabled=true`, window=20, confirmed with a
+real training run (see above). Everything else stays disabled. The natural
+follow-up, if further work on this feature area is wanted, is open question
+3 below — whether the standings/roster-input approach is worth another
+attempt at all, given nine sections of formula variants failed to move it.
 
 ### Open questions for human review
 
-1. **Which window value for `preferred_opponent_delta`?** All three of
-   15/20/25 pass equally on fold-consistency; window=25 has the best
-   win-count (70%), window=15 the largest raw `test_diff_mae` improvement.
-   No CV-based tiebreaker distinguishes them further — this is a judgment
-   call (e.g. window=20 as the original brief's suggested default, if no
-   other consideration favors one of the others).
+1. ~~Which window value for `preferred_opponent_delta`?~~ **Resolved:**
+   window=20 chosen (all three of 15/20/25 pass equally on fold-consistency;
+   window=25 has the best win-count, window=15 the largest raw
+   `test_diff_mae` improvement; 20 was picked as the original brief's
+   suggested default with no CV-based tiebreaker favoring 15 or 25
+   specifically). If either of the other two windows is ever revisited,
+   §11 has the full breakdown.
 2. **Should `preferred_opponent_delta` ship alone, or is further validation
    (more folds, a different date range) warranted before enabling anything,**
    given that §10's signals also looked convincing on 5 folds before the
