@@ -268,8 +268,12 @@ season_motivation:
   #
   # `enabled` gates feature_builder.py's _add_season_motivation_features, mirroring
   # OnOffSplitsConfig/StyleMatchupConfig's own `enabled` field. Same convention: a
-  # feature only flips to `true` after a conclusive ablation-pipeline comparison.
-  # Stays `false` until that happens.
+  # feature only flips to `true` after a conclusive ablation-pipeline comparison --
+  # true here because preferred_opponent_delta below cleared that bar (see
+  # docs/SEASON_MOTIVATION_LOG.md FINAL SUMMARY); every other sub-signal this
+  # flag would otherwise expose is independently gated back off by its own
+  # `..._enabled` flag (motivation_score_enabled, performance_vs_expectation_enabled,
+  # opponent_adjusted_form_enabled), none of which cleared the bar.
   enabled: true
   # Gates motivation_score/games_to_clinch_ceiling/games_to_clinch_floor/
   # recent_minutes_trend_score specifically -- the original Phase 1 design,
