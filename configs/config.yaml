@@ -261,3 +261,53 @@ on_off_splits:
   # on/off "swing" from a 4-minute sample. See feature_builder.py's
   # _add_on_off_splits_features docstring.
   min_on_off_minutes: 50.0
+
+season_motivation:
+  # Season motivation / seeding-incentive features. See
+  # docs/SEASON_MOTIVATION_DECISIONS.md (formulas) and
+  # docs/SEASON_MOTIVATION_LOG.md (CV results + adoption decisions).
+  #
+  # Gates _add_season_motivation_features. true because preferred_opponent_delta
+  # below cleared the ablation bar; every other sub-signal is independently
+  # gated back off by its own flag (none of those cleared the bar).
+  enabled: true
+  # Gates motivation_score/games_to_clinch_ceiling/floor/recent_minutes_trend_score
+  # (the original Phase 1 design -- did not clear the bar, see log FINAL SUMMARY).
+  motivation_score_enabled: false
+  # Play-in cutoff seed (not top-6-only) -- a team at 9th/10th is still fighting.
+  playoff_line_seed: 10
+  # Direct-berth (top-6) cutoff. If set, pressure is a weighted average
+  # (direct_playoff_weight) of pressure vs. playoff_line_seed and vs. this seed.
+  # null = single-threshold (the adopted behavior). Not adopted -- log section 6.1
+  # (a max-based combination was tried first, found to bias pressure upward while
+  # compressing variance; weighted-average fixed that but still fell short).
+  direct_playoff_seed: null
+  # Weight on the direct-berth pressure above (remainder weights postseason
+  # pressure). Only used when direct_playoff_seed is set. 0.5 = only value tried.
+  direct_playoff_weight: 0.5
+  # How much sitting healthy-scratch players suppresses motivation_score's
+  # standings-pressure term. 1.0 = fully suppresses. Explored empirically, log doc.
+  roster_behavior_weight: 1.0
+  # Min weekly player_importance snapshots before a player counts toward
+  # full_strength_quality -- guards against a 1-game callup skewing the baseline.
+  min_importance_games: 5
+  # Lookback (weeks) for recent_minutes_trend_score: current vs. N-weeks-ago
+  # cumulative minutes average, catching gradual "soft" tanking
+  # roster_behavior_score's single-night snapshot misses. Not adopted, log 6.2/9.
+  recent_trend_lookback_weeks: 4
+  # Behavior-based signals (motivation as expressed in game results, not
+  # standings/roster inputs) -- log's Phase 1 Iteration section. Each needs
+  # `enabled` above AND its own flag, style_matchup's enabled/raw_features_enabled
+  # convention. Passed CV at window=10 but inverted at neighboring windows
+  # (5/15) -- not adopted.
+  performance_vs_expectation_enabled: false
+  performance_vs_expectation_window: 10  # rolling window, games. Explored 5/10/15.
+  opponent_adjusted_form_enabled: false
+  opponent_adjusted_form_window: 10      # rolling window, games. Explored 5/10/15.
+  # Passed CV AND held up across all three tested windows (15/20/25), unlike
+  # the two signals above. Log section 11 + FINAL SUMMARY. Adopted.
+  preferred_opponent_delta_enabled: true
+  # Games before season's end this starts computing (0.0 outside it) -- only
+  # the seeding endgame carries this incentive. All of 15/20/25 passed; 20
+  # chosen as the middle value, no CV tiebreaker favored 15 or 25.
+  preferred_opponent_delta_window_games: 20

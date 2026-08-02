@@ -93,6 +93,7 @@ class FeatureBuilder:
         df = self._add_style_matchup_features(df)
         df = self._add_style_fingerprint_features(df)
         df = self._add_on_off_splits_features(df)
+        df = self._add_season_motivation_features(df)
 
         feature_cols = self._get_feature_columns(df)
         nan_games = df[feature_cols].isna().any(axis=1).sum()
@@ -1094,6 +1095,166 @@ class FeatureBuilder:
         new_cols["missing_player_on_off_impact_diff"] = (
             new_cols["home_team_missing_player_on_off_impact"] - new_cols["away_team_missing_player_on_off_impact"]
         )
+
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_season_motivation_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Season motivation / seeding-incentive features. See
+        `season_motivation.py`'s module docstring for what each signal
+        computes and docs/SEASON_MOTIVATION_LOG.md for CV results/adoption.
+
+        No new backfill needed -- standings/schedule derive in-memory from
+        `game` (only `game_date`/team-id columns read from "future" rows,
+        never outcomes). Delegates to `src/feature_engineering/season_motivation.py`,
+        same separation `_add_elo_features` uses.
+
+        Adds, for each of home_team/away_team: `_motivation_score`,
+        `_games_to_clinch_ceiling`/`_games_to_clinch_floor`,
+        `_recent_minutes_trend_score` (all gated by
+        `motivation_score_enabled` -- not adopted, see FINAL SUMMARY);
+        `_performance_vs_expectation_score`/`_opponent_adjusted_form_score`
+        (each independently gated, requires `elo_features.enabled=true` --
+        not adopted, failed a window-robustness check); and
+        `_preferred_opponent_delta` (gated by `preferred_opponent_delta_enabled`
+        -- adopted, the only signal to pass that check).
+
+        Soft-disabled (warn + skip) if the injury features cache is missing.
+        """
+        cfg = load_config()
+        if not cfg.season_motivation or not cfg.season_motivation.enabled:
+            return df
+
+        injury_db = Path(cfg.injury_features.db_path) if cfg.injury_features else None
+        if injury_db is None or not injury_db.exists():
+            logger.warning(
+                f"Injury features DB not found at {injury_db} -- season motivation's "
+                "roster-behavior component depends on it, skipping season motivation features."
+            )
+            return df
+
+        from src.data_processing.data_loader import NBADataLoader
+        from src.feature_engineering.season_motivation import (
+            compute_standings_metrics,
+            compute_roster_behavior_scores,
+            compute_recent_minutes_trend_scores,
+            compute_team_performance_history,
+            compute_performance_vs_expectation_scores,
+            compute_opponent_adjusted_form_scores,
+            compute_preferred_opponent_delta_scores,
+            _fit_elo_margin_scale,
+        )
+
+        sm_cfg = cfg.season_motivation
+        loader = NBADataLoader(db_path=cfg.data_paths.raw_db)
+        try:
+            all_games = loader.load_games(
+                start_date=cfg.datasets_loading.data_start_date,
+                end_date=cfg.datasets_loading.test_end_date,
+                allowed_season_types=cfg.datasets_loading.allowed_season_types,
+            )
+        finally:
+            loader.close()
+
+        game_dates = pd.to_datetime(df["GAME_DATE"]).dt.normalize()
+
+        standings = None
+        roster_behavior = None
+        recent_minutes_trend = None
+        if sm_cfg.motivation_score_enabled:
+            standings = compute_standings_metrics(
+                all_games, sm_cfg.playoff_line_seed, sm_cfg.direct_playoff_seed, sm_cfg.direct_playoff_weight,
+            )
+
+            season_start_by_season = (
+                all_games.assign(GAME_DATE=pd.to_datetime(all_games["GAME_DATE"]).dt.normalize())
+                .groupby("SEASON_ID")["GAME_DATE"].min().to_dict()
+            )
+            team_dates = pd.concat([
+                pd.DataFrame({"team_id": df["HOME_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
+                pd.DataFrame({"team_id": df["AWAY_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
+            ], ignore_index=True)
+
+            roster_behavior = compute_roster_behavior_scores(
+                team_dates, str(injury_db), cfg.injury_features.importance_weights,
+                sm_cfg.min_importance_games, season_start_by_season,
+            )
+            recent_minutes_trend = compute_recent_minutes_trend_scores(
+                team_dates, str(injury_db), cfg.injury_features.importance_weights,
+                sm_cfg.min_importance_games, season_start_by_season, sm_cfg.recent_trend_lookback_weeks,
+            )
+
+        performance_vs_expectation = None
+        opponent_adjusted_form = None
+        if sm_cfg.performance_vs_expectation_enabled or sm_cfg.opponent_adjusted_form_enabled:
+            if not cfg.elo_features or not cfg.elo_features.enabled:
+                logger.warning(
+                    "performance_vs_expectation/opponent_adjusted_form need elo_features.enabled=true "
+                    "(they reuse its ratings) -- skipping both, other season motivation columns unaffected."
+                )
+            else:
+                from src.feature_engineering.elo import compute_elo_ratings
+
+                elo_cfg = cfg.elo_features
+                elo_ratings = compute_elo_ratings(
+                    all_games, initial_rating=elo_cfg.initial_rating, k_factor=elo_cfg.k_factor,
+                    home_advantage=elo_cfg.home_advantage, mov_multiplier=elo_cfg.mov_multiplier,
+                    season_regression=elo_cfg.season_regression,
+                )
+                elo_margin_scale = _fit_elo_margin_scale(all_games, elo_ratings, elo_cfg.home_advantage)
+                team_performance = compute_team_performance_history(
+                    all_games, elo_ratings, elo_cfg.home_advantage, elo_margin_scale,
+                )
+                if sm_cfg.performance_vs_expectation_enabled:
+                    performance_vs_expectation = compute_performance_vs_expectation_scores(
+                        team_performance, sm_cfg.performance_vs_expectation_window,
+                    )
+                if sm_cfg.opponent_adjusted_form_enabled:
+                    opponent_adjusted_form = compute_opponent_adjusted_form_scores(
+                        team_performance, sm_cfg.opponent_adjusted_form_window,
+                    )
+
+        preferred_opponent_delta = None
+        if sm_cfg.preferred_opponent_delta_enabled:
+            preferred_opponent_delta = compute_preferred_opponent_delta_scores(
+                all_games, sm_cfg.preferred_opponent_delta_window_games,
+            )
+
+        new_cols = {}
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            lookup = pd.DataFrame({
+                "season_id": df["SEASON_ID"].values,
+                "team_id": df[team_col].values,
+                "snapshot_date": game_dates.values,
+            })
+            rb_lookup = pd.DataFrame({"team_id": df[team_col].values, "game_date": game_dates.values})
+
+            if standings is not None:
+                standings_merged = lookup.merge(standings, on=["season_id", "team_id", "snapshot_date"], how="left")
+                rb_merged = rb_lookup.merge(roster_behavior, on=["team_id", "game_date"], how="left")
+                roster_score = rb_merged["roster_behavior_score"].fillna(0.0).values
+
+                trend_merged = rb_lookup.merge(recent_minutes_trend, on=["team_id", "game_date"], how="left")
+                trend_score = trend_merged["recent_minutes_trend_score"].fillna(0.0).values
+
+                pressure = standings_merged["pressure_raw"].fillna(0.0).values
+                motivation = np.clip(pressure * (1 - sm_cfg.roster_behavior_weight * roster_score), 0.0, 1.0)
+
+                new_cols[f"{prefix}_motivation_score"] = motivation
+                new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
+                new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
+                new_cols[f"{prefix}_recent_minutes_trend_score"] = trend_score
+
+            if performance_vs_expectation is not None:
+                pve_merged = rb_lookup.merge(performance_vs_expectation, on=["team_id", "game_date"], how="left")
+                new_cols[f"{prefix}_performance_vs_expectation_score"] = pve_merged["performance_vs_expectation_score"].fillna(0.0).values
+            if opponent_adjusted_form is not None:
+                oaf_merged = rb_lookup.merge(opponent_adjusted_form, on=["team_id", "game_date"], how="left")
+                new_cols[f"{prefix}_opponent_adjusted_form_score"] = oaf_merged["opponent_adjusted_form_score"].fillna(0.0).values
+
+            if preferred_opponent_delta is not None:
+                pod_merged = lookup.merge(preferred_opponent_delta, on=["season_id", "team_id", "snapshot_date"], how="left")
+                new_cols[f"{prefix}_preferred_opponent_delta"] = pod_merged["preferred_opponent_delta"].fillna(0.0).values
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

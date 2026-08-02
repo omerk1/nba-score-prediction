@@ -51,7 +51,23 @@
 **Note:** Lower priority until data source identified
 
 ### B4: Season Motivation Signal (revised from an earlier "tanking/playoff status" idea)
-**Status:** Planned — revised before building, original spec was too rigid
+**Status:** ✅ Implemented and fully iterated (branch `feature/season-motivation`,
+PR #36) — **partially adopted.** `season_motivation.enabled: true`, but only for
+`preferred_opponent_delta` (`preferred_opponent_delta_enabled: true`, window=20);
+every other signal tried stays disabled via its own flag
+(`motivation_score_enabled: false`, `performance_vs_expectation_enabled: false`,
+`opponent_adjusted_form_enabled: false`). See `docs/SEASON_MOTIVATION_DECISIONS.md`
+(data audit + formulas) and `docs/SEASON_MOTIVATION_LOG.md` (full validation story,
+11 sections + FINAL SUMMARY) for everything tried.
+**Real result:** the original standings-pressure/roster-behavior design
+(`motivation_score`) looked promising on a single split but did not survive a 5-fold
+expanding-window CV (53% of metric-instances favorable, later variants worse), nor
+did two later behavior-based signals (passed CV initially, failed a window-robustness
+sweep). The one signal that passed CV *and* held up under that same robustness check —
+`preferred_opponent_delta` (how much a team's Round 1 opponent would change if its own
+seed shifted by one spot) — is what's enabled. No new backfill or DB table was needed
+at all for any of this — standings, schedule, and roster-quality data all already
+existed in already-complete tables.
 **Original idea (dropped, found in earlier session history):** hard seed-range cutoffs
 (bottom-4 = tanking, top-4 = secure, 8-14 = playoff race, 8-10 = playin) producing binary
 `home_team_tanking`/`home_team_playoff_race` (0/1) columns.
@@ -73,7 +89,11 @@ hardcoded seed-bucket flag. Two data-driven ingredients to explore, not assume:
 the cutoffs as a tuned/explored parameter, not a guess.
 
 ### B5: Playoff Seed Already Clinched (split off from the same original idea)
-**Status:** Planned — split out because it's a genuinely different signal from B4
+**Status:** Folded into B4's actual implementation above —
+`games_to_clinch_ceiling`/`games_to_clinch_floor` (continuous countdowns, not a
+binary flag) were built as part of the same `feature/season-motivation` branch and
+Phase 1 round, sharing the same win-count/games-remaining machinery the
+standings-pressure component needs anyway. Not a distinct remaining backlog item.
 **Goal:** whether a team's playoff seed (or lottery position band) is already
 mathematically locked at the time of a given game, computed cleanly from standings +
 remaining schedule — distinct from B4's motivation signal, since a team can have nothing

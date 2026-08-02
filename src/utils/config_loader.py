@@ -144,6 +144,38 @@ class OnOffSplitsConfig(BaseModel):
     min_on_off_minutes: float = 0.0
 
 
+class SeasonMotivationConfig(BaseModel):
+    """Season motivation / seeding-incentive features (see
+    docs/SEASON_MOTIVATION_DECISIONS.md). No `db_path` of its own — reads
+    `data_paths.raw_db` (standings/schedule, from `game`) and
+    `injury_features.db_path` (`player_importance`/`player_injuries`)
+    directly. `enabled` gates `_add_season_motivation_features`."""
+    enabled: bool = False
+    # Gates motivation_score/games_to_clinch_*/recent_minutes_trend_score --
+    # the original Phase 1 design, which did NOT clear the ablation bar (see
+    # log FINAL SUMMARY). Separate from `enabled` so a signal that DID clear
+    # the bar (preferred_opponent_delta) can ship without these non-adopted
+    # columns. Defaults True (opt-out, not opt-in) so nothing changes unless
+    # explicitly set False.
+    motivation_score_enabled: bool = True
+    playoff_line_seed: int = 10
+    direct_playoff_seed: Optional[int] = None
+    direct_playoff_weight: float = 0.5
+    roster_behavior_weight: float = 1.0
+    min_importance_games: int = 5
+    recent_trend_lookback_weeks: int = 4
+    # Behavior-based signals (independently toggleable, same convention as
+    # StyleMatchupConfig's enabled/raw_features_enabled pair) -- each requires
+    # `enabled` above to be true AND its own flag, so a signal that clears the
+    # ablation bar can be turned on without re-enabling everything else.
+    performance_vs_expectation_enabled: bool = False
+    performance_vs_expectation_window: int = 10
+    opponent_adjusted_form_enabled: bool = False
+    opponent_adjusted_form_window: int = 10
+    preferred_opponent_delta_enabled: bool = False
+    preferred_opponent_delta_window_games: int = 20
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -159,6 +191,7 @@ class Config(BaseModel):
     injury_features: Optional[InjuryFeaturesConfig] = None
     style_matchup: Optional[StyleMatchupConfig] = None
     on_off_splits: Optional[OnOffSplitsConfig] = None
+    season_motivation: Optional[SeasonMotivationConfig] = None
 
 
 # --- Loader Functions ---
