@@ -608,73 +608,222 @@ kind of single-draw sensitivity) but not adopted on the strength of the
 current evidence. This finding, not the individually-passing window=10
 result above, is the one that should inform any adoption decision.
 
-## FINAL SUMMARY (Phase 1)
+## 11. Phase 2 — Preferred Opponent Targeting
 
-**Bottom line after the expanding-window CV: the single-split result does not
-generalize, and a raw-component redesign made the CV picture worse, not
-better.** The headline fold (fold1, the branch's default train/val/test split)
-shows a clean win on every tracked metric under the original combined-score
-design, and three of six new columns rank in the top third of feature
-importance — genuinely more promising on paper than on/off-splits ever looked
-on a single split. But across all 5 CV folds, only 53% of metric-instances
-favor the original design, with 2 of 5 folds clearly unfavorable. §5's
-follow-up attempt — decomposing `motivation_score` into raw
-`standings_pressure`/`roster_behavior_score` columns, motivated by a directly
-analogous precedent (A7's style-matchup redesign) that worked well elsewhere
-in this repo — dropped the result further, to 20% (6/30), and fold1's clean
-6/6 win collapsed to 1/6. Neither version is a demonstrated, reproducible
-improvement. `season_motivation.enabled` stays `false`, and so does its
-internal design choice (combined score vs. raw components) — both were tried,
-neither cleared the bar.
+Every signal through §10 is either a standings/roster input (§1-9) or a
+recent-behavior signal (§10) — both measure *how much* a team is fighting for
+position. Phase 2 targets a different, more specific incentive: teams near a
+seed boundary sometimes care not just about *whether* they make the playoffs
+or improve their seed, but about *which specific opponent* they'd draw in
+Round 1. A team can be better off NOT chasing the best seed it can reach,
+because a one-seed swing can swap in a materially easier or harder Round 1
+opponent than "higher seed = better" suggests.
 
-**What was added:** `src/feature_engineering/season_motivation.py` (new module)
-plus `feature_builder.py`'s `_add_season_motivation_features`, adding 6 columns
-(`{home,away}_team_motivation_score`, `{home,away}_team_games_to_clinch_ceiling`,
-`{home,away}_team_games_to_clinch_floor`). Gated by
-`config.season_motivation.enabled` (currently `false`, pending the same
-conclusive-ablation bar every other not-yet-adopted feature in this repo is held
-to), soft-disabled if the injury features cache is missing.
+### Signal tried
 
-**No new backfill or DB table was needed** — every ingredient (standings,
-schedule, roster quality, sit-out reasons) already existed in already-complete
-tables (`nba_api.sqlite.game`, `injury_features.sqlite.player_importance`/
-`player_injuries`). This is a meaningfully cheaper story than on/off-splits,
-which needed a multi-thousand-call live API backfill.
+`preferred_opponent_delta`: the signed win_pct delta, at whichever of
+(own_seed − 1, own_seed + 1) is the larger-magnitude swing, between that
+adjacent seed's Round 1 opponent and the current seed's Round 1 opponent
+(standard bracket: seed *s* plays seed *9 − s*). Positive = the available
+one-seed move faces a *stronger* opponent (current draw already the more
+favorable of the two — no incentive to jockey). Negative = the available
+one-seed move faces a *weaker* opponent (a real incentive to shift seed by
+exactly one spot). Zero unless the team currently holds a direct playoff seed
+(1-8) with at most `preferred_opponent_delta_window_games` games left in the
+season. See `season_motivation.compute_preferred_opponent_delta_scores`.
 
-**Single-split result looked like a genuine improvement — the 5-fold CV shows
-it doesn't hold up.** On the default split, five of eight tracked metrics
-(diff_mae, win_acc, brier — both val and test) moved the right direction
-simultaneously, and three of six new columns ranked in the top third of feature
-importance. But §4's expanding-window CV puts this in context: only 53% of
-metric-instances favor the treatment across all 5 folds, with 2 of 5 clearly
-unfavorable. The `roster_behavior_weight` parameter itself was explored
-properly (0.0/0.5/1.0/1.5/2.0/3.0), with `1.0` a genuine, confirmed local
-optimum among those tested — the parameter tuning is sound, the underlying
-feature's overall value is not confirmed.
+Built on the standings machinery already used for `motivation_score`/clinch
+(`compute_standings_metrics`'s panel construction was refactored into a
+shared `_ranked_standings_panel` helper, reused by both), not the Elo-based
+machinery §10's two signals use — this is fundamentally a standings/seeding
+phenomenon (which specific team occupies the adjacent seed), not a
+behavioral one.
 
-**Known limitations (documented, not solved here):**
-1. No tiebreakers modeled (head-to-head, division, conference record) — a
-   deliberate continuous-proxy simplification per the brief.
-2. Roster-behavior signal is structurally zero before 2021-10-19
-   (`player_injuries` coverage start).
-3. Pure strategic tanking (playing normally but not trying) has no available
-   data source and is invisible to this signal.
-4. Live/production inference on an in-progress season needs a fresh schedule
-   fetch (`ScheduleLeagueV2`) not built here — every season this touches during
-   training/validation is already historically complete.
-5. Runtime cost: `_add_season_motivation_features` takes ~2.5 minutes on the
-   full training set (9,509 games), driven by `compute_roster_behavior_scores`'s
-   per-`(team, date)` Python loop. Acceptable for the offline ablation pipeline,
-   worth revisiting if this becomes a bottleneck in more frequent iteration.
+**Known limitations (deliberate, not solved here):**
+1. Only a single seed step is considered in each direction — no 2+-seed
+   jumps, even though a team could realistically move further than one seed
+   before the season ends.
+2. The adjacent seed's occupant is read directly off the current standings
+   snapshot, not resimulated — swapping seeds would also shift who else in
+   the conference lands at each rank (a full conference picture); this only
+   asks "who is there right now."
+3. No tiebreakers modeled (head-to-head, division, conference record), same
+   continuous-proxy simplification as every other signal in this
+   investigation.
 
-**Open question before Phase 2 / merge:** given the CV's mixed result, should
-Phase 2 (`preferred_opponent_delta`) still be built on top of a Phase 1 that
-hasn't cleared the bar on its own? Recommendation: yes, still worth building —
-Phase 2 is a genuinely different signal (seeding-incentive targeting near the
-end of the season) that could independently carry its own weight even if
-Phase 1's standings-pressure/roster-behavior combination doesn't, and the brief
-called for completing both phases before an adoption decision. But the final
-adoption call should now explicitly weigh Phase 1's CV result, not just treat
-it as a foregone "already proven" prerequisite — `season_motivation.enabled`
-stays `false` regardless of Phase 2's outcome unless a future ablation round
-finds something the current CV didn't.
+### CV results (window sensitivity: `preferred_opponent_delta_window_games`
+= 15/20/25, isolated on top of the current base design — neither §10 signal
+enabled, per that section's revised verdict — compared against
+`season_motivation_recenttrend_{fold}_treatment`)
+
+| variant | win-count | test_diff_mae mean delta | test_diff_mae per-fold (fold1→5) | folds improved |
+|---|---|---|---|---|
+| window=15 | 17/30 (57%) | **−0.0610** | +0.023, −0.089, −0.096, −0.106, −0.037 | 4/5 |
+| window=20 | 16/30 (53%) | **−0.0560** | +0.001, −0.048, −0.070, −0.084, −0.079 | 4/5 |
+| window=25 | 21/30 (70%) | **−0.0448** | +0.018, −0.053, −0.043, −0.111, −0.035 | 4/5 |
+
+Full test suite: 156/156 passing. `configs/config.yaml` verified
+byte-identical to HEAD after the sweep (same patch/restore pattern as every
+prior CV driver).
+
+### Verdict
+
+**Passes, and — unlike §10's two signals — passes robustly across the
+window sweep.** All three tested window values show `test_diff_mae`
+improving in the same 4 of 5 folds, with the same fold (fold1, the most
+recent test period) as the lone, small exception each time, and the other
+four folds improving by a comparable magnitude regardless of window choice.
+This is exactly the check §10's signals failed: there, window=10's pass
+inverted sign entirely at window=5 and window=15. Here, the direction and
+fold pattern hold steady across 15/20/25, which is much more consistent with
+a real, window-insensitive effect than a favorable draw against one specific
+hyperparameter value. (`val_diff_mae` is noisier — mean deltas of −0.032,
+−0.018, −0.035 for window 15/20/25, with more folds flipping sign than on
+test — but the fold-consistency bar this whole investigation has used
+throughout is defined on `test_diff_mae`, not val, precisely because val is
+the smaller, noisier split.)
+
+Window=25 has the highest win-count (70%) of the three; window=15 has the
+largest `test_diff_mae` improvement magnitude. All three are legitimate,
+fold-consistent choices — this is a genuine three-way tie on the metric that
+matters, not a case needing a tie-break sweep the way §10's window=10 did.
+
+**This does not resolve §8's structural finding on its own; it's the first
+signal in the entire investigation to clear the fold-consistency bar
+robustly, on a signal deliberately built around a specific, well-defined
+mechanism (which team occupies the adjacent seed) rather than a general
+"more motivation information" attempt.** Whether to enable it, and at which
+window value, is left for human review — see the FINAL SUMMARY below.
+
+## FINAL SUMMARY
+
+This investigation ran ten formula variants of a combined/decomposed
+standings-and-roster score (§1-9), two behavior-based signals with a window
+sweep (§10), and one seeding-target signal with its own window sweep (§11).
+One thing cleared the bar robustly. Here is the complete picture.
+
+### What's enabled vs. parked, and why
+
+**Nothing is enabled by default in this branch's committed config** —
+`season_motivation.enabled` is `false`, and every sub-signal's own
+`..._enabled` flag is `false`. That has not changed as a result of this
+investigation; every adoption decision below is a recommendation for human
+sign-off, not a change already made.
+
+**Parked (implemented, tested, disabled by default, available for future
+reconsideration):**
+- `motivation_score` + `games_to_clinch_ceiling`/`games_to_clinch_floor`
+  (§1-4): single-split result looked clean, but only 53% of metric-instances
+  favored it across 5 CV folds, with 2 of 5 clearly unfavorable. Not a
+  demonstrated improvement.
+- Raw-component decomposition of the above (§5): tried as a direct analogue
+  to a precedent that worked elsewhere in this repo (A7's style-matchup
+  redesign). Made the CV picture worse (20%, fold1's clean win collapsed).
+  Reverted.
+- Dual-threshold pressure, both max-based (§6.1, 33%) and weighted-average
+  (§8, 40%) variants: neither cleared the bar. Weighted-average is the
+  version left wired into `compute_standings_metrics` (via the optional
+  `direct_playoff_seed` parameter) since it's strictly less biased than
+  `max`, but it isn't itself an adopted change — it only activates if
+  `direct_playoff_seed` is explicitly set, which it isn't.
+- `recent_minutes_trend_score` (§9): 27-37% across variants tried. Failed.
+- `performance_vs_expectation_score` / `opponent_adjusted_form_score` (§10):
+  the first signals in the whole investigation to pass the fold-consistency
+  bar — but only at exactly one of three tested window values (10). At the
+  neighboring windows (5, 15), the effect didn't just weaken, it inverted to
+  consistently negative, by a magnitude comparable to or larger than
+  window=10's improvement. Diagnosed as very likely a favorable draw against
+  these 5 CV splits at that one hyperparameter value, not a robust effect —
+  the fold that stayed positive at window=5/15 was consistently the same
+  one (fold1) at every window, while the folds that drove window=10's pass
+  (2-5) reversed sign entirely. Both remain implemented, tested, and
+  disabled.
+
+**Recommended for enabling, pending your decision — `preferred_opponent_delta`
+(§11):** the one signal in this entire investigation that passed the
+fold-consistency bar *and* held up under the window-robustness check that
+killed §10's signals. All three tested windows (15/20/25) show `test_diff_mae`
+improving in the same 4 of 5 folds, with the same small exception (fold1)
+each time, and comparable improvement magnitude across all three — the
+opposite of §10's window=10-only, sign-inverting pattern. This is a
+meaningfully different kind of evidence: a specific, mechanistically-motivated
+signal (which team occupies the adjacent seed) that a same-shaped robustness
+check couldn't break. Nothing has been enabled in config as a result of this
+finding — see "Open questions" below for what's left for you to decide.
+
+### Honest CV picture across the whole investigation
+
+Every standings/roster-input variant (§1-9) showed the same structural
+symptom §8 first diagnosed: `test_diff_mae` degrading by roughly the same
+amount (−0.06 to −0.08) regardless of formula. Reformulating the combination
+rule, decomposing it into raw components, adding a second threshold, sharpening
+it to a weighted average, and adding a complementary roster-trend signal all
+failed to move this needle in the favorable direction. Two behavior-based
+signals (§10) briefly appeared to break this pattern (test_diff_mae
+improving 4/5 folds) — but that result didn't survive being tested at
+neighboring windows, so it should be read as inconclusive-trending-negative,
+not as a second confirmed win. The one signal that both passed initially and
+held up under further scrutiny is `preferred_opponent_delta` (§11) — a
+standings-based signal again, but built around one specific mechanism
+(seed-adjacent opponent strength) rather than an attempt to capture "more
+motivation" generally.
+
+### Was §8's structural issue resolved?
+
+**Partially, and only by one signal.** §8's finding was that every *general*
+attempt to capture "how much is this team motivated by its standings
+position" hits a ceiling — reformulating the combination rule doesn't help
+because the ceiling isn't about the formula, it's about what the underlying
+inputs can predict. `preferred_opponent_delta` doesn't contradict that
+finding for the *general* motivation-pressure signal (`motivation_score`
+remains unenabled, unchanged, still short of the bar) — it succeeds by asking
+a narrower, different question (which specific opponent, not how much
+pressure) that isn't subject to the same ceiling. So: the general ceiling
+identified in §8 persists for `motivation_score` and its variants; it does
+not appear to constrain `preferred_opponent_delta`, which measures something
+else entirely.
+
+### Recommended next step
+
+Enable `preferred_opponent_delta_enabled=true` with one of the three
+window values that passed (15, 20, or 25 — all three are legitimate,
+fold-consistent choices; §11 has the full breakdown of win-count vs.
+magnitude tradeoffs between them). Everything else stays disabled. This is
+a recommendation, not an action taken — `configs/config.yaml` has not been
+changed by this investigation.
+
+### Open questions for human review
+
+1. **Which window value for `preferred_opponent_delta`?** All three of
+   15/20/25 pass equally on fold-consistency; window=25 has the best
+   win-count (70%), window=15 the largest raw `test_diff_mae` improvement.
+   No CV-based tiebreaker distinguishes them further — this is a judgment
+   call (e.g. window=20 as the original brief's suggested default, if no
+   other consideration favors one of the others).
+2. **Should `preferred_opponent_delta` ship alone, or is further validation
+   (more folds, a different date range) warranted before enabling anything,**
+   given that §10's signals also looked convincing on 5 folds before the
+   window sweep revealed the problem? The window-robustness check here is
+   a stronger bar than §10 had before its own sweep, but it is still only
+   5 folds.
+3. **Are `motivation_score`/`recent_minutes_trend_score`/§10's two signals
+   worth revisiting at all**, or is the standings/roster-input approach a
+   dead end for this repo's data? Nothing tried in nine sections moved that
+   needle; a future attempt would need either new data (play-by-play,
+   betting-market-implied effort proxies) or a fundamentally different
+   mechanism, not another formula variant of the same inputs.
+4. **Runtime cost**: `_add_season_motivation_features` takes ~2.5 minutes on
+   the full training set, driven by `compute_roster_behavior_scores`'s
+   per-`(team, date)` Python loop (unrelated to `preferred_opponent_delta`,
+   which doesn't use that path) — acceptable for the offline ablation
+   pipeline, worth revisiting if this becomes a bottleneck.
+
+**Known limitations across every signal in this investigation:** no
+tiebreakers modeled (head-to-head, division, conference record) — deliberate
+continuous-proxy simplification per the original brief; roster-behavior
+signals are structurally zero before 2021-10-19 (`player_injuries` coverage
+start); pure strategic tanking (playing normally but not trying) has no
+available data source and is invisible to every signal here; live/production
+inference on an in-progress season needs a fresh schedule fetch
+(`ScheduleLeagueV2`) not built in this investigation, since every season
+touched during training/validation was already historically complete.
