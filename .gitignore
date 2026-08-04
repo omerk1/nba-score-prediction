@@ -9,8 +9,12 @@ data/processed/*
 # But keep .gitkeep files
 !**/.gitkeep
 
-# Keep ablation logs
+# Keep ablation logs. outputs/experiments.csv is the old 16-column schema,
+# frozen historical snapshot; outputs/experiments_v2.csv (CLAUDE.md's Project
+# Rules section) is the live registry going forward, seeded from it via
+# scripts/migrate_experiments_schema.py.
 !outputs/experiments.csv
+!outputs/experiments_v2.csv
 
 # Keep the full per-run feature-importance tables (small, one row per feature)
 # so the ablation record has durable evidence of where each run's features
@@ -110,6 +114,7 @@ outputs/reports/*
 
 # Claude Code settings (local overrides are personal, project settings are shared)
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
 # Generated model artifacts
 data/models/training_metadata.json

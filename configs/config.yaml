@@ -22,6 +22,50 @@ datasets_loading:
     - "Regular Season"
     - "Playoffs"
 
+# Expanding-window CV folds (CLAUDE.md's "Project Rules (ML experimentation)"
+# section). Ordered oldest -> newest -- validated mechanically by
+# src/evaluation/cv_harness.py's validate_fold_definitions, not just by
+# convention. train_start_date/data_start_date above are shared and fixed
+# across every fold (that's what makes it "expanding"); fold5 is identical to
+# the single split above by construction. Season boundaries confirmed
+# directly from nba_api.sqlite's regular-season game dates. The 2018-19
+# season (the only earlier complete season) is deliberately excluded as a
+# fold-1 candidate -- a single-season training window (~82 games/team) is a
+# notably thinner regime than every fold below and was never used anywhere
+# in this project's own prior CV work either.
+cv:
+  folds:
+    - name: fold1
+      train_end_date: "2020-08-14"          # End of 2019-20 regular season (COVID bubble)
+      validation_start_date: "2020-12-22"   # Start of 2020-21 season (COVID-delayed)
+      validation_end_date: "2021-05-16"     # End of 2020-21 regular season
+      test_start_date: "2021-10-19"         # Start of 2021-22 season
+      test_end_date: "2022-04-10"           # End of 2021-22 regular season
+    - name: fold2
+      train_end_date: "2021-05-16"
+      validation_start_date: "2021-10-19"
+      validation_end_date: "2022-04-10"
+      test_start_date: "2022-10-18"
+      test_end_date: "2023-04-09"
+    - name: fold3
+      train_end_date: "2022-04-10"
+      validation_start_date: "2022-10-18"
+      validation_end_date: "2023-04-09"
+      test_start_date: "2023-10-24"
+      test_end_date: "2024-04-14"
+    - name: fold4
+      train_end_date: "2023-04-09"
+      validation_start_date: "2023-10-24"
+      validation_end_date: "2024-04-14"
+      test_start_date: "2024-10-22"
+      test_end_date: "2025-04-13"
+    - name: fold5
+      train_end_date: "2024-04-14"          # == datasets_loading.train_end_date
+      validation_start_date: "2024-10-22"   # == datasets_loading.validation_start_date
+      validation_end_date: "2025-04-13"     # == datasets_loading.validation_end_date
+      test_start_date: "2025-10-21"         # == datasets_loading.test_start_date
+      test_end_date: "2026-04-12"           # == datasets_loading.test_end_date
+
 # Feature engineering
 features:
   rolling_windows: [5, 10, 20]   # Games for rolling averages (multiple windows)

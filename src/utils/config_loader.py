@@ -1,12 +1,12 @@
-import yaml
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
+import yaml
 from pydantic import BaseModel, ConfigDict
 
-
 # --- Schema Definitions ---
+
 
 class DataPathsConfig(BaseModel):
     raw_db: str
@@ -25,6 +25,26 @@ class DatasetsLoadingConfig(BaseModel):
     test_end_date: Optional[str] = None
     allowed_season_types: Optional[list[str]] = None
     context_season_types: Optional[list[str]] = None
+
+
+class CVFoldConfig(BaseModel):
+    """One expanding-window CV fold: train = datasets_loading.train_start_date
+    (shared, fixed across every fold) through train_end_date; validation = the
+    next season; test = the season after that. `cv.folds` in configs/config.yaml
+    must be ordered oldest -> newest -- validated mechanically (not just by
+    convention) by src/evaluation/cv_harness.py's validate_fold_definitions.
+    See CLAUDE.md's "Project Rules (ML experimentation)" section."""
+
+    name: str
+    train_end_date: str
+    validation_start_date: str
+    validation_end_date: str
+    test_start_date: str
+    test_end_date: str
+
+
+class CVConfig(BaseModel):
+    folds: list[CVFoldConfig] = []
 
 
 class FeaturesConfig(BaseModel):
@@ -114,6 +134,7 @@ class StyleMatchupConfig(BaseModel):
     components + explicit home-vs-away differentials, no KNN similarity search
     involved — a different feature set from `enabled`'s KNN-lookup score, not a
     replacement for it)."""
+
     enabled: bool
     raw_features_enabled: bool = False
     fingerprint_window: int
@@ -138,6 +159,7 @@ class OnOffSplitsConfig(BaseModel):
     decisions doc). `enabled` gates feature_builder.py's
     _add_on_off_splits_features, mirroring InjuryFeaturesConfig/StyleMatchupConfig's
     own `enabled` field."""
+
     enabled: bool
     db_path: str
     checkpoint_cadence_days: int
@@ -150,6 +172,7 @@ class SeasonMotivationConfig(BaseModel):
     `data_paths.raw_db` (standings/schedule, from `game`) and
     `injury_features.db_path` (`player_importance`/`player_injuries`)
     directly. `enabled` gates `_add_season_motivation_features`."""
+
     enabled: bool = False
     # Gates motivation_score/games_to_clinch_*/recent_minutes_trend_score --
     # the original Phase 1 design, which did NOT clear the ablation bar (see
@@ -181,6 +204,7 @@ class Config(BaseModel):
     Main Configuration Object.
     Pydantic automatically handles nested dicts to objects.
     """
+
     model_config = ConfigDict(frozen=True)  # Makes config immutable
 
     data_paths: DataPathsConfig
@@ -192,9 +216,11 @@ class Config(BaseModel):
     style_matchup: Optional[StyleMatchupConfig] = None
     on_off_splits: Optional[OnOffSplitsConfig] = None
     season_motivation: Optional[SeasonMotivationConfig] = None
+    cv: Optional[CVConfig] = None
 
 
 # --- Loader Functions ---
+
 
 def load_config(config_path: Optional[str | Path] = None) -> Config:
     """
@@ -210,7 +236,7 @@ def load_config(config_path: Optional[str | Path] = None) -> Config:
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found at: {config_path.absolute()}")
 
-    with open(config_path, 'r') as f:
+    with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f) or {}
 
     # Pydantic validates the whole tree here
@@ -223,7 +249,7 @@ def get_config_value(obj: Any, path: str, default: Any = None) -> Any:
     Example: get_config_value(cfg, "data_paths.raw_db")
     """
     try:
-        for part in path.split('.'):
+        for part in path.split("."):
             # Works for both Pydantic objects and standard dicts
             if isinstance(obj, dict):
                 obj = obj[part]
