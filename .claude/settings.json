@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read -r f; case \"$f\" in *.py) venv/bin/black \"$f\" 2>/dev/null && venv/bin/isort \"$f\" 2>/dev/null ;; esac; } || true"
+          }
+        ]
+      }
+    ]
+  }
+}

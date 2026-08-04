@@ -10,6 +10,7 @@ import logging
 import math
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -25,36 +26,36 @@ logger = logging.getLogger(__name__)
 # teams stays constant regardless of DST since all US zones shift together
 # (except Phoenix, which never observes DST and is fixed at UTC-7).
 _TEAM_LOCATIONS: dict[int, tuple[float, float, int]] = {
-    1610612737: (33.749,  -84.388,  -5),  # ATL
-    1610612738: (42.360,  -71.059,  -5),  # BOS
-    1610612739: (41.499,  -81.694,  -5),  # CLE
-    1610612740: (29.951,  -90.072,  -6),  # NOP
-    1610612741: (41.878,  -87.630,  -6),  # CHI
-    1610612742: (32.777,  -96.797,  -6),  # DAL
-    1610612743: (39.739, -104.990,  -7),  # DEN
-    1610612744: (37.768, -122.388,  -8),  # GSW
-    1610612745: (29.760,  -95.370,  -6),  # HOU
-    1610612746: (34.043, -118.267,  -8),  # LAC
-    1610612747: (34.043, -118.267,  -8),  # LAL
-    1610612748: (25.762,  -80.192,  -5),  # MIA
-    1610612749: (43.039,  -87.907,  -6),  # MIL
-    1610612750: (44.978,  -93.265,  -6),  # MIN
-    1610612751: (40.683,  -73.972,  -5),  # BKN
-    1610612752: (40.751,  -73.993,  -5),  # NYK
-    1610612753: (28.538,  -81.379,  -5),  # ORL
-    1610612754: (39.768,  -86.158,  -5),  # IND
-    1610612755: (39.953,  -75.165,  -5),  # PHI
-    1610612756: (33.448, -112.074,  -7),  # PHX (no DST, fixed UTC-7)
-    1610612757: (45.523, -122.677,  -8),  # POR
-    1610612758: (38.582, -121.494,  -8),  # SAC
-    1610612759: (29.424,  -98.494,  -6),  # SAS
-    1610612760: (35.468,  -97.516,  -6),  # OKC
-    1610612761: (43.653,  -79.383,  -5),  # TOR
-    1610612762: (40.761, -111.891,  -7),  # UTA
-    1610612763: (35.150,  -90.049,  -6),  # MEM
-    1610612764: (38.898,  -77.037,  -5),  # WAS
-    1610612765: (42.331,  -83.046,  -5),  # DET
-    1610612766: (35.227,  -80.843,  -5),  # CHA
+    1610612737: (33.749, -84.388, -5),  # ATL
+    1610612738: (42.360, -71.059, -5),  # BOS
+    1610612739: (41.499, -81.694, -5),  # CLE
+    1610612740: (29.951, -90.072, -6),  # NOP
+    1610612741: (41.878, -87.630, -6),  # CHI
+    1610612742: (32.777, -96.797, -6),  # DAL
+    1610612743: (39.739, -104.990, -7),  # DEN
+    1610612744: (37.768, -122.388, -8),  # GSW
+    1610612745: (29.760, -95.370, -6),  # HOU
+    1610612746: (34.043, -118.267, -8),  # LAC
+    1610612747: (34.043, -118.267, -8),  # LAL
+    1610612748: (25.762, -80.192, -5),  # MIA
+    1610612749: (43.039, -87.907, -6),  # MIL
+    1610612750: (44.978, -93.265, -6),  # MIN
+    1610612751: (40.683, -73.972, -5),  # BKN
+    1610612752: (40.751, -73.993, -5),  # NYK
+    1610612753: (28.538, -81.379, -5),  # ORL
+    1610612754: (39.768, -86.158, -5),  # IND
+    1610612755: (39.953, -75.165, -5),  # PHI
+    1610612756: (33.448, -112.074, -7),  # PHX (no DST, fixed UTC-7)
+    1610612757: (45.523, -122.677, -8),  # POR
+    1610612758: (38.582, -121.494, -8),  # SAC
+    1610612759: (29.424, -98.494, -6),  # SAS
+    1610612760: (35.468, -97.516, -6),  # OKC
+    1610612761: (43.653, -79.383, -5),  # TOR
+    1610612762: (40.761, -111.891, -7),  # UTA
+    1610612763: (35.150, -90.049, -6),  # MEM
+    1610612764: (38.898, -77.037, -5),  # WAS
+    1610612765: (42.331, -83.046, -5),  # DET
+    1610612766: (35.227, -80.843, -5),  # CHA
 }
 
 
@@ -74,10 +75,33 @@ class FeatureBuilder:
         self.rolling_windows = sorted(rolling_windows)
         self.h2h_margin_window = h2h_margin_window
         self.h2h_win_rate_window = h2h_win_rate_window
+        # Fit-once-on-train, reuse-on-val/test cache for _fit_elo_margin_scale
+        # (see _add_season_motivation_features) -- a real "fit statistic" (a
+        # least-squares regression coefficient), unlike Elo ratings/standings
+        # snapshots, which are safe to recompute fresh with more history on
+        # every call. Set on this instance's FIRST create_all_features() call
+        # (assumed train, matching every current caller's own call order) and
+        # reused unchanged on later calls, so it's never refit using val/test
+        # outcomes. A fresh FeatureBuilder() (one per run_split() call) means
+        # this never leaks across folds either.
+        self._fitted_elo_margin_scale = None
 
-    def create_all_features(self, games_df: pd.DataFrame) -> pd.DataFrame:
+    def create_all_features(
+        self, games_df: pd.DataFrame, context_end_date: Optional[str] = None
+    ) -> pd.DataFrame:
+        """
+        context_end_date: upper bound for any feature that needs more history
+        than `games_df` alone to compute correctly (Elo ratings, season_motivation
+        standings/schedule) -- see `_add_elo_features`/`_add_season_motivation_features`.
+        Defaults to `games_df`'s own max GAME_DATE (never reaches beyond the data
+        this specific call was given) when not provided; a CV/multi-split caller
+        should pass this split's own true end date explicitly (see
+        src/evaluation/cv_harness.run_split) so a train-time call can't reach into
+        val/test-period games.
+        """
         df = games_df.copy()
-        df = df.sort_values('GAME_DATE').reset_index(drop=True)
+        df = df.sort_values("GAME_DATE").reset_index(drop=True)
+        context_end_date = context_end_date or df["GAME_DATE"].max().strftime("%Y-%m-%d")
 
         df = self._add_basic_features(df)
         df = self._add_rolling_features(df)
@@ -88,55 +112,58 @@ class FeatureBuilder:
         df = self._add_matchup_features(df)
         df = self._add_h2h_features(df)
         df = self._add_travel_features(df)
-        df = self._add_elo_features(df)
+        df = self._add_elo_features(df, context_end_date)
         df = self._add_injury_features(df)
         df = self._add_style_matchup_features(df)
         df = self._add_style_fingerprint_features(df)
         df = self._add_on_off_splits_features(df)
-        df = self._add_season_motivation_features(df)
+        df = self._add_season_motivation_features(df, context_end_date)
 
         feature_cols = self._get_feature_columns(df)
         nan_games = df[feature_cols].isna().any(axis=1).sum()
 
-        logger.info(f"Features built: {len(feature_cols)} cols, {len(df):,} games ({nan_games} with NaN — kept, CatBoost handles natively)")
+        logger.info(
+            f"Features built: {len(feature_cols)} cols, {len(df):,} games ({nan_games} with NaN — kept, CatBoost handles natively)"
+        )
 
         return df
 
     def _add_basic_features(self, df: pd.DataFrame) -> pd.DataFrame:
         new_cols = {
-            'season_progress': df.groupby('SEASON_ID').cumcount() / df.groupby('SEASON_ID')['SEASON_ID'].transform('count')
+            "season_progress": df.groupby("SEASON_ID").cumcount()
+            / df.groupby("SEASON_ID")["SEASON_ID"].transform("count")
         }
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
         new_cols = {}
         for team_col, pts_col, prefix in [
-            ('HOME_TEAM_ID', 'PTS_home', 'home_team'),
-            ('AWAY_TEAM_ID', 'PTS_away', 'away_team'),
+            ("HOME_TEAM_ID", "PTS_home", "home_team"),
+            ("AWAY_TEAM_ID", "PTS_away", "away_team"),
         ]:
-            win_series = (df['POINT_DIFF'] > 0) if prefix == 'home_team' else (df['POINT_DIFF'] < 0)
-            diff_series = df['POINT_DIFF'] if prefix == 'home_team' else -df['POINT_DIFF']
+            win_series = (df["POINT_DIFF"] > 0) if prefix == "home_team" else (df["POINT_DIFF"] < 0)
+            diff_series = df["POINT_DIFF"] if prefix == "home_team" else -df["POINT_DIFF"]
 
             # Temp columns needed for groupby.transform
-            df[f'_win_{prefix}'] = win_series
-            df[f'_diff_{prefix}'] = diff_series
+            df[f"_win_{prefix}"] = win_series
+            df[f"_diff_{prefix}"] = diff_series
 
             for window in self.rolling_windows:
                 # pts_avg omitted — off_eff in _add_style_features is identical
-                new_cols[f'{prefix}_win_pct_L{window}'] = df.groupby(team_col)[f'_win_{prefix}'].transform(
+                new_cols[f"{prefix}_win_pct_L{window}"] = df.groupby(team_col)[f"_win_{prefix}"].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
-                new_cols[f'{prefix}_diff_avg_L{window}'] = df.groupby(team_col)[f'_diff_{prefix}'].transform(
+                new_cols[f"{prefix}_diff_avg_L{window}"] = df.groupby(team_col)[f"_diff_{prefix}"].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
                 # FG3_PCT omitted — fg3_pct in _add_style_features is identical.
                 # Volume-weighted (sum of makes / sum of attempts over the window), NOT a mean
                 # of per-game percentages — the latter would let a low-attempt outlier game
                 # (e.g. 1-for-2) swing the rolling average as much as a normal-volume game.
-                for stat, made_stat, att_stat in [('FG_PCT', 'FGM', 'FGA'), ('FT_PCT', 'FTM', 'FTA')]:
+                for stat, made_stat, att_stat in [("FG_PCT", "FGM", "FGA"), ("FT_PCT", "FTM", "FTA")]:
                     team_suffix = prefix.split("_")[0]
-                    made_col = f'{made_stat}_{team_suffix}'
-                    att_col = f'{att_stat}_{team_suffix}'
+                    made_col = f"{made_stat}_{team_suffix}"
+                    att_col = f"{att_stat}_{team_suffix}"
                     if made_col in df.columns and att_col in df.columns:
                         made_roll = df.groupby(team_col)[made_col].transform(
                             lambda x, w=window: x.shift(1).rolling(w, min_periods=1).sum()
@@ -144,37 +171,39 @@ class FeatureBuilder:
                         att_roll = df.groupby(team_col)[att_col].transform(
                             lambda x, w=window: x.shift(1).rolling(w, min_periods=1).sum()
                         )
-                        new_cols[f'{prefix}_{stat.lower()}_L{window}'] = made_roll / att_roll.replace(0, np.nan)
+                        new_cols[f"{prefix}_{stat.lower()}_L{window}"] = made_roll / att_roll.replace(
+                            0, np.nan
+                        )
 
-            df.drop(columns=[f'_win_{prefix}', f'_diff_{prefix}'], inplace=True)
+            df.drop(columns=[f"_win_{prefix}", f"_diff_{prefix}"], inplace=True)
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_rest_features(self, df: pd.DataFrame) -> pd.DataFrame:
         new_cols = {}
         for team_col, prefix in [
-            ('HOME_TEAM_ID', 'home_team'),
-            ('AWAY_TEAM_ID', 'away_team'),
+            ("HOME_TEAM_ID", "home_team"),
+            ("AWAY_TEAM_ID", "away_team"),
         ]:
-            rest_days = df.groupby(team_col)['GAME_DATE'].diff().dt.days.fillna(3)
-            new_cols[f'{prefix}_rest_days'] = rest_days
-            new_cols[f'{prefix}_back_to_back'] = (rest_days == 1).astype(int)
-            new_cols[f'{prefix}_games_in_4_nights'] = df.groupby(team_col, group_keys=False).apply(
-                lambda x: (x['GAME_DATE'].diff().dt.days.rolling(3, min_periods=1).sum() <= 4).astype(int)
+            rest_days = df.groupby(team_col)["GAME_DATE"].diff().dt.days.fillna(3)
+            new_cols[f"{prefix}_rest_days"] = rest_days
+            new_cols[f"{prefix}_back_to_back"] = (rest_days == 1).astype(int)
+            new_cols[f"{prefix}_games_in_4_nights"] = df.groupby(team_col, group_keys=False).apply(
+                lambda x: (x["GAME_DATE"].diff().dt.days.rolling(3, min_periods=1).sum() <= 4).astype(int)
             )
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_style_features(self, df: pd.DataFrame) -> pd.DataFrame:
         new_cols = {}
         for team_col, prefix in [
-            ('HOME_TEAM_ID', 'home_team'),
-            ('AWAY_TEAM_ID', 'away_team'),
+            ("HOME_TEAM_ID", "home_team"),
+            ("AWAY_TEAM_ID", "away_team"),
         ]:
-            pts_col = 'PTS_home' if prefix == 'home_team' else 'PTS_away'
-            opp_pts_col = 'PTS_away' if prefix == 'home_team' else 'PTS_home'
+            pts_col = "PTS_home" if prefix == "home_team" else "PTS_away"
+            opp_pts_col = "PTS_away" if prefix == "home_team" else "PTS_home"
             team_suffix = prefix.split("_")[0]
-            fg3m_col = f'FG3M_{team_suffix}'
-            fg3a_col = f'FG3A_{team_suffix}'
+            fg3m_col = f"FG3M_{team_suffix}"
+            fg3a_col = f"FG3A_{team_suffix}"
 
             for window in self.rolling_windows:
                 grouped = df.groupby(team_col)
@@ -187,11 +216,11 @@ class FeatureBuilder:
                     fg3a_roll = grouped[fg3a_col].transform(
                         lambda x, w=window: x.shift(1).rolling(w, min_periods=1).sum()
                     )
-                    new_cols[f'{prefix}_fg3_pct_L{window}'] = fg3m_roll / fg3a_roll.replace(0, np.nan)
-                new_cols[f'{prefix}_off_eff_L{window}'] = grouped[pts_col].transform(
+                    new_cols[f"{prefix}_fg3_pct_L{window}"] = fg3m_roll / fg3a_roll.replace(0, np.nan)
+                new_cols[f"{prefix}_off_eff_L{window}"] = grouped[pts_col].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
-                new_cols[f'{prefix}_def_eff_L{window}'] = grouped[opp_pts_col].transform(
+                new_cols[f"{prefix}_def_eff_L{window}"] = grouped[opp_pts_col].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
@@ -206,40 +235,40 @@ class FeatureBuilder:
         """
         new_cols = {}
         for window in self.rolling_windows:
-            if f'home_team_def_eff_L{window}' not in df.columns:
+            if f"home_team_def_eff_L{window}" not in df.columns:
                 continue
 
             for opp_stat, home_col, away_col in [
-                ('opp_def_quality', f'away_team_def_eff_L{window}', f'home_team_def_eff_L{window}'),
-                ('opp_off_quality', f'away_team_off_eff_L{window}', f'home_team_off_eff_L{window}'),
+                ("opp_def_quality", f"away_team_def_eff_L{window}", f"home_team_def_eff_L{window}"),
+                ("opp_off_quality", f"away_team_off_eff_L{window}", f"home_team_off_eff_L{window}"),
             ]:
-                home_rows = pd.DataFrame({
-                    'GAME_DATE': df['GAME_DATE'].values,
-                    'team_id':   df['HOME_TEAM_ID'].values,
-                    'opp_q':     df[home_col].values,
-                })
-                away_rows = pd.DataFrame({
-                    'GAME_DATE': df['GAME_DATE'].values,
-                    'team_id':   df['AWAY_TEAM_ID'].values,
-                    'opp_q':     df[away_col].values,
-                })
-                long_df = (
-                    pd.concat([home_rows, away_rows])
-                    .sort_values('GAME_DATE')
-                    .reset_index(drop=True)
+                home_rows = pd.DataFrame(
+                    {
+                        "GAME_DATE": df["GAME_DATE"].values,
+                        "team_id": df["HOME_TEAM_ID"].values,
+                        "opp_q": df[home_col].values,
+                    }
                 )
-                long_df['rolling'] = long_df.groupby('team_id')['opp_q'].transform(
+                away_rows = pd.DataFrame(
+                    {
+                        "GAME_DATE": df["GAME_DATE"].values,
+                        "team_id": df["AWAY_TEAM_ID"].values,
+                        "opp_q": df[away_col].values,
+                    }
+                )
+                long_df = pd.concat([home_rows, away_rows]).sort_values("GAME_DATE").reset_index(drop=True)
+                long_df["rolling"] = long_df.groupby("team_id")["opp_q"].transform(
                     lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
                 )
 
-                for team_col, prefix in [('HOME_TEAM_ID', 'home_team'), ('AWAY_TEAM_ID', 'away_team')]:
-                    query = df[['GAME_DATE', team_col]].rename(columns={team_col: 'team_id'})
+                for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+                    query = df[["GAME_DATE", team_col]].rename(columns={team_col: "team_id"})
                     merged = query.merge(
-                        long_df[['GAME_DATE', 'team_id', 'rolling']],
-                        on=['GAME_DATE', 'team_id'],
-                        how='left',
+                        long_df[["GAME_DATE", "team_id", "rolling"]],
+                        on=["GAME_DATE", "team_id"],
+                        how="left",
                     )
-                    new_cols[f'{prefix}_{opp_stat}_L{window}'] = merged['rolling'].values
+                    new_cols[f"{prefix}_{opp_stat}_L{window}"] = merged["rolling"].values
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
@@ -259,42 +288,46 @@ class FeatureBuilder:
 
     def _compute_venue_delta(self, df: pd.DataFrame, window: int) -> dict:
         home_lookup = (
-            df[['GAME_DATE', 'HOME_TEAM_ID']]
-            .assign(home_roll=df.groupby('HOME_TEAM_ID')['PTS_home'].transform(
-                lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
-            ))
-            .rename(columns={'HOME_TEAM_ID': 'team_id'})
-            .sort_values('GAME_DATE')
+            df[["GAME_DATE", "HOME_TEAM_ID"]]
+            .assign(
+                home_roll=df.groupby("HOME_TEAM_ID")["PTS_home"].transform(
+                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                )
+            )
+            .rename(columns={"HOME_TEAM_ID": "team_id"})
+            .sort_values("GAME_DATE")
         )
         away_lookup = (
-            df[['GAME_DATE', 'AWAY_TEAM_ID']]
-            .assign(away_roll=df.groupby('AWAY_TEAM_ID')['PTS_away'].transform(
-                lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
-            ))
-            .rename(columns={'AWAY_TEAM_ID': 'team_id'})
-            .sort_values('GAME_DATE')
+            df[["GAME_DATE", "AWAY_TEAM_ID"]]
+            .assign(
+                away_roll=df.groupby("AWAY_TEAM_ID")["PTS_away"].transform(
+                    lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+                )
+            )
+            .rename(columns={"AWAY_TEAM_ID": "team_id"})
+            .sort_values("GAME_DATE")
         )
 
-        home_query = df[['GAME_DATE', 'HOME_TEAM_ID']].rename(columns={'HOME_TEAM_ID': 'team_id'})
-        away_query = df[['GAME_DATE', 'AWAY_TEAM_ID']].rename(columns={'AWAY_TEAM_ID': 'team_id'})
+        home_query = df[["GAME_DATE", "HOME_TEAM_ID"]].rename(columns={"HOME_TEAM_ID": "team_id"})
+        away_query = df[["GAME_DATE", "AWAY_TEAM_ID"]].rename(columns={"AWAY_TEAM_ID": "team_id"})
 
         home_team_away_roll = pd.merge_asof(
-            home_query, away_lookup, on='GAME_DATE', by='team_id', direction='backward'
-        )['away_roll']
+            home_query, away_lookup, on="GAME_DATE", by="team_id", direction="backward"
+        )["away_roll"]
         away_team_home_roll = pd.merge_asof(
-            away_query, home_lookup, on='GAME_DATE', by='team_id', direction='backward'
-        )['home_roll']
+            away_query, home_lookup, on="GAME_DATE", by="team_id", direction="backward"
+        )["home_roll"]
 
-        home_roll = df.groupby('HOME_TEAM_ID')['PTS_home'].transform(
+        home_roll = df.groupby("HOME_TEAM_ID")["PTS_home"].transform(
             lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
         )
-        away_roll = df.groupby('AWAY_TEAM_ID')['PTS_away'].transform(
+        away_roll = df.groupby("AWAY_TEAM_ID")["PTS_away"].transform(
             lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
         )
 
         return {
-            f'home_team_venue_delta_L{window}': home_roll.values - home_team_away_roll.values,
-            f'away_team_venue_delta_L{window}': away_team_home_roll.values - away_roll.values,
+            f"home_team_venue_delta_L{window}": home_roll.values - home_team_away_roll.values,
+            f"away_team_venue_delta_L{window}": away_team_home_roll.values - away_roll.values,
         }
 
     def _add_matchup_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -308,18 +341,28 @@ class FeatureBuilder:
         """
         new_cols = {}
         for window in self.rolling_windows:
-            if f'home_team_off_eff_L{window}' in df.columns:
-                new_cols[f'home_off_vs_away_def_L{window}'] = df[f'home_team_off_eff_L{window}'] - df[f'away_team_def_eff_L{window}']
-                new_cols[f'away_off_vs_home_def_L{window}'] = df[f'away_team_off_eff_L{window}'] - df[f'home_team_def_eff_L{window}']
+            if f"home_team_off_eff_L{window}" in df.columns:
+                new_cols[f"home_off_vs_away_def_L{window}"] = (
+                    df[f"home_team_off_eff_L{window}"] - df[f"away_team_def_eff_L{window}"]
+                )
+                new_cols[f"away_off_vs_home_def_L{window}"] = (
+                    df[f"away_team_off_eff_L{window}"] - df[f"home_team_def_eff_L{window}"]
+                )
 
-            if f'home_team_fg3_pct_L{window}' in df.columns:
-                new_cols[f'home_3pt_advantage_L{window}'] = df[f'home_team_fg3_pct_L{window}'] - df[f'away_team_fg3_pct_L{window}']
+            if f"home_team_fg3_pct_L{window}" in df.columns:
+                new_cols[f"home_3pt_advantage_L{window}"] = (
+                    df[f"home_team_fg3_pct_L{window}"] - df[f"away_team_fg3_pct_L{window}"]
+                )
 
-            if f'home_team_win_pct_L{window}' in df.columns:
-                new_cols[f'form_differential_L{window}'] = df[f'home_team_win_pct_L{window}'] - df[f'away_team_win_pct_L{window}']
+            if f"home_team_win_pct_L{window}" in df.columns:
+                new_cols[f"form_differential_L{window}"] = (
+                    df[f"home_team_win_pct_L{window}"] - df[f"away_team_win_pct_L{window}"]
+                )
 
-            if f'home_team_diff_avg_L{window}' in df.columns:
-                new_cols[f'strength_differential_L{window}'] = df[f'home_team_diff_avg_L{window}'] - df[f'away_team_diff_avg_L{window}']
+            if f"home_team_diff_avg_L{window}" in df.columns:
+                new_cols[f"strength_differential_L{window}"] = (
+                    df[f"home_team_diff_avg_L{window}"] - df[f"away_team_diff_avg_L{window}"]
+                )
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
@@ -339,65 +382,75 @@ class FeatureBuilder:
         ww = self.h2h_win_rate_window
 
         # Temp columns needed for groupby operations
-        df['matchup_key'] = df.apply(
-            lambda row: '_'.join(sorted([str(row['HOME_TEAM_ID']), str(row['AWAY_TEAM_ID'])])),
-            axis=1
+        df["matchup_key"] = df.apply(
+            lambda row: "_".join(sorted([str(row["HOME_TEAM_ID"]), str(row["AWAY_TEAM_ID"])])), axis=1
         )
-        df['_canonical_team'] = df[['HOME_TEAM_ID', 'AWAY_TEAM_ID']].min(axis=1)
-        df['_canonical_margin'] = df.apply(
-            lambda r: r['POINT_DIFF'] if r['HOME_TEAM_ID'] == r['_canonical_team'] else -r['POINT_DIFF'],
-            axis=1
+        df["_canonical_team"] = df[["HOME_TEAM_ID", "AWAY_TEAM_ID"]].min(axis=1)
+        df["_canonical_margin"] = df.apply(
+            lambda r: r["POINT_DIFF"] if r["HOME_TEAM_ID"] == r["_canonical_team"] else -r["POINT_DIFF"],
+            axis=1,
         )
         # For h2h features, process each matchup_key separately to avoid index issues
         h2h_results = {}
-        for key in ['_h2h_margin_canon', '_h2h_win_canon', '_h2h_win_3yr_canon', '_h2h_avg_diff_canon']:
+        for key in ["_h2h_margin_canon", "_h2h_win_canon", "_h2h_win_3yr_canon", "_h2h_avg_diff_canon"]:
             h2h_results[key] = pd.Series(index=df.index, dtype=float)
 
-        for matchup_key in df['matchup_key'].unique():
-            mask = df['matchup_key'] == matchup_key
+        for matchup_key in df["matchup_key"].unique():
+            mask = df["matchup_key"] == matchup_key
             group_indices = df[mask].index
             group_df = df.loc[group_indices].copy()
 
             # _h2h_margin_canon
-            h2h_results['_h2h_margin_canon'].loc[group_indices] = (
-                group_df['_canonical_margin'].shift(1).rolling(mw, min_periods=1).mean().values
+            h2h_results["_h2h_margin_canon"].loc[group_indices] = (
+                group_df["_canonical_margin"].shift(1).rolling(mw, min_periods=1).mean().values
             )
 
             # _h2h_win_canon
-            h2h_results['_h2h_win_canon'].loc[group_indices] = (
-                (group_df['_canonical_margin'] > 0).shift(1).rolling(ww, min_periods=1).mean().values
+            h2h_results["_h2h_win_canon"].loc[group_indices] = (
+                (group_df["_canonical_margin"] > 0).shift(1).rolling(ww, min_periods=1).mean().values
             )
 
             # _h2h_win_3yr_canon
-            h2h_results['_h2h_win_3yr_canon'].loc[group_indices] = (
-                self._compute_h2h_3year_win_pct(group_df).values
-            )
+            h2h_results["_h2h_win_3yr_canon"].loc[group_indices] = self._compute_h2h_3year_win_pct(
+                group_df
+            ).values
 
             # _h2h_avg_diff_canon
-            h2h_results['_h2h_avg_diff_canon'].loc[group_indices] = (
-                group_df['_canonical_margin'].shift(1).expanding(min_periods=1).mean().values
+            h2h_results["_h2h_avg_diff_canon"].loc[group_indices] = (
+                group_df["_canonical_margin"].shift(1).expanding(min_periods=1).mean().values
             )
 
         for key, series in h2h_results.items():
             df[key] = series
 
         # 3. Home/away split win percentages (from home team perspective)
-        df['_h2h_home_win_pct'] = self._compute_h2h_home_away_splits(df, 'home')
-        df['_h2h_away_win_pct'] = self._compute_h2h_home_away_splits(df, 'away')
+        df["_h2h_home_win_pct"] = self._compute_h2h_home_away_splits(df, "home")
+        df["_h2h_away_win_pct"] = self._compute_h2h_home_away_splits(df, "away")
 
-        is_canon_home = df['HOME_TEAM_ID'] == df['_canonical_team']
+        is_canon_home = df["HOME_TEAM_ID"] == df["_canonical_team"]
         new_cols = {
-            f'h2h_home_margin_L{mw}':   df['_h2h_margin_canon'].where(is_canon_home, -df['_h2h_margin_canon']),
-            f'h2h_home_win_rate_L{ww}': df['_h2h_win_canon'].where(is_canon_home, 1 - df['_h2h_win_canon']),
-            'h2h_win_pct_3yr': df['_h2h_win_3yr_canon'].where(is_canon_home, 1 - df['_h2h_win_3yr_canon']),
-            'h2h_avg_diff': df['_h2h_avg_diff_canon'].where(is_canon_home, -df['_h2h_avg_diff_canon']),
-            'h2h_home_win_pct': df['_h2h_home_win_pct'],
-            'h2h_away_win_pct': df['_h2h_away_win_pct'],
+            f"h2h_home_margin_L{mw}": df["_h2h_margin_canon"].where(is_canon_home, -df["_h2h_margin_canon"]),
+            f"h2h_home_win_rate_L{ww}": df["_h2h_win_canon"].where(is_canon_home, 1 - df["_h2h_win_canon"]),
+            "h2h_win_pct_3yr": df["_h2h_win_3yr_canon"].where(is_canon_home, 1 - df["_h2h_win_3yr_canon"]),
+            "h2h_avg_diff": df["_h2h_avg_diff_canon"].where(is_canon_home, -df["_h2h_avg_diff_canon"]),
+            "h2h_home_win_pct": df["_h2h_home_win_pct"],
+            "h2h_away_win_pct": df["_h2h_away_win_pct"],
         }
 
-        df.drop(columns=['matchup_key', '_canonical_team', '_canonical_margin', '_h2h_margin_canon', '_h2h_win_canon',
-                         '_h2h_win_3yr_canon', '_h2h_avg_diff_canon', '_h2h_home_win_pct', '_h2h_away_win_pct'],
-                inplace=True)
+        df.drop(
+            columns=[
+                "matchup_key",
+                "_canonical_team",
+                "_canonical_margin",
+                "_h2h_margin_canon",
+                "_h2h_win_canon",
+                "_h2h_win_3yr_canon",
+                "_h2h_avg_diff_canon",
+                "_h2h_home_win_pct",
+                "_h2h_away_win_pct",
+            ],
+            inplace=True,
+        )
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
@@ -416,22 +469,22 @@ class FeatureBuilder:
 
         # Preserve original index but sort by date
         orig_index = matchup_games.index
-        matchup_sorted = matchup_games.sort_values('GAME_DATE')
+        matchup_sorted = matchup_games.sort_values("GAME_DATE")
         sorted_orig_index = matchup_sorted.index  # original labels, in date-sorted order
         matchup_sorted = matchup_sorted.reset_index(drop=True)
-        current_season = matchup_sorted['SEASON_ID'].values
-        canonical_win = (matchup_sorted['_canonical_margin'] > 0).astype(float).values
+        current_season = matchup_sorted["SEASON_ID"].values
+        canonical_win = (matchup_sorted["_canonical_margin"] > 0).astype(float).values
 
         result = []
         for i in range(len(matchup_sorted)):
             if i == 0:
-                result.append(float('nan'))
+                result.append(float("nan"))
             else:
                 # Look back at all games within last 3 seasons
                 curr_season = current_season[i]
                 recent_3yr_mask = current_season[:i] >= curr_season - 3
                 if recent_3yr_mask.sum() == 0:
-                    result.append(float('nan'))
+                    result.append(float("nan"))
                 else:
                     win_pct = canonical_win[:i][recent_3yr_mask].mean()
                     result.append(win_pct)
@@ -451,37 +504,34 @@ class FeatureBuilder:
         Returns:
             Series with win% (indexed by df.index)
         """
-        result = pd.Series(float('nan'), index=df.index)
+        result = pd.Series(float("nan"), index=df.index)
 
         for idx in df.index:
             if idx == 0:
                 continue
 
-            home_team_id = df.loc[idx, 'HOME_TEAM_ID']
-            away_team_id = df.loc[idx, 'AWAY_TEAM_ID']
-            curr_date = df.loc[idx, 'GAME_DATE']
+            home_team_id = df.loc[idx, "HOME_TEAM_ID"]
+            away_team_id = df.loc[idx, "AWAY_TEAM_ID"]
 
             # Get all prior games
-            prior = df.loc[:idx-1]
+            prior = df.loc[: idx - 1]
 
-            if venue_type == 'home':
+            if venue_type == "home":
                 # Home team playing at home against this opponent
                 matching = prior[
-                    (prior['HOME_TEAM_ID'] == home_team_id) &
-                    (prior['AWAY_TEAM_ID'] == away_team_id)
+                    (prior["HOME_TEAM_ID"] == home_team_id) & (prior["AWAY_TEAM_ID"] == away_team_id)
                 ]
                 if len(matching) > 0:
-                    wins = (matching['POINT_DIFF'] > 0).sum()
+                    wins = (matching["POINT_DIFF"] > 0).sum()
                     result.loc[idx] = wins / len(matching)
             else:  # away
                 # Home team playing away against this opponent
                 matching = prior[
-                    (prior['HOME_TEAM_ID'] == away_team_id) &
-                    (prior['AWAY_TEAM_ID'] == home_team_id)
+                    (prior["HOME_TEAM_ID"] == away_team_id) & (prior["AWAY_TEAM_ID"] == home_team_id)
                 ]
                 if len(matching) > 0:
                     # Win when away means POINT_DIFF < 0
-                    wins = (matching['POINT_DIFF'] < 0).sum()
+                    wins = (matching["POINT_DIFF"] < 0).sum()
                     result.loc[idx] = wins / len(matching)
 
         return result
@@ -491,7 +541,10 @@ class FeatureBuilder:
         R = 3958.8  # Earth radius in miles
         dlat = math.radians(lat2 - lat1)
         dlon = math.radians(lon2 - lon1)
-        a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        a = (
+            math.sin(dlat / 2) ** 2
+            + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+        )
         return R * 2 * math.asin(math.sqrt(a))
 
     def _add_travel_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -505,86 +558,90 @@ class FeatureBuilder:
         loc = _TEAM_LOCATIONS
 
         # Long format: one row per (game, team) recording where the game is played
-        home_rows = pd.DataFrame({
-            'GAME_DATE': df['GAME_DATE'].values,
-            'team_id':   df['HOME_TEAM_ID'].values,
-            'city_team': df['HOME_TEAM_ID'].values,  # game is in home team's city
-        })
-        away_rows = pd.DataFrame({
-            'GAME_DATE': df['GAME_DATE'].values,
-            'team_id':   df['AWAY_TEAM_ID'].values,
-            'city_team': df['HOME_TEAM_ID'].values,  # away team travels to home team's city
-        })
-        long_df = (
-            pd.concat([home_rows, away_rows])
-            .sort_values('GAME_DATE')
-            .reset_index(drop=True)
+        home_rows = pd.DataFrame(
+            {
+                "GAME_DATE": df["GAME_DATE"].values,
+                "team_id": df["HOME_TEAM_ID"].values,
+                "city_team": df["HOME_TEAM_ID"].values,  # game is in home team's city
+            }
         )
+        away_rows = pd.DataFrame(
+            {
+                "GAME_DATE": df["GAME_DATE"].values,
+                "team_id": df["AWAY_TEAM_ID"].values,
+                "city_team": df["HOME_TEAM_ID"].values,  # away team travels to home team's city
+            }
+        )
+        long_df = pd.concat([home_rows, away_rows]).sort_values("GAME_DATE").reset_index(drop=True)
 
-        long_df['prev_city_team'] = long_df.groupby('team_id')['city_team'].shift(1)
+        long_df["prev_city_team"] = long_df.groupby("team_id")["city_team"].shift(1)
         # Default previous city to team's own home (no travel) when no prior game exists
-        long_df['prev_city_team'] = long_df['prev_city_team'].fillna(long_df['team_id'])
+        long_df["prev_city_team"] = long_df["prev_city_team"].fillna(long_df["team_id"])
 
         def travel_miles(row):
-            curr = loc.get(int(row['city_team']))
-            prev = loc.get(int(row['prev_city_team']))
+            curr = loc.get(int(row["city_team"]))
+            prev = loc.get(int(row["prev_city_team"]))
             if curr is None or prev is None:
                 return 0.0
             return self._haversine_miles(prev[0], prev[1], curr[0], curr[1])
 
         def tz_shift(row):
-            curr = loc.get(int(row['city_team']))
-            prev = loc.get(int(row['prev_city_team']))
+            curr = loc.get(int(row["city_team"]))
+            prev = loc.get(int(row["prev_city_team"]))
             if curr is None or prev is None:
                 return 0
             return curr[2] - prev[2]  # positive = traveled east
 
-        long_df['travel_miles'] = long_df.apply(travel_miles, axis=1)
-        long_df['tz_shift']     = long_df.apply(tz_shift,     axis=1)
+        long_df["travel_miles"] = long_df.apply(travel_miles, axis=1)
+        long_df["tz_shift"] = long_df.apply(tz_shift, axis=1)
 
         # Rolling travel miles over last 7 and 14 days (day-windows capture road-trip
         # fatigue better than game-count windows since schedule density varies).
-        long_df['GAME_DATE'] = pd.to_datetime(long_df['GAME_DATE'])
-        long_df = long_df.sort_values(['team_id', 'GAME_DATE'])
+        long_df["GAME_DATE"] = pd.to_datetime(long_df["GAME_DATE"])
+        long_df = long_df.sort_values(["team_id", "GAME_DATE"])
         for days in [7, 14]:
-            col = f'travel_miles_{days}d'
-            long_df[col] = (
-                long_df.groupby('team_id', group_keys=False)
-                .apply(lambda g, d=days: (
-                    g.set_index('GAME_DATE')['travel_miles']
-                    .rolling(f'{d}D', closed='both')
+            col = f"travel_miles_{days}d"
+            long_df[col] = long_df.groupby("team_id", group_keys=False).apply(
+                lambda g, d=days: (
+                    g.set_index("GAME_DATE")["travel_miles"]
+                    .rolling(f"{d}D", closed="both")
                     .sum()
                     .set_axis(g.index)
-                ))
+                )
             )
 
-        rolling_cols = ['travel_miles_7d', 'travel_miles_14d']
+        rolling_cols = ["travel_miles_7d", "travel_miles_14d"]
         new_cols = {}
-        for team_col, prefix in [('HOME_TEAM_ID', 'home_team'), ('AWAY_TEAM_ID', 'away_team')]:
-            query = df[['GAME_DATE', team_col]].rename(columns={team_col: 'team_id'})
-            query['GAME_DATE'] = pd.to_datetime(query['GAME_DATE'])
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            query = df[["GAME_DATE", team_col]].rename(columns={team_col: "team_id"})
+            query["GAME_DATE"] = pd.to_datetime(query["GAME_DATE"])
             merged = query.merge(
-                long_df[['GAME_DATE', 'team_id', 'travel_miles', 'tz_shift'] + rolling_cols],
-                on=['GAME_DATE', 'team_id'],
-                how='left',
+                long_df[["GAME_DATE", "team_id", "travel_miles", "tz_shift"] + rolling_cols],
+                on=["GAME_DATE", "team_id"],
+                how="left",
             )
-            new_cols[f'{prefix}_travel_miles']      = merged['travel_miles'].fillna(0).values
-            new_cols[f'{prefix}_tz_shift']           = merged['tz_shift'].fillna(0).values
-            new_cols[f'{prefix}_travel_miles_7d']   = merged['travel_miles_7d'].fillna(0).values
-            new_cols[f'{prefix}_travel_miles_14d']  = merged['travel_miles_14d'].fillna(0).values
+            new_cols[f"{prefix}_travel_miles"] = merged["travel_miles"].fillna(0).values
+            new_cols[f"{prefix}_tz_shift"] = merged["tz_shift"].fillna(0).values
+            new_cols[f"{prefix}_travel_miles_7d"] = merged["travel_miles_7d"].fillna(0).values
+            new_cols[f"{prefix}_travel_miles_14d"] = merged["travel_miles_14d"].fillna(0).values
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
-    def _add_elo_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _add_elo_features(self, df: pd.DataFrame, context_end_date: Optional[str] = None) -> pd.DataFrame:
         """
         Add pre-game Elo ratings (home_team_elo, away_team_elo, elo_diff).
 
         Elo is inherently sequential — a team's rating depends on every prior
         result, not just a recent window. So ratings are computed once over
-        the full chronological game history (not just the rows in `df`),
-        then merged onto `df` by GAME_ID. This ensures val/test games carry
-        forward ratings accumulated during train, rather than restarting at
-        initial_rating each split.
+        the full chronological game history up to `context_end_date` (not just
+        the rows in `df`, but never beyond this call's own applicable end date
+        either — see `create_all_features`'s docstring), then merged onto `df`
+        by GAME_ID. This ensures val/test games carry forward ratings
+        accumulated during train, rather than restarting at initial_rating
+        each split, WITHOUT a train-time call being able to reach into
+        val/test-period games (the bug this replaced: this used to always load
+        through the global `datasets_loading.test_end_date`, regardless of
+        which split was being processed).
         """
         cfg = load_config()
         if not cfg.elo_features or not cfg.elo_features.enabled:
@@ -597,8 +654,9 @@ class FeatureBuilder:
         try:
             all_games = loader.load_games(
                 start_date=cfg.datasets_loading.data_start_date,
-                end_date=cfg.datasets_loading.test_end_date,
-                allowed_season_types=cfg.datasets_loading.context_season_types or cfg.datasets_loading.allowed_season_types,
+                end_date=context_end_date,
+                allowed_season_types=cfg.datasets_loading.context_season_types
+                or cfg.datasets_loading.allowed_season_types,
             )
         finally:
             loader.close()
@@ -613,12 +671,14 @@ class FeatureBuilder:
             season_regression=elo_cfg.season_regression,
         )
 
-        merged = df[['GAME_ID']].merge(elo_df, on='GAME_ID', how='left')
+        merged = df[["GAME_ID"]].merge(elo_df, on="GAME_ID", how="left")
 
         new_cols = {
-            'home_team_elo': merged['home_team_elo'].values,
-            'away_team_elo': merged['away_team_elo'].values,
-            'elo_diff': merged['home_team_elo'].values + elo_cfg.home_advantage - merged['away_team_elo'].values,
+            "home_team_elo": merged["home_team_elo"].values,
+            "away_team_elo": merged["away_team_elo"].values,
+            "elo_diff": merged["home_team_elo"].values
+            + elo_cfg.home_advantage
+            - merged["away_team_elo"].values,
         }
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
@@ -647,10 +707,12 @@ class FeatureBuilder:
         new_cols = {}
         home_merged, away_merged = None, None
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
-            lookup = pd.DataFrame({
-                "game_date": game_dates.values,
-                "team_id": df[team_col].values,
-            })
+            lookup = pd.DataFrame(
+                {
+                    "game_date": game_dates.values,
+                    "team_id": df[team_col].values,
+                }
+            )
             merged = lookup.merge(injury_df, on=["game_date", "team_id"], how="left")
             new_cols[f"{prefix}_n_out"] = merged["n_out"].fillna(0).astype(int).values
             new_cols[f"{prefix}_n_questionable"] = merged["n_questionable"].fillna(0).astype(int).values
@@ -661,8 +723,7 @@ class FeatureBuilder:
                 away_merged = merged
 
         new_cols["team_deficit_diff"] = (
-            home_merged["team_deficit"].fillna(0).values
-            - away_merged["team_deficit"].fillna(0).values
+            home_merged["team_deficit"].fillna(0).values - away_merged["team_deficit"].fillna(0).values
         )
 
         dates_with_coverage = set(injury_df["game_date"])
@@ -705,9 +766,7 @@ class FeatureBuilder:
                 conn,
             )
 
-        merged = df[["GAME_ID"]].merge(
-            scores_df, left_on="GAME_ID", right_on="game_id", how="left"
-        )
+        merged = df[["GAME_ID"]].merge(scores_df, left_on="GAME_ID", right_on="game_id", how="left")
 
         new_cols = {
             "style_matchup_score": merged["style_matchup_score"].values,
@@ -718,7 +777,11 @@ class FeatureBuilder:
     # Metrics with a calibrated (Layer 2, injury-adjusted) value already validated
     # across A7's early stages -- see docs/a7_phase_log.md.
     _RAW_STYLE_CALIBRATED_METRICS = [
-        "pace_score", "three_pt_reliance", "paint_activity", "defensive_rating", "assist_rate",
+        "pace_score",
+        "three_pt_reliance",
+        "paint_activity",
+        "defensive_rating",
+        "assist_rate",
     ]
     # Added by the raw-fingerprint feature redesign -- offensive-quality counterpart
     # to defensive_rating. Layer 1 (uncalibrated) only, a deliberate scope cut -- see
@@ -825,8 +888,9 @@ class FeatureBuilder:
 
         with sqlite3.connect(f"file:{cache_db}?mode=ro", uri=True) as conn:
             layer2 = pd.read_sql_query(
-                "SELECT game_id, team_id, game_date, " + ", ".join(calibrated) +
-                " FROM matchup_fingerprints WHERE layer = 2",
+                "SELECT game_id, team_id, game_date, "
+                + ", ".join(calibrated)
+                + " FROM matchup_fingerprints WHERE layer = 2",
                 conn,
             )
             layer1_uncalibrated = pd.read_sql_query(
@@ -834,9 +898,7 @@ class FeatureBuilder:
                 conn,
             )
 
-        fingerprints = layer2.merge(
-            layer1_uncalibrated, on=["game_id", "team_id"], how="left"
-        )
+        fingerprints = layer2.merge(layer1_uncalibrated, on=["game_id", "team_id"], how="left")
         # Normalize to date granularity (drop any time-of-day component) so this
         # matches on the same terms as _add_injury_features's (team_id, game_date)
         # join, and sort ascending — merge_asof's "on" column must be sorted on
@@ -849,10 +911,12 @@ class FeatureBuilder:
         new_cols = {}
         side_values = {}
         for team_col, side in [("HOME_TEAM_ID", "home"), ("AWAY_TEAM_ID", "away")]:
-            lookup = pd.DataFrame({
-                "game_date": query_dates.values,
-                "team_id": df[team_col].values,
-            })
+            lookup = pd.DataFrame(
+                {
+                    "game_date": query_dates.values,
+                    "team_id": df[team_col].values,
+                }
+            )
             merged = pd.merge_asof(
                 lookup,
                 fingerprints[["game_date", "team_id"] + all_metrics],
@@ -1026,7 +1090,9 @@ class FeatureBuilder:
         out_players["weight"] = np.where(out_players["status"] == "Out", 1.0, doubtful_weight)
         out_players_resolved = out_players.merge(name_res, on="player_name", how="inner")
 
-        def _asof_lookup(rows: pd.DataFrame, pool: pd.DataFrame, split_type: str, by_cols: list[str]) -> pd.Series:
+        def _asof_lookup(
+            rows: pd.DataFrame, pool: pd.DataFrame, split_type: str, by_cols: list[str]
+        ) -> pd.Series:
             sub_pool = pool[pool["split_type"] == split_type].sort_values("as_of_date")
             if sub_pool.empty:
                 return pd.Series([float("nan")] * len(rows), index=rows.index)
@@ -1042,9 +1108,13 @@ class FeatureBuilder:
                 left[col] = left[col].astype("int64")
                 right[col] = right[col].astype("int64")
             merged = pd.merge_asof(
-                left, right,
-                left_on="lookup_date", right_on="as_of_date",
-                by=by_cols, direction="backward", allow_exact_matches=True,
+                left,
+                right,
+                left_on="lookup_date",
+                right_on="as_of_date",
+                by=by_cols,
+                direction="backward",
+                allow_exact_matches=True,
             )
             return merged["on_off_plus_minus"]
 
@@ -1053,14 +1123,17 @@ class FeatureBuilder:
             ("HOME_TEAM_ID", "home", "home_team"),
             ("AWAY_TEAM_ID", "away", "away_team"),
         ]:
-            rows = pd.DataFrame({
-                "row_id": df.index,
-                "game_date": pd.to_datetime(df["GAME_DATE"]).dt.normalize().values,
-                "team_id": df[team_col].values,
-            })
+            rows = pd.DataFrame(
+                {
+                    "row_id": df.index,
+                    "game_date": pd.to_datetime(df["GAME_DATE"]).dt.normalize().values,
+                    "team_id": df[team_col].values,
+                }
+            )
             rows = rows.merge(
                 out_players_resolved[["game_date", "team_id", "player_name", "player_id", "weight"]],
-                on=["game_date", "team_id"], how="inner",
+                on=["game_date", "team_id"],
+                how="inner",
             )
 
             if rows.empty:
@@ -1090,15 +1163,20 @@ class FeatureBuilder:
             merged = pd.DataFrame(index=df.index).join(agg)
             new_cols[f"{prefix}_missing_player_on_off_impact"] = merged["impact_sum"].fillna(0.0).values
             new_cols[f"{prefix}_n_missing_total"] = merged["out_n"].fillna(0).astype(int).values
-            new_cols[f"{prefix}_n_missing_resolved_on_off"] = merged["resolved_n"].fillna(0).astype(int).values
+            new_cols[f"{prefix}_n_missing_resolved_on_off"] = (
+                merged["resolved_n"].fillna(0).astype(int).values
+            )
 
         new_cols["missing_player_on_off_impact_diff"] = (
-            new_cols["home_team_missing_player_on_off_impact"] - new_cols["away_team_missing_player_on_off_impact"]
+            new_cols["home_team_missing_player_on_off_impact"]
+            - new_cols["away_team_missing_player_on_off_impact"]
         )
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
-    def _add_season_motivation_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _add_season_motivation_features(
+        self, df: pd.DataFrame, context_end_date: Optional[str] = None
+    ) -> pd.DataFrame:
         """
         Season motivation / seeding-incentive features. See
         `season_motivation.py`'s module docstring for what each signal
@@ -1108,6 +1186,16 @@ class FeatureBuilder:
         `game` (only `game_date`/team-id columns read from "future" rows,
         never outcomes). Delegates to `src/feature_engineering/season_motivation.py`,
         same separation `_add_elo_features` uses.
+
+        `context_end_date` bounds the internal `all_games` load to this call's
+        own applicable end date (never the global `datasets_loading.test_end_date`
+        regardless of which split is being processed -- see `create_all_features`'s
+        docstring). Standings/roster/preferred_opponent_delta are point-in-time
+        snapshots, safe to recompute fresh from however much history is available
+        on every call. `elo_margin_scale` is NOT -- it's a least-squares fit, so
+        it's fit once (on this instance's first call, assumed train) and cached
+        on `self._fitted_elo_margin_scale` for reuse, never refit using val/test
+        outcomes.
 
         Adds, for each of home_team/away_team: `_motivation_score`,
         `_games_to_clinch_ceiling`/`_games_to_clinch_floor`,
@@ -1135,14 +1223,14 @@ class FeatureBuilder:
 
         from src.data_processing.data_loader import NBADataLoader
         from src.feature_engineering.season_motivation import (
-            compute_standings_metrics,
-            compute_roster_behavior_scores,
-            compute_recent_minutes_trend_scores,
-            compute_team_performance_history,
-            compute_performance_vs_expectation_scores,
-            compute_opponent_adjusted_form_scores,
-            compute_preferred_opponent_delta_scores,
             _fit_elo_margin_scale,
+            compute_opponent_adjusted_form_scores,
+            compute_performance_vs_expectation_scores,
+            compute_preferred_opponent_delta_scores,
+            compute_recent_minutes_trend_scores,
+            compute_roster_behavior_scores,
+            compute_standings_metrics,
+            compute_team_performance_history,
         )
 
         sm_cfg = cfg.season_motivation
@@ -1150,7 +1238,7 @@ class FeatureBuilder:
         try:
             all_games = loader.load_games(
                 start_date=cfg.datasets_loading.data_start_date,
-                end_date=cfg.datasets_loading.test_end_date,
+                end_date=context_end_date,
                 allowed_season_types=cfg.datasets_loading.allowed_season_types,
             )
         finally:
@@ -1163,25 +1251,52 @@ class FeatureBuilder:
         recent_minutes_trend = None
         if sm_cfg.motivation_score_enabled:
             standings = compute_standings_metrics(
-                all_games, sm_cfg.playoff_line_seed, sm_cfg.direct_playoff_seed, sm_cfg.direct_playoff_weight,
+                all_games,
+                sm_cfg.playoff_line_seed,
+                sm_cfg.direct_playoff_seed,
+                sm_cfg.direct_playoff_weight,
             )
 
             season_start_by_season = (
                 all_games.assign(GAME_DATE=pd.to_datetime(all_games["GAME_DATE"]).dt.normalize())
-                .groupby("SEASON_ID")["GAME_DATE"].min().to_dict()
+                .groupby("SEASON_ID")["GAME_DATE"]
+                .min()
+                .to_dict()
             )
-            team_dates = pd.concat([
-                pd.DataFrame({"team_id": df["HOME_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
-                pd.DataFrame({"team_id": df["AWAY_TEAM_ID"].values, "game_date": game_dates.values, "season_id": df["SEASON_ID"].values}),
-            ], ignore_index=True)
+            team_dates = pd.concat(
+                [
+                    pd.DataFrame(
+                        {
+                            "team_id": df["HOME_TEAM_ID"].values,
+                            "game_date": game_dates.values,
+                            "season_id": df["SEASON_ID"].values,
+                        }
+                    ),
+                    pd.DataFrame(
+                        {
+                            "team_id": df["AWAY_TEAM_ID"].values,
+                            "game_date": game_dates.values,
+                            "season_id": df["SEASON_ID"].values,
+                        }
+                    ),
+                ],
+                ignore_index=True,
+            )
 
             roster_behavior = compute_roster_behavior_scores(
-                team_dates, str(injury_db), cfg.injury_features.importance_weights,
-                sm_cfg.min_importance_games, season_start_by_season,
+                team_dates,
+                str(injury_db),
+                cfg.injury_features.importance_weights,
+                sm_cfg.min_importance_games,
+                season_start_by_season,
             )
             recent_minutes_trend = compute_recent_minutes_trend_scores(
-                team_dates, str(injury_db), cfg.injury_features.importance_weights,
-                sm_cfg.min_importance_games, season_start_by_season, sm_cfg.recent_trend_lookback_weeks,
+                team_dates,
+                str(injury_db),
+                cfg.injury_features.importance_weights,
+                sm_cfg.min_importance_games,
+                season_start_by_season,
+                sm_cfg.recent_trend_lookback_weeks,
             )
 
         performance_vs_expectation = None
@@ -1197,40 +1312,64 @@ class FeatureBuilder:
 
                 elo_cfg = cfg.elo_features
                 elo_ratings = compute_elo_ratings(
-                    all_games, initial_rating=elo_cfg.initial_rating, k_factor=elo_cfg.k_factor,
-                    home_advantage=elo_cfg.home_advantage, mov_multiplier=elo_cfg.mov_multiplier,
+                    all_games,
+                    initial_rating=elo_cfg.initial_rating,
+                    k_factor=elo_cfg.k_factor,
+                    home_advantage=elo_cfg.home_advantage,
+                    mov_multiplier=elo_cfg.mov_multiplier,
                     season_regression=elo_cfg.season_regression,
                 )
-                elo_margin_scale = _fit_elo_margin_scale(all_games, elo_ratings, elo_cfg.home_advantage)
+                # Fit ONCE on this instance's first call (assumed train -- see
+                # __init__), reused unchanged on later val/test calls. This is
+                # a least-squares fit, not a point-in-time snapshot -- refitting
+                # it fresh on every call (using whatever `all_games` that call's
+                # own context_end_date allows) would mean val/test outcomes
+                # influence a "constant" the model also uses to score training
+                # rows. See CLAUDE.md's leakage-safety rule.
+                if self._fitted_elo_margin_scale is None:
+                    self._fitted_elo_margin_scale = _fit_elo_margin_scale(
+                        all_games, elo_ratings, elo_cfg.home_advantage
+                    )
+                elo_margin_scale = self._fitted_elo_margin_scale
                 team_performance = compute_team_performance_history(
-                    all_games, elo_ratings, elo_cfg.home_advantage, elo_margin_scale,
+                    all_games,
+                    elo_ratings,
+                    elo_cfg.home_advantage,
+                    elo_margin_scale,
                 )
                 if sm_cfg.performance_vs_expectation_enabled:
                     performance_vs_expectation = compute_performance_vs_expectation_scores(
-                        team_performance, sm_cfg.performance_vs_expectation_window,
+                        team_performance,
+                        sm_cfg.performance_vs_expectation_window,
                     )
                 if sm_cfg.opponent_adjusted_form_enabled:
                     opponent_adjusted_form = compute_opponent_adjusted_form_scores(
-                        team_performance, sm_cfg.opponent_adjusted_form_window,
+                        team_performance,
+                        sm_cfg.opponent_adjusted_form_window,
                     )
 
         preferred_opponent_delta = None
         if sm_cfg.preferred_opponent_delta_enabled:
             preferred_opponent_delta = compute_preferred_opponent_delta_scores(
-                all_games, sm_cfg.preferred_opponent_delta_window_games,
+                all_games,
+                sm_cfg.preferred_opponent_delta_window_games,
             )
 
         new_cols = {}
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
-            lookup = pd.DataFrame({
-                "season_id": df["SEASON_ID"].values,
-                "team_id": df[team_col].values,
-                "snapshot_date": game_dates.values,
-            })
+            lookup = pd.DataFrame(
+                {
+                    "season_id": df["SEASON_ID"].values,
+                    "team_id": df[team_col].values,
+                    "snapshot_date": game_dates.values,
+                }
+            )
             rb_lookup = pd.DataFrame({"team_id": df[team_col].values, "game_date": game_dates.values})
 
             if standings is not None:
-                standings_merged = lookup.merge(standings, on=["season_id", "team_id", "snapshot_date"], how="left")
+                standings_merged = lookup.merge(
+                    standings, on=["season_id", "team_id", "snapshot_date"], how="left"
+                )
                 rb_merged = rb_lookup.merge(roster_behavior, on=["team_id", "game_date"], how="left")
                 roster_score = rb_merged["roster_behavior_score"].fillna(0.0).values
 
@@ -1241,20 +1380,34 @@ class FeatureBuilder:
                 motivation = np.clip(pressure * (1 - sm_cfg.roster_behavior_weight * roster_score), 0.0, 1.0)
 
                 new_cols[f"{prefix}_motivation_score"] = motivation
-                new_cols[f"{prefix}_games_to_clinch_ceiling"] = standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
-                new_cols[f"{prefix}_games_to_clinch_floor"] = standings_merged["games_to_clinch_floor"].fillna(0.0).values
+                new_cols[f"{prefix}_games_to_clinch_ceiling"] = (
+                    standings_merged["games_to_clinch_ceiling"].fillna(0.0).values
+                )
+                new_cols[f"{prefix}_games_to_clinch_floor"] = (
+                    standings_merged["games_to_clinch_floor"].fillna(0.0).values
+                )
                 new_cols[f"{prefix}_recent_minutes_trend_score"] = trend_score
 
             if performance_vs_expectation is not None:
-                pve_merged = rb_lookup.merge(performance_vs_expectation, on=["team_id", "game_date"], how="left")
-                new_cols[f"{prefix}_performance_vs_expectation_score"] = pve_merged["performance_vs_expectation_score"].fillna(0.0).values
+                pve_merged = rb_lookup.merge(
+                    performance_vs_expectation, on=["team_id", "game_date"], how="left"
+                )
+                new_cols[f"{prefix}_performance_vs_expectation_score"] = (
+                    pve_merged["performance_vs_expectation_score"].fillna(0.0).values
+                )
             if opponent_adjusted_form is not None:
                 oaf_merged = rb_lookup.merge(opponent_adjusted_form, on=["team_id", "game_date"], how="left")
-                new_cols[f"{prefix}_opponent_adjusted_form_score"] = oaf_merged["opponent_adjusted_form_score"].fillna(0.0).values
+                new_cols[f"{prefix}_opponent_adjusted_form_score"] = (
+                    oaf_merged["opponent_adjusted_form_score"].fillna(0.0).values
+                )
 
             if preferred_opponent_delta is not None:
-                pod_merged = lookup.merge(preferred_opponent_delta, on=["season_id", "team_id", "snapshot_date"], how="left")
-                new_cols[f"{prefix}_preferred_opponent_delta"] = pod_merged["preferred_opponent_delta"].fillna(0.0).values
+                pod_merged = lookup.merge(
+                    preferred_opponent_delta, on=["season_id", "team_id", "snapshot_date"], how="left"
+                )
+                new_cols[f"{prefix}_preferred_opponent_delta"] = (
+                    pod_merged["preferred_opponent_delta"].fillna(0.0).values
+                )
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 

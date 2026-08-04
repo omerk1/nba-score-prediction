@@ -44,14 +44,14 @@ import pytest
 
 from src.feature_engineering.feature_builder import FeatureBuilder
 from src.feature_engineering.season_motivation import (
-    compute_standings_metrics,
-    compute_roster_behavior_scores,
-    compute_recent_minutes_trend_scores,
-    compute_team_performance_history,
-    compute_performance_vs_expectation_scores,
-    compute_opponent_adjusted_form_scores,
-    compute_preferred_opponent_delta_scores,
     _fit_elo_margin_scale,
+    compute_opponent_adjusted_form_scores,
+    compute_performance_vs_expectation_scores,
+    compute_preferred_opponent_delta_scores,
+    compute_recent_minutes_trend_scores,
+    compute_roster_behavior_scores,
+    compute_standings_metrics,
+    compute_team_performance_history,
 )
 
 # Four real East-conference team IDs (per season_motivation._TEAM_CONFERENCE)
@@ -70,8 +70,12 @@ GAME_COLS = ["GAME_ID", "GAME_DATE", "SEASON_ID", "HOME_TEAM_ID", "AWAY_TEAM_ID"
 
 def _game_row(game_id, game_date, home, away, home_wins):
     return {
-        "GAME_ID": game_id, "GAME_DATE": pd.Timestamp(game_date), "SEASON_ID": SEASON_ID,
-        "HOME_TEAM_ID": home, "AWAY_TEAM_ID": away, "HOME_TEAM_WINS": int(home_wins),
+        "GAME_ID": game_id,
+        "GAME_DATE": pd.Timestamp(game_date),
+        "SEASON_ID": SEASON_ID,
+        "HOME_TEAM_ID": home,
+        "AWAY_TEAM_ID": away,
+        "HOME_TEAM_WINS": int(home_wins),
     }
 
 
@@ -83,14 +87,16 @@ def _round_robin_games():
       B, C = 1-1 each (tied for the middle -- irrelevant to the ceiling==0 /
       floor==0 assertions below, which only depend on A being strictly best
       and D strictly worst, not on how the tied middle sorts)."""
-    return pd.DataFrame([
-        _game_row("g1", "2024-01-01", TEAM_A, TEAM_B, True),   # A 1-0, B 0-1
-        _game_row("g2", "2024-01-01", TEAM_C, TEAM_D, True),   # C 1-0, D 0-1
-        _game_row("g3", "2024-01-03", TEAM_A, TEAM_C, True),   # A 2-0, C 1-1
-        _game_row("g4", "2024-01-03", TEAM_B, TEAM_D, True),   # B 1-1, D 0-2
-        _game_row("g5", "2024-01-05", TEAM_A, TEAM_D, True),   # A 3-0, D 0-3 (after this game)
-        _game_row("g6", "2024-01-05", TEAM_B, TEAM_C, False),  # B 1-2, C 2-1 (after this game)
-    ])[GAME_COLS]
+    return pd.DataFrame(
+        [
+            _game_row("g1", "2024-01-01", TEAM_A, TEAM_B, True),  # A 1-0, B 0-1
+            _game_row("g2", "2024-01-01", TEAM_C, TEAM_D, True),  # C 1-0, D 0-1
+            _game_row("g3", "2024-01-03", TEAM_A, TEAM_C, True),  # A 2-0, C 1-1
+            _game_row("g4", "2024-01-03", TEAM_B, TEAM_D, True),  # B 1-1, D 0-2
+            _game_row("g5", "2024-01-05", TEAM_A, TEAM_D, True),  # A 3-0, D 0-3 (after this game)
+            _game_row("g6", "2024-01-05", TEAM_B, TEAM_C, False),  # B 1-2, C 2-1 (after this game)
+        ]
+    )[GAME_COLS]
 
 
 def _line_and_chaser_games(line_wins, chaser_wins, chaser_losses, chaser_future_games):
@@ -152,7 +158,9 @@ class TestStandingsMetrics:
     def test_pressure_is_exactly_one_when_tied_at_the_line(self):
         """GB_from_line == 0 -> pressure_raw == 1.0 exactly, regardless of games
         remaining -- the formula's peak case."""
-        games, snapshot_date = _line_and_chaser_games(line_wins=3, chaser_wins=3, chaser_losses=0, chaser_future_games=5)
+        games, snapshot_date = _line_and_chaser_games(
+            line_wins=3, chaser_wins=3, chaser_losses=0, chaser_future_games=5
+        )
         panel = compute_standings_metrics(games, playoff_line_seed=1)
         row = panel[(panel["team_id"] == TEAM_B) & (panel["snapshot_date"] == snapshot_date)]
         assert row["pressure_raw"].iloc[0] == pytest.approx(1.0)
@@ -161,7 +169,9 @@ class TestStandingsMetrics:
         """Far from the line (GB large) with 0 games remaining -> pressure
         clips to exactly 0.0 -- mathematically eliminated/clinched reads as
         zero pressure, per the brief's stated boundary condition."""
-        games, snapshot_date = _line_and_chaser_games(line_wins=10, chaser_wins=0, chaser_losses=10, chaser_future_games=0)
+        games, snapshot_date = _line_and_chaser_games(
+            line_wins=10, chaser_wins=0, chaser_losses=10, chaser_future_games=0
+        )
         panel = compute_standings_metrics(games, playoff_line_seed=1)
         row = panel[(panel["team_id"] == TEAM_B) & (panel["snapshot_date"] == snapshot_date)]
         assert row["pressure_raw"].iloc[0] == pytest.approx(0.0)
@@ -172,7 +182,9 @@ class TestStandingsMetrics:
         mathematically very much alive. This is the two-sided-decay property:
         pressure depends on the gap RELATIVE to games remaining, not the gap
         alone."""
-        games, snapshot_date = _line_and_chaser_games(line_wins=10, chaser_wins=0, chaser_losses=10, chaser_future_games=50)
+        games, snapshot_date = _line_and_chaser_games(
+            line_wins=10, chaser_wins=0, chaser_losses=10, chaser_future_games=50
+        )
         panel = compute_standings_metrics(games, playoff_line_seed=1)
         row = panel[(panel["team_id"] == TEAM_B) & (panel["snapshot_date"] == snapshot_date)]
         # GB_from_line = 10, games_remaining = 50 -> pressure = 1 - 10/51
@@ -189,20 +201,16 @@ def _write_injury_features_db(path, importance_rows, injury_rows):
     injury_rows: list of (game_date, team_id, player_name, status, reason)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
-    conn.execute(
-        """CREATE TABLE player_importance (
+    conn.execute("""CREATE TABLE player_importance (
             player_id INTEGER, player_name TEXT, team_id INTEGER, as_of_date TEXT,
             minutes_per_game REAL, pts_per_game REAL, usage_rate REAL, updated_at TEXT NOT NULL,
             PRIMARY KEY (player_id, team_id, as_of_date)
-        )"""
-    )
-    conn.execute(
-        """CREATE TABLE player_injuries (
+        )""")
+    conn.execute("""CREATE TABLE player_injuries (
             game_date TEXT NOT NULL, team_id INTEGER NOT NULL, player_name TEXT NOT NULL,
             status TEXT NOT NULL, reason TEXT, source TEXT NOT NULL DEFAULT 'pdf',
             PRIMARY KEY (game_date, team_id, player_name)
-        )"""
-    )
+        )""")
     for player_id, player_name, team_id, as_of_date, minutes, pts, usg in importance_rows:
         conn.execute(
             "INSERT INTO player_importance (player_id, player_name, team_id, as_of_date, "
@@ -226,9 +234,21 @@ IMPORTANCE_WEIGHTS = MagicMock(minutes_share=0.4, usage_rate=0.4, pts_share=0.2)
 # used for the dual-threshold pressure test below -- need a realistically
 # full conference to have a meaningful, unambiguous rank 5/6/10.
 _EAST_15 = [
-    1610612737, 1610612738, 1610612739, 1610612741, 1610612748, 1610612749,
-    1610612751, 1610612752, 1610612753, 1610612754, 1610612755, 1610612761,
-    1610612764, 1610612765, 1610612766,
+    1610612737,
+    1610612738,
+    1610612739,
+    1610612741,
+    1610612748,
+    1610612749,
+    1610612751,
+    1610612752,
+    1610612753,
+    1610612754,
+    1610612755,
+    1610612761,
+    1610612764,
+    1610612765,
+    1610612766,
 ]
 _FILLER_WEST_TEAM = 1610612744  # GSW -- West, never ranked within the East group
 
@@ -248,17 +268,29 @@ def _fifteen_team_tiers_games():
     date = pd.Timestamp("2024-01-01")
     for team_id, wins in zip(_EAST_15, wins_by_rank):
         for _ in range(wins):
-            rows.append({
-                "GAME_ID": f"g{gid}", "GAME_DATE": date, "SEASON_ID": SEASON_ID,
-                "HOME_TEAM_ID": team_id, "AWAY_TEAM_ID": _FILLER_WEST_TEAM, "HOME_TEAM_WINS": 1,
-            })
+            rows.append(
+                {
+                    "GAME_ID": f"g{gid}",
+                    "GAME_DATE": date,
+                    "SEASON_ID": SEASON_ID,
+                    "HOME_TEAM_ID": team_id,
+                    "AWAY_TEAM_ID": _FILLER_WEST_TEAM,
+                    "HOME_TEAM_WINS": 1,
+                }
+            )
             gid += 1
             date += pd.Timedelta(days=1)
         for _ in range(20):
-            rows.append({
-                "GAME_ID": f"g{gid}", "GAME_DATE": date, "SEASON_ID": SEASON_ID,
-                "HOME_TEAM_ID": team_id, "AWAY_TEAM_ID": _FILLER_WEST_TEAM, "HOME_TEAM_WINS": 0,
-            })
+            rows.append(
+                {
+                    "GAME_ID": f"g{gid}",
+                    "GAME_DATE": date,
+                    "SEASON_ID": SEASON_ID,
+                    "HOME_TEAM_ID": team_id,
+                    "AWAY_TEAM_ID": _FILLER_WEST_TEAM,
+                    "HOME_TEAM_WINS": 0,
+                }
+            )
             gid += 1
             date += pd.Timedelta(days=1)
     # Anchor game (rank1 team vs filler, one more win) strictly after every
@@ -266,10 +298,16 @@ def _fifteen_team_tiers_games():
     # team's full accumulated record above is already "final" (no more of
     # their own games exist past this point).
     snapshot_date = date
-    rows.append({
-        "GAME_ID": "anchor", "GAME_DATE": snapshot_date, "SEASON_ID": SEASON_ID,
-        "HOME_TEAM_ID": _EAST_15[0], "AWAY_TEAM_ID": _FILLER_WEST_TEAM, "HOME_TEAM_WINS": 1,
-    })
+    rows.append(
+        {
+            "GAME_ID": "anchor",
+            "GAME_DATE": snapshot_date,
+            "SEASON_ID": SEASON_ID,
+            "HOME_TEAM_ID": _EAST_15[0],
+            "AWAY_TEAM_ID": _FILLER_WEST_TEAM,
+            "HOME_TEAM_WINS": 1,
+        }
+    )
     return pd.DataFrame(rows)[GAME_COLS], snapshot_date
 
 
@@ -375,11 +413,18 @@ class TestRosterBehaviorScores:
             ],
             injury_rows=[("2024-01-15", TEAM_A, "Star Player", "Out", NON_INJURY_REASON)],
         )
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_roster_behavior_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                  season_start_by_season=season_start)
+        result = compute_roster_behavior_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["roster_behavior_score"].iloc[0] > 0.0
 
@@ -398,11 +443,18 @@ class TestRosterBehaviorScores:
             ],
             injury_rows=[("2024-01-15", TEAM_A, "Star Player", "Out", INJURY_REASON)],
         )
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_roster_behavior_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                  season_start_by_season=season_start)
+        result = compute_roster_behavior_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["roster_behavior_score"].iloc[0] == 0.0
 
@@ -420,11 +472,18 @@ class TestRosterBehaviorScores:
             ],
             injury_rows=[("2024-01-15", TEAM_A, "Star Player", "Out", NON_INJURY_REASON)],
         )
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_roster_behavior_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                  season_start_by_season=season_start)
+        result = compute_roster_behavior_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["roster_behavior_score"].iloc[0] == 0.0
 
@@ -433,11 +492,18 @@ class TestRosterBehaviorScores:
         "nothing to report" case, not a missing-data/NaN case."""
         db_path = tmp_path / "injury_features.sqlite"
         _write_injury_features_db(db_path, importance_rows=[], injury_rows=[])
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_roster_behavior_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                  season_start_by_season=season_start)
+        result = compute_roster_behavior_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["roster_behavior_score"].iloc[0] == 0.0
         assert not pd.isna(row["roster_behavior_score"].iloc[0])
@@ -455,17 +521,41 @@ class TestRecentMinutesTrendScores:
         _write_injury_features_db(
             db_path,
             importance_rows=[
-                (501, "Star Player", TEAM_A, "2023-12-01", 35.0, 25.0, 0.30),  # prior (>=4 weeks before target)
+                (
+                    501,
+                    "Star Player",
+                    TEAM_A,
+                    "2023-12-01",
+                    35.0,
+                    25.0,
+                    0.30,
+                ),  # prior (>=4 weeks before target)
                 (501, "Star Player", TEAM_A, "2023-12-08", 35.0, 25.0, 0.30),
-                (501, "Star Player", TEAM_A, "2024-01-08", 20.0, 14.0, 0.30),  # current -- minutes cut nearly in half
+                (
+                    501,
+                    "Star Player",
+                    TEAM_A,
+                    "2024-01-08",
+                    20.0,
+                    14.0,
+                    0.30,
+                ),  # current -- minutes cut nearly in half
             ],
             injury_rows=[],
         )
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                       season_start_by_season=season_start, lookback_weeks=4)
+        result = compute_recent_minutes_trend_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+            lookback_weeks=4,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["recent_minutes_trend_score"].iloc[0] > 0.0
 
@@ -483,11 +573,19 @@ class TestRecentMinutesTrendScores:
             ],
             injury_rows=[],
         )
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                       season_start_by_season=season_start, lookback_weeks=4)
+        result = compute_recent_minutes_trend_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+            lookback_weeks=4,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["recent_minutes_trend_score"].iloc[0] == 0.0
 
@@ -504,11 +602,19 @@ class TestRecentMinutesTrendScores:
             ],
             injury_rows=[],
         )
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                       season_start_by_season=season_start, lookback_weeks=4)
+        result = compute_recent_minutes_trend_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+            lookback_weeks=4,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["recent_minutes_trend_score"].iloc[0] == 0.0
 
@@ -517,11 +623,19 @@ class TestRecentMinutesTrendScores:
         report" case, not a missing-data/NaN case."""
         db_path = tmp_path / "injury_features.sqlite"
         _write_injury_features_db(db_path, importance_rows=[], injury_rows=[])
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-15"), "season_id": SEASON_ID}]
+        )
         season_start = {SEASON_ID: pd.Timestamp("2023-10-01")}
 
-        result = compute_recent_minutes_trend_scores(team_dates, str(db_path), IMPORTANCE_WEIGHTS, min_importance_games=2,
-                                                       season_start_by_season=season_start, lookback_weeks=4)
+        result = compute_recent_minutes_trend_scores(
+            team_dates,
+            str(db_path),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
+            season_start_by_season=season_start,
+            lookback_weeks=4,
+        )
         row = result[(result["team_id"] == TEAM_A) & (result["game_date"] == pd.Timestamp("2024-01-15"))]
         assert row["recent_minutes_trend_score"].iloc[0] == 0.0
         assert not pd.isna(row["recent_minutes_trend_score"].iloc[0])
@@ -533,8 +647,12 @@ FILLER_1, FILLER_2 = 1610612751, 1610612752  # BKN, NYK -- unused elsewhere, rea
 
 def _pve_game(game_id, game_date, home, away, point_diff):
     return {
-        "GAME_ID": game_id, "GAME_DATE": pd.Timestamp(game_date), "SEASON_ID": SEASON_ID,
-        "HOME_TEAM_ID": home, "AWAY_TEAM_ID": away, "POINT_DIFF": point_diff,
+        "GAME_ID": game_id,
+        "GAME_DATE": pd.Timestamp(game_date),
+        "SEASON_ID": SEASON_ID,
+        "HOME_TEAM_ID": home,
+        "AWAY_TEAM_ID": away,
+        "POINT_DIFF": point_diff,
     }
 
 
@@ -570,7 +688,9 @@ class TestTeamPerformanceHistory:
         games_df = pd.DataFrame([_pve_game("g1", "2024-01-01", TEAM_A, TEAM_B, 12.0)])[PVE_GAME_COLS]
         elo_ratings = pd.DataFrame([_elo_row("g1", 1600, 1500)])
 
-        team_games = compute_team_performance_history(games_df, elo_ratings, home_advantage=100.0, elo_margin_scale=0.05)
+        team_games = compute_team_performance_history(
+            games_df, elo_ratings, home_advantage=100.0, elo_margin_scale=0.05
+        )
 
         home_row = team_games[team_games["team_id"] == TEAM_A].iloc[0]
         away_row = team_games[team_games["team_id"] == TEAM_B].iloc[0]
@@ -588,14 +708,16 @@ class TestTeamPerformanceHistory:
         opponent = TEAM_C
         team_x = TEAM_D
         games = [
-            _pve_game("g1", "2024-01-01", opponent, FILLER_1, 10.0),   # opponent wins
-            _pve_game("g2", "2024-01-02", opponent, FILLER_2, 10.0),   # opponent wins again (2-0)
-            _pve_game("g3", "2024-01-03", team_x, opponent, 5.0),      # team_x (home) beats opponent
+            _pve_game("g1", "2024-01-01", opponent, FILLER_1, 10.0),  # opponent wins
+            _pve_game("g2", "2024-01-02", opponent, FILLER_2, 10.0),  # opponent wins again (2-0)
+            _pve_game("g3", "2024-01-03", team_x, opponent, 5.0),  # team_x (home) beats opponent
         ]
         games_df = pd.DataFrame(games)[PVE_GAME_COLS]
         elo_ratings = pd.DataFrame([_elo_row(g["GAME_ID"], 1500, 1500) for g in games])
 
-        team_games = compute_team_performance_history(games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0)
+        team_games = compute_team_performance_history(
+            games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0
+        )
         row = team_games[(team_games["team_id"] == team_x) & (team_games["game_id"] == "g3")].iloc[0]
         assert row["opponent_win_pct"] == pytest.approx(1.0)
         assert row["signed_opponent_adjusted_score"] == pytest.approx(1.0)
@@ -607,14 +729,16 @@ class TestTeamPerformanceHistory:
         weak_opp = TEAM_C
         team_y = TEAM_D
         games = [
-            _pve_game("g1", "2024-01-01", FILLER_1, weak_opp, 10.0),   # weak_opp (away) loses
-            _pve_game("g2", "2024-01-02", FILLER_2, weak_opp, 10.0),   # weak_opp (away) loses again (0-2)
-            _pve_game("g3", "2024-01-03", team_y, weak_opp, -5.0),     # team_y (home) loses to weak_opp
+            _pve_game("g1", "2024-01-01", FILLER_1, weak_opp, 10.0),  # weak_opp (away) loses
+            _pve_game("g2", "2024-01-02", FILLER_2, weak_opp, 10.0),  # weak_opp (away) loses again (0-2)
+            _pve_game("g3", "2024-01-03", team_y, weak_opp, -5.0),  # team_y (home) loses to weak_opp
         ]
         games_df = pd.DataFrame(games)[PVE_GAME_COLS]
         elo_ratings = pd.DataFrame([_elo_row(g["GAME_ID"], 1500, 1500) for g in games])
 
-        team_games = compute_team_performance_history(games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0)
+        team_games = compute_team_performance_history(
+            games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0
+        )
         row = team_games[(team_games["team_id"] == team_y) & (team_games["game_id"] == "g3")].iloc[0]
         assert row["opponent_win_pct"] == pytest.approx(0.0)
         assert row["signed_opponent_adjusted_score"] == pytest.approx(-1.0)
@@ -627,12 +751,13 @@ class TestRollingBehaviorScores:
         elo_diff always 0 so expected_margin is always 0 -- performance_residual
         == actual_margin directly, making the rolling mean hand-verifiable)."""
         games = [
-            _pve_game(f"g{i}", f"2024-01-{i+1:02d}", team_id, opponent_id, m)
-            for i, m in enumerate(margins)
+            _pve_game(f"g{i}", f"2024-01-{i+1:02d}", team_id, opponent_id, m) for i, m in enumerate(margins)
         ]
         games_df = pd.DataFrame(games)[PVE_GAME_COLS]
         elo_ratings = pd.DataFrame([_elo_row(g["GAME_ID"], 1500, 1500) for g in games])
-        return compute_team_performance_history(games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0)
+        return compute_team_performance_history(
+            games_df, elo_ratings, home_advantage=0.0, elo_margin_scale=0.0
+        )
 
     def test_performance_vs_expectation_excludes_current_game(self):
         """Rolling window must use shift(1) -- the score attached to a game
@@ -662,21 +787,43 @@ class TestRollingBehaviorScores:
         assert last_row["opponent_adjusted_form_score"] == pytest.approx(-0.5)
 
 
-def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, motivation_score_enabled: bool = True,
-                  playoff_line_seed: int = 10,
-                  direct_playoff_seed: int = None, direct_playoff_weight: float = 0.5,
-                  roster_behavior_weight: float = 1.0, min_importance_games: int = 5,
-                  recent_trend_lookback_weeks: int = 4,
-                  performance_vs_expectation_enabled: bool = False, performance_vs_expectation_window: int = 10,
-                  opponent_adjusted_form_enabled: bool = False, opponent_adjusted_form_window: int = 10,
-                  preferred_opponent_delta_enabled: bool = False, preferred_opponent_delta_window_games: int = 20):
+def _mock_config(
+    raw_db_path,
+    injury_db_path,
+    enabled: bool = True,
+    motivation_score_enabled: bool = True,
+    playoff_line_seed: int = 10,
+    direct_playoff_seed: int = None,
+    direct_playoff_weight: float = 0.5,
+    roster_behavior_weight: float = 1.0,
+    min_importance_games: int = 5,
+    recent_trend_lookback_weeks: int = 4,
+    performance_vs_expectation_enabled: bool = False,
+    performance_vs_expectation_window: int = 10,
+    opponent_adjusted_form_enabled: bool = False,
+    opponent_adjusted_form_window: int = 10,
+    preferred_opponent_delta_enabled: bool = False,
+    preferred_opponent_delta_window_games: int = 20,
+    elo_features_enabled: bool = False,
+):
     mock_cfg = MagicMock()
     mock_cfg.data_paths = MagicMock(raw_db=str(raw_db_path))
+    mock_cfg.elo_features = MagicMock(
+        enabled=elo_features_enabled,
+        initial_rating=1500.0,
+        k_factor=11.02,
+        home_advantage=117.87,
+        mov_multiplier=True,
+        season_regression=0.522,
+    )
     mock_cfg.season_motivation = MagicMock(
-        enabled=enabled, motivation_score_enabled=motivation_score_enabled,
-        playoff_line_seed=playoff_line_seed, direct_playoff_seed=direct_playoff_seed,
+        enabled=enabled,
+        motivation_score_enabled=motivation_score_enabled,
+        playoff_line_seed=playoff_line_seed,
+        direct_playoff_seed=direct_playoff_seed,
         direct_playoff_weight=direct_playoff_weight,
-        roster_behavior_weight=roster_behavior_weight, min_importance_games=min_importance_games,
+        roster_behavior_weight=roster_behavior_weight,
+        min_importance_games=min_importance_games,
         recent_trend_lookback_weeks=recent_trend_lookback_weeks,
         performance_vs_expectation_enabled=performance_vs_expectation_enabled,
         performance_vs_expectation_window=performance_vs_expectation_window,
@@ -687,7 +834,9 @@ def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, motivation_s
     )
     mock_cfg.injury_features = MagicMock(db_path=str(injury_db_path), importance_weights=IMPORTANCE_WEIGHTS)
     mock_cfg.datasets_loading = MagicMock(
-        data_start_date="2023-10-01", test_end_date="2024-06-01", allowed_season_types=["Regular Season"],
+        data_start_date="2023-10-01",
+        test_end_date="2024-06-01",
+        allowed_season_types=["Regular Season"],
     )
     return mock_cfg
 
@@ -695,26 +844,43 @@ def _mock_config(raw_db_path, injury_db_path, enabled: bool = True, motivation_s
 def _write_game_db(path, games_df):
     """Minimal `game` table matching NBADataLoader._GAME_SELECT's required
     columns -- box-score columns not needed for season_motivation are left as
-    0/NULL."""
+    0/NULL. Point margin defaults to a fixed 100-90 (HOME_TEAM_WINS-derived
+    wl_home only) unless games_df has its own POINT_DIFF column, needed for
+    tests that require a real, varying point margin (e.g. Elo-margin-scale
+    fitting) rather than just win/loss."""
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
-    conn.execute(
-        """CREATE TABLE game (
+    conn.execute("""CREATE TABLE game (
             game_id TEXT PRIMARY KEY, game_date TEXT, season_id TEXT, season_type TEXT,
             team_id_home INTEGER, team_id_away INTEGER, pts_home REAL, pts_away REAL, wl_home TEXT,
             fg_pct_home REAL, ft_pct_home REAL, fg3_pct_home REAL, ast_home INTEGER, reb_home INTEGER,
             fg_pct_away REAL, ft_pct_away REAL, fg3_pct_away REAL, ast_away INTEGER, reb_away INTEGER,
-            fgm_home INTEGER, fga_home INTEGER, fg3m_home INTEGER, fg3a_home INTEGER, ftm_home INTEGER, fta_home INTEGER,
-            fgm_away INTEGER, fga_away INTEGER, fg3m_away INTEGER, fg3a_away INTEGER, ftm_away INTEGER, fta_away INTEGER
-        )"""
-    )
+            fgm_home INTEGER, fga_home INTEGER, fg3m_home INTEGER, fg3a_home INTEGER,
+            ftm_home INTEGER, fta_home INTEGER,
+            fgm_away INTEGER, fga_away INTEGER, fg3m_away INTEGER, fg3a_away INTEGER,
+            ftm_away INTEGER, fta_away INTEGER
+        )""")
+    has_point_diff = "POINT_DIFF" in games_df.columns
     for _, row in games_df.iterrows():
+        if has_point_diff:
+            point_diff = row["POINT_DIFF"]
+            pts_home, pts_away = 100 + max(point_diff, 0), 100 + max(-point_diff, 0)
+            wl_home = "W" if point_diff > 0 else "L"
+        else:
+            pts_home, pts_away = 100, 90
+            wl_home = "W" if row["HOME_TEAM_WINS"] else "L"
         conn.execute(
             "INSERT INTO game (game_id, game_date, season_id, season_type, team_id_home, team_id_away, "
-            "pts_home, pts_away, wl_home) VALUES (?, ?, ?, 'Regular Season', ?, ?, 100, 90, ?)",
+            "pts_home, pts_away, wl_home) VALUES (?, ?, ?, 'Regular Season', ?, ?, ?, ?, ?)",
             (
-                row["GAME_ID"], row["GAME_DATE"].strftime("%Y-%m-%d"), str(row["SEASON_ID"]),
-                int(row["HOME_TEAM_ID"]), int(row["AWAY_TEAM_ID"]), "W" if row["HOME_TEAM_WINS"] else "L",
+                row["GAME_ID"],
+                row["GAME_DATE"].strftime("%Y-%m-%d"),
+                str(row["SEASON_ID"]),
+                int(row["HOME_TEAM_ID"]),
+                int(row["AWAY_TEAM_ID"]),
+                pts_home,
+                pts_away,
+                wl_home,
             ),
         )
     conn.commit()
@@ -722,17 +888,26 @@ def _write_game_db(path, games_df):
 
 
 def _query_df(game_date, home_team_id=TEAM_A, away_team_id=TEAM_B, season_id=SEASON_ID):
-    return pd.DataFrame([{
-        "GAME_ID": "target", "GAME_DATE": pd.Timestamp(game_date), "SEASON_ID": season_id,
-        "HOME_TEAM_ID": home_team_id, "AWAY_TEAM_ID": away_team_id,
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "GAME_ID": "target",
+                "GAME_DATE": pd.Timestamp(game_date),
+                "SEASON_ID": season_id,
+                "HOME_TEAM_ID": home_team_id,
+                "AWAY_TEAM_ID": away_team_id,
+            }
+        ]
+    )
 
 
 class TestAddSeasonMotivationFeatures:
 
     @patch("src.feature_engineering.feature_builder.load_config")
     def test_disabled_returns_df_unchanged(self, mock_config, tmp_path):
-        mock_config.return_value = _mock_config(tmp_path / "nonexistent.sqlite", tmp_path / "nonexistent2.sqlite", enabled=False)
+        mock_config.return_value = _mock_config(
+            tmp_path / "nonexistent.sqlite", tmp_path / "nonexistent2.sqlite", enabled=False
+        )
         df = _query_df("2024-01-15")
         fb = FeatureBuilder(rolling_windows=[3])
         result = fb._add_season_motivation_features(df)
@@ -764,8 +939,14 @@ class TestAddSeasonMotivationFeatures:
             ],
             injury_rows=[("2024-01-05", TEAM_A, "Star Player", "Out", NON_INJURY_REASON)],
         )
-        mock_config.return_value = _mock_config(raw_db, injury_db, enabled=True, playoff_line_seed=3,
-                                                  roster_behavior_weight=0.6, min_importance_games=2)
+        mock_config.return_value = _mock_config(
+            raw_db,
+            injury_db,
+            enabled=True,
+            playoff_line_seed=3,
+            roster_behavior_weight=0.6,
+            min_importance_games=2,
+        )
 
         df = _query_df("2024-01-05", home_team_id=TEAM_A, away_team_id=TEAM_D)
         fb = FeatureBuilder(rolling_windows=[3])
@@ -775,9 +956,14 @@ class TestAddSeasonMotivationFeatures:
         pressure = standings[
             (standings["team_id"] == TEAM_A) & (standings["snapshot_date"] == pd.Timestamp("2024-01-05"))
         ]["pressure_raw"].iloc[0]
-        team_dates = pd.DataFrame([{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-05"), "season_id": SEASON_ID}])
+        team_dates = pd.DataFrame(
+            [{"team_id": TEAM_A, "game_date": pd.Timestamp("2024-01-05"), "season_id": SEASON_ID}]
+        )
         roster_score = compute_roster_behavior_scores(
-            team_dates, str(injury_db), IMPORTANCE_WEIGHTS, min_importance_games=2,
+            team_dates,
+            str(injury_db),
+            IMPORTANCE_WEIGHTS,
+            min_importance_games=2,
             season_start_by_season={SEASON_ID: pd.Timestamp("2023-10-01")},
         )["roster_behavior_score"].iloc[0]
 
@@ -800,8 +986,14 @@ class TestAddSeasonMotivationFeatures:
             ],
             injury_rows=[("2024-01-05", TEAM_A, "Star Player", "Out", NON_INJURY_REASON)],
         )
-        mock_config.return_value = _mock_config(raw_db, injury_db, enabled=True, playoff_line_seed=3,
-                                                  roster_behavior_weight=0.0, min_importance_games=2)
+        mock_config.return_value = _mock_config(
+            raw_db,
+            injury_db,
+            enabled=True,
+            playoff_line_seed=3,
+            roster_behavior_weight=0.0,
+            min_importance_games=2,
+        )
 
         df = _query_df("2024-01-05", home_team_id=TEAM_A, away_team_id=TEAM_D)
         fb = FeatureBuilder(rolling_windows=[3])
@@ -827,15 +1019,20 @@ class TestAddSeasonMotivationFeatures:
         _write_game_db(raw_db, games)
         _write_injury_features_db(injury_db, importance_rows=[], injury_rows=[])
         mock_config.return_value = _mock_config(
-            raw_db, injury_db, enabled=True,
-            preferred_opponent_delta_enabled=True, preferred_opponent_delta_window_games=200,
+            raw_db,
+            injury_db,
+            enabled=True,
+            preferred_opponent_delta_enabled=True,
+            preferred_opponent_delta_window_games=200,
         )
         # _fifteen_team_tiers_games schedules ~650 days of games (15 teams x
         # up to 70 games each, one game per calendar day) before its anchor
         # snapshot_date -- well past _mock_config's hardcoded 2024-06-01
         # test_end_date, which would truncate the loaded games and silently
         # change the standings. Extend it past the fixture's own snapshot_date.
-        mock_config.return_value.datasets_loading.test_end_date = (snapshot_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        mock_config.return_value.datasets_loading.test_end_date = (
+            snapshot_date + pd.Timedelta(days=1)
+        ).strftime("%Y-%m-%d")
 
         df = _query_df(snapshot_date, home_team_id=_EAST_15[0], away_team_id=_FILLER_WEST_TEAM)
         fb = FeatureBuilder(rolling_windows=[3])
@@ -863,7 +1060,9 @@ class TestAddSeasonMotivationFeatures:
         assert "home_team_preferred_opponent_delta" not in result.columns
 
     @patch("src.feature_engineering.feature_builder.load_config")
-    def test_motivation_score_enabled_false_omits_base_columns_but_keeps_preferred_opponent_delta(self, mock_config, tmp_path):
+    def test_motivation_score_enabled_false_omits_base_columns_but_keeps_preferred_opponent_delta(
+        self, mock_config, tmp_path
+    ):
         """motivation_score_enabled=False must drop motivation_score/
         games_to_clinch_ceiling/games_to_clinch_floor/recent_minutes_trend_score
         (the non-adopted Phase 1 design) while preferred_opponent_delta (which
@@ -876,17 +1075,114 @@ class TestAddSeasonMotivationFeatures:
         _write_game_db(raw_db, games)
         _write_injury_features_db(injury_db, importance_rows=[], injury_rows=[])
         mock_config.return_value = _mock_config(
-            raw_db, injury_db, enabled=True, motivation_score_enabled=False,
-            preferred_opponent_delta_enabled=True, preferred_opponent_delta_window_games=200,
+            raw_db,
+            injury_db,
+            enabled=True,
+            motivation_score_enabled=False,
+            preferred_opponent_delta_enabled=True,
+            preferred_opponent_delta_window_games=200,
         )
-        mock_config.return_value.datasets_loading.test_end_date = (snapshot_date + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+        mock_config.return_value.datasets_loading.test_end_date = (
+            snapshot_date + pd.Timedelta(days=1)
+        ).strftime("%Y-%m-%d")
 
         df = _query_df(snapshot_date, home_team_id=_EAST_15[0], away_team_id=_FILLER_WEST_TEAM)
         fb = FeatureBuilder(rolling_windows=[3])
         result = fb._add_season_motivation_features(df)
 
-        for col in ["home_team_motivation_score", "home_team_games_to_clinch_ceiling",
-                    "home_team_games_to_clinch_floor", "home_team_recent_minutes_trend_score"]:
+        for col in [
+            "home_team_motivation_score",
+            "home_team_games_to_clinch_ceiling",
+            "home_team_games_to_clinch_floor",
+            "home_team_recent_minutes_trend_score",
+        ]:
             assert col not in result.columns
         expected = 20 / 40 - 18 / 38
         assert result.loc[0, "home_team_preferred_opponent_delta"] == pytest.approx(expected, abs=1e-6)
+
+
+def _margin_scale_games(n_games, start_date, point_diff, game_id_prefix):
+    """n_games alternating home/away between TEAM_A/TEAM_B, one per day from
+    start_date, each with the given fixed POINT_DIFF (signed, home perspective)
+    -- gives compute_elo_ratings/​_fit_elo_margin_scale a real, non-degenerate
+    sequence to fit against."""
+    rows = []
+    date = pd.Timestamp(start_date)
+    for i in range(n_games):
+        home, away = (TEAM_A, TEAM_B) if i % 2 == 0 else (TEAM_B, TEAM_A)
+        rows.append(_pve_game(f"{game_id_prefix}{i}", date, home, away, point_diff))
+        date += pd.Timedelta(days=2)
+    return rows
+
+
+class TestEloMarginScaleFitOnceReused:
+    """Regression test for the leakage fix: _fit_elo_margin_scale must be fit
+    ONCE (on this FeatureBuilder instance's first create_all_features() call,
+    assumed train) and reused unchanged on later calls, never refit using
+    val/test-period games. See CLAUDE.md's leakage-safety rule and
+    docs/... the audit that found this (a least-squares fit is NOT safe to
+    recompute per-call the way point-in-time snapshots are)."""
+
+    @patch("src.feature_engineering.feature_builder.load_config")
+    def test_second_call_reuses_first_calls_fit_not_a_fresh_one(self, mock_config, tmp_path):
+        raw_db = tmp_path / "nba_api.sqlite"
+        injury_db = tmp_path / "injury_features.sqlite"
+
+        # "train" window: small, consistent point margin (+6 home perspective).
+        train_games = _margin_scale_games(10, "2024-01-01", point_diff=6, game_id_prefix="train")
+        # "val" window: a MUCH larger, consistent margin (+40) -- if the scale
+        # were refit using train+val data instead of reusing the train-only
+        # fit, the result would visibly shift toward this steeper relationship.
+        val_extra_games = _margin_scale_games(10, "2024-02-01", point_diff=40, game_id_prefix="val")
+        all_games_df = pd.DataFrame(train_games + val_extra_games)[PVE_GAME_COLS]
+
+        _write_game_db(raw_db, all_games_df)
+        _write_injury_features_db(injury_db, importance_rows=[], injury_rows=[])
+        mock_config.return_value = _mock_config(
+            raw_db,
+            injury_db,
+            enabled=True,
+            motivation_score_enabled=False,
+            performance_vs_expectation_enabled=True,
+            elo_features_enabled=True,
+        )
+        train_cutoff = pd.Timestamp("2024-01-01") + pd.Timedelta(days=2 * 9)  # last train game's date
+        val_cutoff = pd.Timestamp("2024-02-01") + pd.Timedelta(days=2 * 9)  # last val game's date
+        mock_config.return_value.datasets_loading.data_start_date = "2023-10-01"
+
+        fb = FeatureBuilder(rolling_windows=[3])
+        assert fb._fitted_elo_margin_scale is None
+
+        train_df = all_games_df[all_games_df["GAME_DATE"] <= train_cutoff].reset_index(drop=True)
+        fb._add_season_motivation_features(train_df, context_end_date=train_cutoff.strftime("%Y-%m-%d"))
+        fitted_after_train = fb._fitted_elo_margin_scale
+        assert fitted_after_train is not None
+
+        val_df = all_games_df[all_games_df["GAME_DATE"] <= val_cutoff].reset_index(drop=True)
+        fb._add_season_motivation_features(val_df, context_end_date=val_cutoff.strftime("%Y-%m-%d"))
+        fitted_after_val = fb._fitted_elo_margin_scale
+
+        assert fitted_after_val == fitted_after_train, (
+            "elo_margin_scale must not change between calls -- it was refit using "
+            "val-period games instead of reusing the train-only fit."
+        )
+
+        # Prove this isn't a coincidence: an independent fresh fit on the
+        # LARGER (train+val) window really would give a different value.
+        from src.feature_engineering.elo import compute_elo_ratings
+        from src.feature_engineering.season_motivation import _fit_elo_margin_scale
+
+        elo_cfg = mock_config.return_value.elo_features
+        elo_ratings_full = compute_elo_ratings(
+            val_df,
+            initial_rating=elo_cfg.initial_rating,
+            k_factor=elo_cfg.k_factor,
+            home_advantage=elo_cfg.home_advantage,
+            mov_multiplier=elo_cfg.mov_multiplier,
+            season_regression=elo_cfg.season_regression,
+        )
+        fresh_fit_on_full_window = _fit_elo_margin_scale(val_df, elo_ratings_full, elo_cfg.home_advantage)
+        assert fresh_fit_on_full_window != pytest.approx(fitted_after_train), (
+            "test fixture didn't actually create a scenario where refitting would "
+            "differ -- strengthen the point_diff gap between train/val windows"
+        )
