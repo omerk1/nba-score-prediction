@@ -512,7 +512,6 @@ class FeatureBuilder:
 
             home_team_id = df.loc[idx, "HOME_TEAM_ID"]
             away_team_id = df.loc[idx, "AWAY_TEAM_ID"]
-            curr_date = df.loc[idx, "GAME_DATE"]
 
             # Get all prior games
             prior = df.loc[: idx - 1]

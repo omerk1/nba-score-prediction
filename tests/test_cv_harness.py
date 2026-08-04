@@ -156,8 +156,10 @@ def _write_minimal_game_db(path, rows):
             team_id_home INTEGER, team_id_away INTEGER, pts_home REAL, pts_away REAL, wl_home TEXT,
             fg_pct_home REAL, ft_pct_home REAL, fg3_pct_home REAL, ast_home INTEGER, reb_home INTEGER,
             fg_pct_away REAL, ft_pct_away REAL, fg3_pct_away REAL, ast_away INTEGER, reb_away INTEGER,
-            fgm_home INTEGER, fga_home INTEGER, fg3m_home INTEGER, fg3a_home INTEGER, ftm_home INTEGER, fta_home INTEGER,
-            fgm_away INTEGER, fga_away INTEGER, fg3m_away INTEGER, fg3a_away INTEGER, ftm_away INTEGER, fta_away INTEGER
+            fgm_home INTEGER, fga_home INTEGER, fg3m_home INTEGER, fg3a_home INTEGER,
+            ftm_home INTEGER, fta_home INTEGER,
+            fgm_away INTEGER, fga_away INTEGER, fg3m_away INTEGER, fg3a_away INTEGER,
+            ftm_away INTEGER, fta_away INTEGER
         )""")
     for game_id, game_date, home, away in rows:
         conn.execute(

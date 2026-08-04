@@ -16,7 +16,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.utils.config_loader import get_config_value, load_config
+from src.utils.config_loader import load_config
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

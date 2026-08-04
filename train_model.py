@@ -32,8 +32,8 @@ import pandas as pd
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from src.evaluation.cv_harness import run_expanding_window_cv, run_split
-from src.utils.config_loader import load_config
+from src.evaluation.cv_harness import run_expanding_window_cv, run_split  # noqa: E402
+from src.utils.config_loader import load_config  # noqa: E402
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
