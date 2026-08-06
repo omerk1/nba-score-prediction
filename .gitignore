@@ -44,6 +44,13 @@ data/processed/*
 # rationale as the on/off-splits pair above.
 !outputs/season_motivation_results.csv
 !outputs/season_motivation_iteration_scratch.csv
+
+# CLAUDE.md's "Leaderboards & research sessions" rules: research/autonomous
+# sessions log every run to results/sessions/<session_id>.csv before
+# promoting the session's best row(s) to outputs/experiments_v2.csv. Session
+# CSVs are archived, never deleted -- same rationale as
+# !outputs/experiments_v2.csv above.
+!results/sessions/*.csv
 # Polymarket price-history pipeline: raw API cache (json.gz, needs its own
 # rule -- not .csv/.parquet so the blanket rules above don't cover it).
 # games.csv/series/*.parquet used to be committed via an exception here (from
