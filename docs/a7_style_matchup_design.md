@@ -45,7 +45,7 @@ Search history for games whose matchup vector looks similar to tonight's; the av
 
 Built from each team's **last N games before the game date** — never the game itself (leakage). Implemented as `.shift(1)` before `.rolling()` (`src/matchups/fingerprint.py`), verified leakage-safe.
 
-This vector is computed for every historical game upfront, forming a searchable index (`src/matchups/matchup_index.py`): `game_id | date | matchup_vector (10 values) | actual_home_margin`.
+This vector is computed for every historical game upfront, forming a searchable index (`src/matchups/matchup_index.py`): `game_id | date | matchup_vector (12 values) | actual_home_margin`.
 
 **Normalization:** z-score, fit point-in-time (only on data available up to the evaluation cutoff — a global-history fit was found to leak and was fixed; see phase log's Critique & Bug-Fix Pass section).
 

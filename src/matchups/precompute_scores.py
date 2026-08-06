@@ -90,7 +90,15 @@ TABLE_DDL = """
 """
 
 
-def precompute_and_cache() -> dict:
+def precompute_and_cache(zscore_cutoff_date: str | None = None) -> dict:
+    """zscore_cutoff_date: overrides the z-score fit cutoff (default None falls
+    back to main config's datasets_loading.train_end_date, today's single_split
+    boundary -- unchanged behavior for every existing caller). Added so a CV
+    caller can rebuild this cache once per fold, using THAT fold's own
+    train_end_date, instead of leaking every fold's z-score stats through the
+    single global single_split boundary -- see the family-inventory audit's CV
+    fold-awareness fix (this cache had none, unlike the rest of the feature
+    pipeline's context_end_date threading)."""
     main_cfg = load_config()
     sm_cfg = load_style_matchup_config()
 
@@ -103,12 +111,14 @@ def precompute_and_cache() -> dict:
     # independent of fingerprint_window/decay_halflife, so no need to rebuild on
     # every run once cached).
     conn = cache_conn()
-    has_names = table_exists(conn, "player_name_resolution") and conn.execute(
-        "SELECT COUNT(*) FROM player_name_resolution"
-    ).fetchone()[0] > 0
-    has_archetypes = table_exists(conn, "player_archetypes") and conn.execute(
-        "SELECT COUNT(*) FROM player_archetypes"
-    ).fetchone()[0] > 0
+    has_names = (
+        table_exists(conn, "player_name_resolution")
+        and conn.execute("SELECT COUNT(*) FROM player_name_resolution").fetchone()[0] > 0
+    )
+    has_archetypes = (
+        table_exists(conn, "player_archetypes")
+        and conn.execute("SELECT COUNT(*) FROM player_archetypes").fetchone()[0] > 0
+    )
     conn.close()
 
     if not has_names:
@@ -120,19 +130,23 @@ def precompute_and_cache() -> dict:
 
     logger.info(
         "Building layer=1 fingerprint cache (window=%s, halflife=%s)...",
-        sm_cfg["fingerprint_window"], sm_cfg["decay_halflife"],
+        sm_cfg["fingerprint_window"],
+        sm_cfg["decay_halflife"],
     )
     build_fingerprint_cache(layer=1, min_games=main_cfg.features.min_games_played)
 
     logger.info("Building layer=2 injury-adjusted fingerprints...")
     build_injury_adjusted_fingerprints()
 
-    zscore_cutoff = main_cfg.datasets_loading.train_end_date
+    zscore_cutoff = zscore_cutoff_date or main_cfg.datasets_loading.train_end_date
     logger.info(
         "Running similarity search (method=%s, k=%s, min_conf=%s, full_conf=%s) "
         "over full history, zscore_cutoff_date=%s...",
-        sm_cfg["similarity_method"], sm_cfg["knn_k"],
-        sm_cfg["min_confidence_sample"], sm_cfg["full_confidence_sample"], zscore_cutoff,
+        sm_cfg["similarity_method"],
+        sm_cfg["knn_k"],
+        sm_cfg["min_confidence_sample"],
+        sm_cfg["full_confidence_sample"],
+        zscore_cutoff,
     )
     out = run_similarity_search(
         layer=2,
