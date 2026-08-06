@@ -1,7 +1,7 @@
 """
 Builds the searchable historical matchup-vector index described in the design doc:
 
-    game_id | date | matchup_vector (10 values) | actual_home_margin
+    game_id | date | matchup_vector (12 values) | actual_home_margin
 
 matchup_vector = [*home_norm, *away_norm] where each side's normalized fingerprint
 is built from Layer-N fingerprints (layer=1 for Layer 1 only, layer=2 once Layer 2
@@ -27,6 +27,13 @@ TRAIN-split-only data). Default `None` preserves the
 OLD global-stats behavior for any caller that doesn't pass a cutoff (e.g. `similarity.py`
 today), so nothing existing silently changes behavior — see `walkforward.py` for the one
 caller that now passes a real per-fold cutoff.
+
+**Fix (family-inventory audit):** this module used to define its own local
+`FINGERPRINT_METRICS` (5 metrics) instead of importing `fingerprint.py`'s (6 metrics,
+since the raw-fingerprint feature redesign added `offensive_rating`) — every other
+consumer (`injury_layer.py`, `calibration.py`, `tuning.py`) already imported the
+shared constant; this was the one file that had drifted out of sync. Now imports it
+directly, so the matchup vector is 12-dim (6 home + 6 away), not 10.
 """
 
 import logging
@@ -35,12 +42,9 @@ import numpy as np
 import pandas as pd
 
 from src.matchups.db import cache_conn, nba_api_conn
+from src.matchups.fingerprint import FINGERPRINT_METRICS
 
 logger = logging.getLogger(__name__)
-
-FINGERPRINT_METRICS = [
-    "pace_score", "three_pt_reliance", "paint_activity", "defensive_rating", "assist_rate",
-]
 
 
 def _load_games() -> pd.DataFrame:
@@ -57,9 +61,11 @@ def _load_games() -> pd.DataFrame:
 def _load_fingerprints(layer: int) -> pd.DataFrame:
     conn = cache_conn()
     fp = pd.read_sql_query(
-        "SELECT game_id, team_id, game_date, " + ", ".join(FINGERPRINT_METRICS) +
-        ", n_games_in_window FROM matchup_fingerprints WHERE layer = ?",
-        conn, params=(layer,),
+        "SELECT game_id, team_id, game_date, "
+        + ", ".join(FINGERPRINT_METRICS)
+        + ", n_games_in_window FROM matchup_fingerprints WHERE layer = ?",
+        conn,
+        params=(layer,),
     )
     conn.close()
     return fp
@@ -79,7 +85,7 @@ def _zscore_stats(fp: pd.DataFrame, zscore_cutoff_date: str | None = None) -> di
 
 
 def build_matchup_index(layer: int = 1, zscore_cutoff_date: str | None = None) -> pd.DataFrame:
-    """One row per game with the 10-dim matchup vector (5 home + 5 away, z-scored) and
+    """One row per game with the 12-dim matchup vector (6 home + 6 away, z-scored) and
     actual_home_margin. Only games where BOTH teams have a valid fingerprint for the
     requested layer are included (early-season games with <5 prior games are dropped
     upstream in fingerprint.py).
@@ -102,11 +108,15 @@ def build_matchup_index(layer: int = 1, zscore_cutoff_date: str | None = None) -
 
     merged = games.merge(
         home[["game_id", "team_id"] + [f"home_{m}" for m in FINGERPRINT_METRICS]],
-        left_on=["game_id", "team_id_home"], right_on=["game_id", "team_id"], how="inner",
+        left_on=["game_id", "team_id_home"],
+        right_on=["game_id", "team_id"],
+        how="inner",
     ).drop(columns=["team_id"])
     merged = merged.merge(
         away[["game_id", "team_id"] + [f"away_{m}" for m in FINGERPRINT_METRICS]],
-        left_on=["game_id", "team_id_away"], right_on=["game_id", "team_id"], how="inner",
+        left_on=["game_id", "team_id_away"],
+        right_on=["game_id", "team_id"],
+        how="inner",
     ).drop(columns=["team_id"])
 
     vector_cols = [f"home_{m}" for m in FINGERPRINT_METRICS] + [f"away_{m}" for m in FINGERPRINT_METRICS]
@@ -117,8 +127,8 @@ def build_matchup_index(layer: int = 1, zscore_cutoff_date: str | None = None) -
         f"(of {len(games)} total games with a final score)"
     )
     return merged[
-        ["game_id", "game_date", "team_id_home", "team_id_away", "actual_home_margin",
-         "matchup_vector"] + vector_cols
+        ["game_id", "game_date", "team_id_home", "team_id_away", "actual_home_margin", "matchup_vector"]
+        + vector_cols
     ]
 
 
