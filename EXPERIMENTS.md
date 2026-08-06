@@ -49,6 +49,8 @@ Decision log and research agenda for the ablation-gated feature workflow (CLAUDE
 
 **Fold-1 zeros/near-zeros, not all the same story**: `injury_features` is a literal, hard zero on fold1 — I believe this is a real data-coverage gap (injury data likely doesn't exist that far back), not a modeling weakness; section 3.1 makes confirming that (and deciding the fix) a gate before treating it as a feature-quality problem. `basic_features` (`season_progress`, ratio 0.21) and `season_motivation_features` (ratio 0.56) are both substantially reduced on fold1 too, but neither is a hard zero — plausible genuine data-hunger (within-season position needs more of the season observed; motivation signals need enough season-progression variance to matter).
 
+**`injury_features`' 0.0017 mean permutation delta (rank 7) is understated, not weak** — it's a 5-fold average that blends a forced 0.0 on fold1 (no data at all, not a real predictive-value reading) with whatever the family actually contributes on folds 2–5. The true value in folds where the data exists is higher than 0.0017 suggests. Do not read this number as a prune signal, and don't group it with the genuinely weak tail (`travel`/`h2h`/`home_advantage`/`rest`) on the strength of the aggregate alone — section 3.2's E4 gets the real per-fold picture instead of relying on this diluted mean.
+
 **`season_motivation_features` is the clear prune candidate**: the only family with a negative permutation delta — removing it very slightly helps on average, despite having passed its own single-metric ablation test at adoption time (`preferred_opponent_delta_treatment`, single_split). Not a contradiction of that earlier result, just a different, more holistic lens now that the full feature set + CV are both in play.
 
 ## 3. Research agenda
@@ -60,7 +62,7 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 **D1. Injury data-coverage check.**
 - Hypothesis: `injury_features.sqlite` doesn't cover fold1's train/val window at all (already know it starts 2021-10-19; fold1's val ends 2021-05-16) — the fold1 zero is a coverage gap, not a signal-quality problem.
 - Action: query `injury_features.sqlite` per season for row counts / completeness, not just the min date (confirm there isn't a partial-coverage gap somewhere else in the covered range too).
-- Decision this gates: once coverage is confirmed, choose between (a) an explicit missing-data indicator feature (e.g. `home/away_team_injury_data_available`) so the model can distinguish "no injury data" from "no injuries," or (b) excluding fold1 from injury-feature-specific evaluation/reporting since it isn't a fair comparison. Not a training run — output is a decision recorded in this log.
+- Decision this gates: confirms coverage before E4 (section 3.2) empirically compares the actual handling strategies rather than picking one by inspection. Not a training run itself — output is a coverage confirmation feeding E4.
 - Effort: low (one query + a written decision). Risk: none. Screening: n/a.
 
 **D2. `style_fingerprint_features` leakage re-audit.**
@@ -88,6 +90,15 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 - Hypothesis: `style_fingerprint_features` and `style_features` (both broad "team style/quality" proxies) and/or `opponent_quality_features` (the "used but not predictive" family from section 2) have real overlap — consolidating could simplify the model without losing signal, or confirm `opponent_quality_features` is safe to prune alongside `season_motivation_features`.
 - Action: correlation/VIF analysis between the three families' engineered columns — diagnostic only, no retraining required first.
 - Effort: medium (a script). Risk: none for the diagnostic; any resulting drop-a-family experiment inherits E2's protocol.
+
+**E4. Injury missing-data handling** (depends on D1; explicitly not part of E2's prune group — `injury_features`' aggregate score is understated, not weak, see section 2).
+- Hypothesis: how missing injury data is represented matters more than whether the feature itself is weak. Three variants, compared directly:
+  1. Native CatBoost NaN handling (status quo — missing rows pass through untouched).
+  2. Explicit availability-indicator feature (`home/away_team_injury_data_available`) alongside the existing columns.
+  3. Folds-start-at-2021 — restrict the comparison to the date range where coverage actually exists (drops/truncates fold1, per D1's coverage findings).
+- Protocol: each variant screened only on the folds where it's actually comparable to the others (variants 1–2 run across all 5 folds; variant 3 is inherently restricted to the covered range, so its comparison is scoped to whichever folds overlap). Not a cheap-3-fold screen — this is fold1-relevant by construction.
+- Expected effect: may lift fold1 specifically; watch per-fold, not just the mean (guardrail applies — no promotion on a fold1-only improvement).
+- Effort: medium (indicator feature is a small `feature_builder.py` addition; the fold-restriction variant reuses existing fold-filtering, no harness changes). Risk: low.
 
 ### 3.3 Model-agnostic axes (broader, lower immediate priority — not driven by the family inventory directly)
 
