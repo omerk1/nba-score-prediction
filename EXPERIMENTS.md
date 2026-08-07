@@ -8,6 +8,8 @@ Decision log and research agenda for the ablation-gated feature workflow (CLAUDE
 
 **CV protocol**: 5 expanding-window folds, oldest → newest, `configs/config.yaml`'s `cv.folds`, mechanically validated by `validate_fold_definitions` (fold ordering, no overlap, no fold's val/test predating an earlier fold's own training window). Fold5 = today's `--protocol single_split` boundaries exactly.
 
+**Reproducibility, verified at full precision**: two independent full 5-fold CV runs of the champion config, diffed at full float64 precision (raw metric dicts and actual val/test predictions, not the 4dp values in logged CSV rows) — byte-identical on every fold, every metric, every prediction. `std = 0.0` exactly. The champion is provably deterministic at this precision, not just "matched to 4 decimals."
+
 **Champion baseline** (`champion_cv_baseline`, `outputs/experiments_v2.csv`): `style_matchup.raw_features_enabled=true`, `preferred_opponent_delta_enabled=true`, `style_matchup.enabled=false`.
 
 | fold | val_score | test_score |
@@ -111,6 +113,8 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 
 **Guardrail (applies to every entry below and every future one)**: per-fold deltas must be shown, not just the mean. No experiment is promoted on fold1's strength alone — an improvement must hold on folds 2–5.
 
+**No significance floor on top of that**: the champion config was verified byte-identical (see section 1) across two independent full 5-fold CV runs — `std = 0.0` exactly, not just small. Only the champion config was directly tested, but the mechanism is config-independent (`ScorePredictor`'s fixed `random_state` governs CatBoost's own bagging RNG regardless of which features are enabled, and nothing else in the pipeline introduces unseeded randomness), so this should generalize to any config in the agenda. Since there is no measured run-to-run variance at all, an experiment's reported delta is never competing with sampling noise; the per-fold-deltas-required guardrail above is sufficient on its own. Adding an arbitrary significance multiplier here would be inventing a floor the evidence doesn't call for.
+
 ---
 
 **`champion_cv_baseline`** (`outputs/experiments_v2.csv`, no session_id — manual one-off)
@@ -122,7 +126,7 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 **`style_matchup_knn_fixed_cv`** (session `20260805_1611_family-inventory`)
 - Hypothesis: `matchup_index.py`'s `FINGERPRINT_METRICS` bug (missing `offensive_rating`, 5 metrics instead of 6 — fixed in #40) materially changes the KNN-similarity feature's behavior; re-test under full CV (never tested under CV before, only single_split in July, not adopted).
 - Result: mean val 1.3830, test 1.3690. Per-fold val: 1.4341 / 1.3846 / 1.3788 / 1.3521 / 1.3653. Per-fold test: 1.3862 / 1.3873 / 1.3718 / 1.3620 / 1.3379.
-- Conclusion: within noise of champion (1.3850/1.3724) on every fold — the fix is real (99.5% of a 200-game sample had a changed similarity score) but doesn't change the adoption verdict. Not adopted; `style_matchup.enabled` stays `false`.
+- Conclusion: a small measured effect vs. champion (1.3850/1.3724 → 1.3830/1.3690), not clearly distinguishable from zero — deterministic delta from a genuine 2-feature config difference (129 vs. 127 features, `style_matchup_score`/`confidence`), not stochastic noise. The underlying fix is real (99.5% of a 200-game sample had a changed similarity score) but doesn't change the adoption verdict. Not adopted; `style_matchup.enabled` stays `false`.
 - Next: none planned — this line is closed pending a genuinely new signal (e.g. richer style inputs, per the design doc's Future Work), not a rerun of the same feature.
 
 **`fingerprint_ablation_on_cheap3fold` / `fingerprint_ablation_off_cheap3fold`** (session `20260805_1611_family-inventory`)
