@@ -96,6 +96,9 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 - Expected effect: val_score_mean roughly flat or very slightly improved.
 - Effort: very low (single flag flip, `scripts/run_fingerprint_ablation.py`'s pattern reused for this flag instead). Risk: very low.
 - Watch list, not bundled into E2's own test (avoid conflating simultaneous changes): `rest_features`, `home_advantage_features` — both near-zero permutation cost though not negative. Worth their own single-flag checks later, not this run.
+- **Result (session `rs_20260808_1`, `scripts/run_season_motivation_ablation.py`): cheap-screen only, not escalated.** Folds 3–5: on mean val=1.3656/test=1.3605, off mean val=1.3650/test=1.3519. Per-fold delta (on−off): fold3 −0.0019, fold4 **+0.0087**, fold5 −0.0051 — 2 of 3 folds favor off (matches the hypothesis direction), fold4 favors keeping it on fairly clearly. Overall val_mean improvement from turning it off is +0.0006 — matches the expected "roughly flat" outcome exactly, not a real lever either way.
+- Conclusion: **not escalated to full 5-fold this session.** Effect is tiny and directionally mixed (not the "looks promising enough to consider promoting" bar the protocol set for escalation) — reallocated the remaining time to E4, which has a sharper, D1-gated hypothesis. `preferred_opponent_delta_enabled` stays `true` (unchanged).
+- Next: candidate for a future cheap addition (very low effort) if a session has idle budget, but not a priority — the tiny magnitude here doesn't justify a full-5-fold run on its own.
 
 **E3. Refine top families — collinearity check.**
 - Hypothesis: `style_fingerprint_features` and `style_features` (both broad "team style/quality" proxies) and/or `opponent_quality_features` (the "used but not predictive" family from section 2) have real overlap — consolidating could simplify the model without losing signal, or confirm `opponent_quality_features` is safe to prune alongside `season_motivation_features`.
@@ -173,3 +176,9 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 - Result: full 5-fold grid over `season_regression` ∈ {0.30, 0.40, 0.522, 0.65, 0.80}, `k_factor` held at 11.02. Best: `season_regression=0.65`, val_mean=1.3841 vs. champion's 1.3850. Per-fold delta (best − champion): fold1 −0.0059, fold2 +0.0025, fold3 +0.0018, fold4 −0.0059, fold5 +0.0030.
 - Conclusion: **not promoted** — improvement doesn't hold on folds 2–5 (3 of 4 non-fold1/4 folds regressed), guardrail violation despite a marginally better mean. Whole grid essentially flat (1.3841–1.3852 range). `season_regression=0.522` exactly reproduced `champion_cv_baseline`'s numbers to 4dp, a useful incidental determinism re-confirmation.
 - Next: `k_factor` cross-grid deliberately not run (see section 3.2's full writeup for rationale) — time reallocated to E2/E4.
+
+**`E2` — Prune the dead tail** (session `rs_20260808_1`, `scripts/run_season_motivation_ablation.py`)
+- Hypothesis: `preferred_opponent_delta_enabled=false` performs flat-to-marginally-better than `true` (matches its negative permutation delta).
+- Result: cheap 3-fold screen (folds 3–5). On mean val=1.3656/test=1.3605, off mean val=1.3650/test=1.3519. Per-fold delta (on−off): fold3 −0.0019, fold4 +0.0087, fold5 −0.0051.
+- Conclusion: **not escalated to full 5-fold** — matches the "roughly flat" expected effect exactly (+0.0006 mean), but direction is mixed across folds (2/3 favor off, fold4 favors on). Doesn't clear the "promising enough to escalate" bar the protocol set. `preferred_opponent_delta_enabled` stays `true`, unchanged.
+- Next: none planned this session — low-priority future candidate given the tiny magnitude either way.
