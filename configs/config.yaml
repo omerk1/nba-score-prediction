@@ -156,6 +156,10 @@ injury_features:
     moderate: 0.6  # Sprain, strain, bone bruise
     minor: 0.3     # Soreness, illness, injury recovery, unknown
   doubtful_weight: 0.8  # Fraction of Out severity applied to Doubtful players
+  # E4 (EXPERIMENTS.md, session rs_20260808_1): zero_fill (status quo) vs.
+  # native_nan for missing injury rows. Not adopted -- ships at the status quo
+  # default per the ablation-gated feature workflow.
+  missing_value_strategy: zero_fill
 
 style_matchup:
   # A7 module (src/matchups/), formally read by config_loader.py's Config schema

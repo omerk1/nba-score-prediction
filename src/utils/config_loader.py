@@ -108,6 +108,11 @@ class InjuryScorer(str, Enum):
     llm = "llm"
 
 
+class InjuryMissingValueStrategy(str, Enum):
+    zero_fill = "zero_fill"
+    native_nan = "native_nan"
+
+
 class InjuryFeaturesConfig(BaseModel):
     enabled: bool
     scorer: InjuryScorer
@@ -119,6 +124,12 @@ class InjuryFeaturesConfig(BaseModel):
     importance_weights: ImportanceWeightsConfig
     severity_weights: SeverityWeightsConfig
     doubtful_weight: float
+    # E4 (EXPERIMENTS.md, session rs_20260808_1): does imputation strategy for
+    # missing injury rows matter more than the feature itself being weak?
+    # zero_fill (status quo) vs. native_nan (let CatBoost's own missing-value
+    # handling operate) -- gated so the ablation ships disabled-from-adoption
+    # by default per CLAUDE.md's ablation-gated feature workflow.
+    missing_value_strategy: InjuryMissingValueStrategy = InjuryMissingValueStrategy.zero_fill
 
 
 class StyleMatchupConfig(BaseModel):

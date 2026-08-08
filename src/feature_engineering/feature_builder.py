@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 
 from src.matchups.config import CACHE_DB
-from src.utils.config_loader import load_config
+from src.utils.config_loader import InjuryMissingValueStrategy, load_config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -704,6 +704,15 @@ class FeatureBuilder:
         injury_df["game_date"] = pd.to_datetime(injury_df["game_date"]).dt.normalize()
         game_dates = pd.to_datetime(df["GAME_DATE"]).dt.normalize()
 
+        # E4 (EXPERIMENTS.md, session rs_20260808_1): zero_fill (status quo)
+        # treats "no matching injury_df row" as "confirmed nobody out" (0).
+        # native_nan instead leaves it as a true missing value, letting
+        # CatBoost's own missing-value handling operate -- distinguishing
+        # "no injury data available" from "checked, nobody out" the same way
+        # `has_injury_data` already lets downstream code do, but at the
+        # feature-value level instead of via a separate indicator column.
+        native_nan = cfg.injury_features.missing_value_strategy == InjuryMissingValueStrategy.native_nan
+
         new_cols = {}
         home_merged, away_merged = None, None
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
@@ -714,17 +723,27 @@ class FeatureBuilder:
                 }
             )
             merged = lookup.merge(injury_df, on=["game_date", "team_id"], how="left")
-            new_cols[f"{prefix}_n_out"] = merged["n_out"].fillna(0).astype(int).values
-            new_cols[f"{prefix}_n_questionable"] = merged["n_questionable"].fillna(0).astype(int).values
-            new_cols[f"{prefix}_team_deficit"] = merged["team_deficit"].fillna(0).values
+            if native_nan:
+                new_cols[f"{prefix}_n_out"] = merged["n_out"].values
+                new_cols[f"{prefix}_n_questionable"] = merged["n_questionable"].values
+                new_cols[f"{prefix}_team_deficit"] = merged["team_deficit"].values
+            else:
+                new_cols[f"{prefix}_n_out"] = merged["n_out"].fillna(0).astype(int).values
+                new_cols[f"{prefix}_n_questionable"] = merged["n_questionable"].fillna(0).astype(int).values
+                new_cols[f"{prefix}_team_deficit"] = merged["team_deficit"].fillna(0).values
             if prefix == "home_team":
                 home_merged = merged
             else:
                 away_merged = merged
 
-        new_cols["team_deficit_diff"] = (
-            home_merged["team_deficit"].fillna(0).values - away_merged["team_deficit"].fillna(0).values
-        )
+        if native_nan:
+            new_cols["team_deficit_diff"] = (
+                home_merged["team_deficit"].values - away_merged["team_deficit"].values
+            )
+        else:
+            new_cols["team_deficit_diff"] = (
+                home_merged["team_deficit"].fillna(0).values - away_merged["team_deficit"].fillna(0).values
+            )
 
         dates_with_coverage = set(injury_df["game_date"])
         new_cols["has_injury_data"] = game_dates.isin(dates_with_coverage).astype(int)
