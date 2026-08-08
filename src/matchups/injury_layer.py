@@ -94,6 +94,28 @@ def _team_game_archetype_severity(out_df: pd.DataFrame) -> dict[tuple, dict[str,
     return result
 
 
+def _apply_injury_deltas(layer1_values: dict, archetypes_out: dict, injury_impact: dict) -> dict:
+    """One team-game's layer=1 metric values -> layer=2 (injury-adjusted).
+
+    Per this module's docstring: different archetypes missing simultaneously
+    stack additively (each targets its own metrics independently) -- so when
+    2+ archetypes share an affected metric, their deltas must SUM, not
+    overwrite one another. Extracted as its own function so this accumulation
+    behavior is directly unit-testable (see tests/test_injury_layer.py) --
+    it's exactly what a prior bug got wrong (each archetype recomputed from
+    the original layer=1 value instead of the running adjusted one, so only
+    the last-iterated archetype's contribution to a shared metric survived;
+    found by session rs_20260808_1's D2 leakage audit, see EXPERIMENTS.md).
+    """
+    out = dict(layer1_values)
+    for archetype, severity_mult in archetypes_out.items():
+        deltas = injury_impact.get(archetype, {})
+        for metric, delta in deltas.items():
+            if metric in FINGERPRINT_METRICS:
+                out[metric] = out[metric] + delta * severity_mult
+    return out
+
+
 def build_injury_adjusted_fingerprints() -> dict:
     """Reads layer=1 fingerprints, applies injury deltas, writes layer=2."""
     init_cache_db()
@@ -101,9 +123,7 @@ def build_injury_adjusted_fingerprints() -> dict:
     injury_impact = cfg["injury_impact"]
 
     conn = cache_conn()
-    fp1 = pd.read_sql_query(
-        "SELECT * FROM matchup_fingerprints WHERE layer = 1", conn
-    )
+    fp1 = pd.read_sql_query("SELECT * FROM matchup_fingerprints WHERE layer = 1", conn)
     conn.close()
 
     out_df = _out_players_with_reason()
@@ -117,20 +137,26 @@ def build_injury_adjusted_fingerprints() -> dict:
         if not archetypes_out:
             continue
         n_adjusted += 1
-        for archetype, severity_mult in archetypes_out.items():
-            deltas = injury_impact.get(archetype, {})
-            for metric, delta in deltas.items():
-                if metric in FINGERPRINT_METRICS:
-                    fp2.at[idx, metric] = row[metric] + delta * severity_mult
+        adjusted = _apply_injury_deltas(row[FINGERPRINT_METRICS].to_dict(), archetypes_out, injury_impact)
+        for metric, value in adjusted.items():
+            fp2.at[idx, metric] = value
 
     fp2["layer"] = 2
     conn = cache_conn()
     conn.execute("DELETE FROM matchup_fingerprints WHERE layer = 2")
     rows = [
         (
-            r.game_id, int(r.team_id), r.game_date, 2,
-            r.pace_score, r.three_pt_reliance, r.paint_activity,
-            r.defensive_rating, r.assist_rate, r.offensive_rating, int(r.n_games_in_window),
+            r.game_id,
+            int(r.team_id),
+            r.game_date,
+            2,
+            r.pace_score,
+            r.three_pt_reliance,
+            r.paint_activity,
+            r.defensive_rating,
+            r.assist_rate,
+            r.offensive_rating,
+            int(r.n_games_in_window),
         )
         for r in fp2.itertuples(index=False)
     ]
