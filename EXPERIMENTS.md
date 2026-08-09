@@ -10,18 +10,20 @@ Decision log and research agenda for the ablation-gated feature workflow (CLAUDE
 
 **Reproducibility, verified at full precision**: two independent full 5-fold CV runs of the champion config, diffed at full float64 precision (raw metric dicts and actual val/test predictions, not the 4dp values in logged CSV rows) — byte-identical on every fold, every metric, every prediction. `std = 0.0` exactly. The champion is provably deterministic at this precision, not just "matched to 4 decimals."
 
-**Champion baseline** (`champion_cv_baseline`, `outputs/experiments_v2.csv`): `style_matchup.raw_features_enabled=true`, `preferred_opponent_delta_enabled=true`, `style_matchup.enabled=false`.
+**Champion baseline** (`champion_cv_baseline_post_injury_fix`, `outputs/experiments_v2.csv`): `style_matchup.raw_features_enabled=true`, `preferred_opponent_delta_enabled=true`, `style_matchup.enabled=false`.
 
 | fold | val_score | test_score |
 |---|---:|---:|
-| 1 | 1.4407 | 1.3868 |
-| 2 | 1.3876 | 1.3936 |
-| 3 | 1.3804 | 1.3720 |
-| 4 | 1.3579 | 1.3787 |
-| 5 | 1.3585 | 1.3308 |
-| **mean** | **1.3850** | **1.3724** |
+| 1 | 1.4407 | 1.3867 |
+| 2 | 1.3878 | 1.3937 |
+| 3 | 1.3796 | 1.3728 |
+| 4 | 1.3560 | 1.3793 |
+| 5 | 1.3613 | 1.3310 |
+| **mean** | **1.3851** | **1.3727** |
 
 **Fold-1 gap, called out explicitly**: fold1's val_score (1.4407) is ~4–6% worse than every other fold (1.36–1.39 range) — the smallest training window (2018-10-16 → 2020-08-14) is the weakest fold by a clear margin, not noise. Section 2's fold-1 breakout and section 3's diagnostics/experiments are largely about understanding and addressing this gap.
+
+**Superseded reference point**: the original `champion_cv_baseline` row (`outputs/experiments_v2.csv`, val_score_mean 1.3850, per-fold `1.4407,1.3876,1.3804,1.3579,1.3585`) was computed before PR #44 fixed a bug in `injury_layer.py`'s multi-archetype injury-delta accumulation (each archetype's contribution to a shared metric was overwriting the previous one instead of summing, on the ~2% of team-games with 2+ different-archetype injuries — see the PR for the mechanism). Re-running the identical champion config with the fix (`champion_cv_baseline_post_injury_fix`) gives the table above. **Effect is negligible**: fold1 is exactly unchanged (no injury data exists that far back, so the fix can't touch it — consistent with the bug being real but scoped to where injury data exists), and folds 2–5 shift by −0.0019 to +0.0028 val_score, mixed direction, no consistent pattern. Mean moves from 1.3850 → 1.3851 (val) and 1.3724 → 1.3727 (test) — both changes are far smaller than any effect size this project's experiments screen for. The old row is kept in `experiments_v2.csv` for provenance (never overwritten, per CLAUDE.md), but `champion_cv_baseline_post_injury_fix` is the current ground truth going forward, since every future run uses the fixed code regardless.
 
 ## 2. Family inventory findings
 
