@@ -14,6 +14,9 @@ end-to-end, including the critical regression guarantee: home_away mode
 (default) must be BYTE-IDENTICAL to today's pre-existing behavior.
 """
 
+import os
+import tempfile
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -182,3 +185,49 @@ class TestScorePredictorIntegration:
             "diff_correlation",
         }
         assert all(np.isfinite(v) for v in metrics.values())
+
+    def test_diff_total_determinism_two_independent_fits_are_byte_identical(self):
+        """Same guarantee already verified for home_away mode's fixed
+        random_state -- diff_total mode must be equally deterministic, not
+        just accurate. Two fresh ScorePredictor instances, same data/params,
+        never sharing any state."""
+        X, y = _synthetic_training_data()
+        params = dict(
+            model_type="catboost",
+            random_state=42,
+            iterations=10,
+            verbose=False,
+            target_formulation="diff_total",
+        )
+        p1 = ScorePredictor(**params)
+        p2 = ScorePredictor(**params)
+        p1.train(X, y)
+        p2.train(X, y)
+        assert np.array_equal(p1.predict(X), p2.predict(X))
+
+    def test_diff_total_survives_save_load_round_trip(self):
+        """predict_game.py loads models via ScorePredictor.load() for live
+        prediction -- target_formulation/target_lambda_weight must round-trip
+        through save()/load() (they live in self.model_params, persisted as
+        part of the pickled model_data dict) so a loaded diff_total model
+        still correctly inverse-transforms its raw predictions."""
+        X, y = _synthetic_training_data()
+        predictor = ScorePredictor(
+            model_type="catboost",
+            random_state=42,
+            iterations=5,
+            verbose=False,
+            target_formulation="diff_total",
+            target_lambda_weight=0.5,
+        )
+        predictor.train(X, y)
+        pred_before = predictor.predict(X)
+
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "model.pkl")
+            predictor.save(path)
+            loaded = ScorePredictor.load(path)
+
+        assert loaded.target_formulation == "diff_total"
+        assert loaded.target_lambda_weight == 0.5
+        assert np.array_equal(loaded.predict(X), pred_before)
