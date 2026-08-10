@@ -125,7 +125,12 @@ model:
     min_data_in_leaf:  [1, 50]     # Top trials clustered 15-26; extended upper
     subsample:         [0.5, 1.0]
     colsample_bylevel: [0.5, 1.0]
-  
+  # EXPERIMENTS.md section 3.3: home_away (status quo) vs. diff_total target
+  # reformulation. Not adopted -- ships at the status quo default per the
+  # ablation-gated feature workflow.
+  target_formulation: home_away
+  target_lambda_weight: 0.5
+
 elo_features:
   enabled: true
   initial_rating: 1500.0    # Standard Elo starting point for all teams

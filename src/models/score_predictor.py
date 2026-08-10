@@ -5,16 +5,16 @@ NBA Score Prediction Model
 Multi-output regression model to predict both home and away scores.
 Focus on point differential accuracy while maintaining realistic scores.
 """
+
 import logging
-import joblib
 from typing import Optional
 
-import pandas as pd
+import joblib
 import numpy as np
-
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from scipy.stats import norm
+import pandas as pd
 from catboost import CatBoostRegressor, Pool
+from scipy.stats import norm
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,19 +28,19 @@ class ScorePredictor:
     with custom evaluation focusing on point differential accuracy.
     """
 
-    def __init__(
-        self,
-        model_type: str = 'catboost',
-        random_state: int = 42,
-        **model_params
-    ):
+    def __init__(self, model_type: str = "catboost", random_state: int = 42, **model_params):
         """
         Initialize the score predictor.
 
         Args:
             model_type: 'xgboost', 'lightgbm', or 'catboost'
             random_state: Random seed for reproducibility
-            **model_params: Additional parameters for the model
+            **model_params: Additional parameters for the model. Two are
+                interpreted here rather than passed through to CatBoost:
+                target_formulation ('home_away' default, or 'diff_total' --
+                EXPERIMENTS.md section 3.3) and target_lambda_weight (default
+                0.5, only used when target_formulation='diff_total' -- see
+                _to_training_targets).
         """
         self.model_type = model_type
         self.random_state = random_state
@@ -48,29 +48,85 @@ class ScorePredictor:
         self.model = None
         self.feature_names = None
 
-        logger.info(f"ScorePredictor initialized with {model_type}")
+        self.target_formulation = model_params.get("target_formulation", "home_away")
+        if self.target_formulation not in ("home_away", "diff_total"):
+            raise ValueError(
+                f"target_formulation must be 'home_away' or 'diff_total', got {self.target_formulation!r}"
+            )
+        self.target_lambda_weight = model_params.get("target_lambda_weight", 0.5)
+        if self.target_formulation == "diff_total" and self.target_lambda_weight <= 0:
+            raise ValueError(
+                f"target_lambda_weight must be > 0 for target_formulation='diff_total' "
+                f"(used as a divisor when reconstructing predictions), got {self.target_lambda_weight}"
+            )
+
+        logger.info(
+            f"ScorePredictor initialized with {model_type} (target_formulation={self.target_formulation})"
+        )
 
     def _create_model(self):
-        if self.model_type != 'catboost':
+        if self.model_type != "catboost":
             raise ValueError(f"Unknown model_type: {self.model_type}. Only 'catboost' is supported.")
         return CatBoostRegressor(
             random_seed=self.random_state,
-            iterations=self.model_params.get('iterations', 1000),
-            depth=self.model_params.get('depth', 6),
-            learning_rate=self.model_params.get('learning_rate', 0.1),
-            bootstrap_type='Bernoulli',
-            subsample=self.model_params.get('subsample', 0.8),
-            colsample_bylevel=self.model_params.get('colsample_bylevel', 0.8),
-            verbose=self.model_params.get('verbose', False),
-            loss_function='MultiRMSE',
+            iterations=self.model_params.get("iterations", 1000),
+            depth=self.model_params.get("depth", 6),
+            learning_rate=self.model_params.get("learning_rate", 0.1),
+            bootstrap_type="Bernoulli",
+            subsample=self.model_params.get("subsample", 0.8),
+            colsample_bylevel=self.model_params.get("colsample_bylevel", 0.8),
+            verbose=self.model_params.get("verbose", False),
+            loss_function="MultiRMSE",
         )
+
+    def _to_training_targets(self, y: pd.DataFrame) -> np.ndarray:
+        """[home, away] (as always passed into train()/evaluate() by callers)
+        -> whatever space the model is actually fit on.
+
+        target_formulation='home_away': pass through unchanged (today's
+        behavior, byte-identical).
+
+        target_formulation='diff_total': fits on [diff, total*sqrt(lambda)]
+        instead. The sqrt(lambda) scaling is the standard trick for getting
+        asymmetric per-output weighting out of a loss (MultiRMSE) that
+        otherwise weights every output dimension's squared error equally --
+        CatBoost's MultiRMSE has no native per-dimension weight parameter.
+        Scaling a target by a constant c scales that dimension's squared-error
+        contribution by c^2, so c=sqrt(lambda) makes total's contribution to
+        the fitted loss exactly `lambda` relative to diff's -- matching
+        compute_composite_score's own `diff_mae + lambda_weight * total_mae`
+        weighting (src/evaluation/cv_harness.py), so the training loss and the
+        eval metric agree on how much each component matters. Predictions are
+        unscaled back in _from_training_targets before anything outside this
+        class ever sees them."""
+        if self.target_formulation == "home_away":
+            return y.to_numpy(dtype=float)
+        home = y.iloc[:, 0].to_numpy(dtype=float)
+        away = y.iloc[:, 1].to_numpy(dtype=float)
+        diff = home - away
+        total = home + away
+        return np.column_stack([diff, total * np.sqrt(self.target_lambda_weight)])
+
+    def _from_training_targets(self, raw: np.ndarray) -> np.ndarray:
+        """Inverse of _to_training_targets. Always returns [home, away],
+        regardless of target_formulation -- predict()'s public contract never
+        changes, so callers outside this class (cv_harness.py, predict_game.py,
+        evaluate() below) never need to know or care which mode trained the
+        underlying model."""
+        if self.target_formulation == "home_away":
+            return raw
+        diff = raw[:, 0]
+        total = raw[:, 1] / np.sqrt(self.target_lambda_weight)
+        home = (total + diff) / 2.0
+        away = (total - diff) / 2.0
+        return np.column_stack([home, away])
 
     def train(
         self,
         X_train: pd.DataFrame,
         y_train: pd.DataFrame,
         X_val: Optional[pd.DataFrame] = None,
-        y_val: Optional[pd.DataFrame] = None
+        y_val: Optional[pd.DataFrame] = None,
     ):
         """
         Train the model.
@@ -84,12 +140,21 @@ class ScorePredictor:
         self.feature_names = X_train.columns.tolist()
         self.model = self._create_model()
 
-        early_stopping_rounds = self.model_params.get('early_stopping_rounds', 50)
-        eval_set = Pool(X_val, y_val) if X_val is not None and y_val is not None else None
+        # Fit in whatever space target_formulation calls for (see
+        # _to_training_targets); y_train/y_val themselves stay [home, away]
+        # for the evaluate() calls below, unchanged in either mode.
+        y_train_fit = self._to_training_targets(y_train)
+        y_val_fit = self._to_training_targets(y_val) if y_val is not None else None
 
-        logger.info(f"Training {self.model_type} on {len(X_train):,} games with {len(self.feature_names)} features...")
+        early_stopping_rounds = self.model_params.get("early_stopping_rounds", 50)
+        eval_set = Pool(X_val, y_val_fit) if X_val is not None and y_val_fit is not None else None
+
+        logger.info(
+            f"Training {self.model_type} on {len(X_train):,} games with {len(self.feature_names)} features..."
+        )
         self.model.fit(
-            X_train, y_train,
+            X_train,
+            y_train_fit,
             eval_set=eval_set,
             early_stopping_rounds=early_stopping_rounds if eval_set is not None else None,
         )
@@ -111,18 +176,17 @@ class ScorePredictor:
             X: Features
 
         Returns:
-            Array of shape (n_games, 2) with [home_score, away_score]
+            Array of shape (n_games, 2) with [home_score, away_score] --
+            regardless of target_formulation, see _from_training_targets.
         """
         if self.model is None:
             raise ValueError("Model not trained yet. Call train() first.")
 
-        return self.model.predict(X)
+        raw = self.model.predict(X)
+        return self._from_training_targets(raw)
 
     def evaluate(
-        self,
-        X: pd.DataFrame,
-        y_true: pd.DataFrame,
-        dataset_name: str = "Dataset"
+        self, X: pd.DataFrame, y_true: pd.DataFrame, dataset_name: str = "Dataset"
     ) -> dict[str, float]:
         """
         Evaluate model with focus on point differential accuracy.
@@ -155,35 +219,32 @@ class ScorePredictor:
         # Metrics
         metrics = {
             # Point Differential (MOST IMPORTANT)
-            'diff_mae': mean_absolute_error(diff_true, diff_pred),
-            'diff_rmse': np.sqrt(mean_squared_error(diff_true, diff_pred)),
-            'diff_within_3': np.mean(np.abs(diff_true - diff_pred) <= 3),
-            'diff_within_5': np.mean(np.abs(diff_true - diff_pred) <= 5),
-            'diff_within_10': np.mean(np.abs(diff_true - diff_pred) <= 10),
-
+            "diff_mae": mean_absolute_error(diff_true, diff_pred),
+            "diff_rmse": np.sqrt(mean_squared_error(diff_true, diff_pred)),
+            "diff_within_3": np.mean(np.abs(diff_true - diff_pred) <= 3),
+            "diff_within_5": np.mean(np.abs(diff_true - diff_pred) <= 5),
+            "diff_within_10": np.mean(np.abs(diff_true - diff_pred) <= 10),
             # Individual Scores
-            'home_mae': mean_absolute_error(home_true, home_pred),
-            'away_mae': mean_absolute_error(away_true, away_pred),
-            'home_rmse': np.sqrt(mean_squared_error(home_true, home_pred)),
-            'away_rmse': np.sqrt(mean_squared_error(away_true, away_pred)),
-
+            "home_mae": mean_absolute_error(home_true, home_pred),
+            "away_mae": mean_absolute_error(away_true, away_pred),
+            "home_rmse": np.sqrt(mean_squared_error(home_true, home_pred)),
+            "away_rmse": np.sqrt(mean_squared_error(away_true, away_pred)),
             # Total Points
-            'total_mae': mean_absolute_error(total_true, total_pred),
-            'total_rmse': np.sqrt(mean_squared_error(total_true, total_pred)),
-
+            "total_mae": mean_absolute_error(total_true, total_pred),
+            "total_rmse": np.sqrt(mean_squared_error(total_true, total_pred)),
             # Win/Loss Prediction
-            'win_accuracy': np.mean((diff_true > 0) == (diff_pred > 0)),
-
+            "win_accuracy": np.mean((diff_true > 0) == (diff_pred > 0)),
             # Brier score: calibration of win probability for moneyline markets.
             # Win prob derived via normal CDF: P(home wins) = Φ(pred_diff / residual_std).
             # Residual std captures model uncertainty; lower Brier = better calibration.
             # Baseline (always predict 50%) = 0.25; good models reach ~0.22-0.23.
-            'brier_score': float(np.mean(
-                (norm.cdf(diff_pred / np.std(diff_true - diff_pred)) - (diff_true > 0).astype(float)) ** 2
-            )),
-
+            "brier_score": float(
+                np.mean(
+                    (norm.cdf(diff_pred / np.std(diff_true - diff_pred)) - (diff_true > 0).astype(float)) ** 2
+                )
+            ),
             # Correlation
-            'diff_correlation': np.corrcoef(diff_true, diff_pred)[0, 1],
+            "diff_correlation": np.corrcoef(diff_true, diff_pred)[0, 1],
         }
 
         logger.info(
@@ -209,10 +270,16 @@ class ScorePredictor:
         if self.model is None:
             raise ValueError("Model not trained yet.")
 
-        importance_df = pd.DataFrame({
-            'feature': self.feature_names,
-            'importance': self.model.get_feature_importance(),
-        }).sort_values('importance', ascending=False).head(top_n)
+        importance_df = (
+            pd.DataFrame(
+                {
+                    "feature": self.feature_names,
+                    "importance": self.model.get_feature_importance(),
+                }
+            )
+            .sort_values("importance", ascending=False)
+            .head(top_n)
+        )
 
         return importance_df
 
@@ -222,11 +289,11 @@ class ScorePredictor:
             raise ValueError("No model to save. Train first.")
 
         model_data = {
-            'model': self.model,
-            'feature_names': self.feature_names,
-            'model_type': self.model_type,
-            'random_state': self.random_state,
-            'model_params': self.model_params
+            "model": self.model,
+            "feature_names": self.feature_names,
+            "model_type": self.model_type,
+            "random_state": self.random_state,
+            "model_params": self.model_params,
         }
 
         joblib.dump(model_data, filepath)
@@ -238,13 +305,13 @@ class ScorePredictor:
         model_data = joblib.load(filepath)
 
         predictor = cls(
-            model_type=model_data['model_type'],
-            random_state=model_data['random_state'],
-            **model_data['model_params']
+            model_type=model_data["model_type"],
+            random_state=model_data["random_state"],
+            **model_data["model_params"],
         )
 
-        predictor.model = model_data['model']
-        predictor.feature_names = model_data['feature_names']
+        predictor.model = model_data["model"]
+        predictor.feature_names = model_data["feature_names"]
 
         logger.info(f"✓ Model loaded from {filepath}")
         return predictor
@@ -260,11 +327,19 @@ if __name__ == "__main__":
     test_df = pd.read_csv(features_dir / "test_features.csv")
 
     # Prepare features and targets
-    target_cols = ['PTS_home', 'PTS_away']
+    target_cols = ["PTS_home", "PTS_away"]
     exclude_cols = [
-        'GAME_ID', 'GAME_DATE', 'SEASON_ID', 'HOME_TEAM_ID', 'AWAY_TEAM_ID',
-        'PTS_home', 'PTS_away', 'POINT_DIFF', 'TOTAL_POINTS', 'HOME_TEAM_WINS',
-        'matchup_key'
+        "GAME_ID",
+        "GAME_DATE",
+        "SEASON_ID",
+        "HOME_TEAM_ID",
+        "AWAY_TEAM_ID",
+        "PTS_home",
+        "PTS_away",
+        "POINT_DIFF",
+        "TOTAL_POINTS",
+        "HOME_TEAM_WINS",
+        "matchup_key",
     ]
     feature_cols = [col for col in train_df.columns if col not in exclude_cols]
 
@@ -279,19 +354,14 @@ if __name__ == "__main__":
     logger.info(f"  Features: {len(feature_cols)}")
 
     # Train model
-    predictor = ScorePredictor(
-        model_type='catboost',
-        iterations=200,
-        depth=6,
-        learning_rate=0.1
-    )
+    predictor = ScorePredictor(model_type="catboost", iterations=200, depth=6, learning_rate=0.1)
 
     train_metrics, test_metrics = predictor.train(X_train, y_train, X_test, y_test)
 
     # Show feature importance
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("TOP 20 MOST IMPORTANT FEATURES")
-    print("="*70)
+    print("=" * 70)
     importance_df = predictor.get_feature_importance(top_n=20)
     print(importance_df.to_string(index=False))
 
@@ -300,6 +370,6 @@ if __name__ == "__main__":
     models_dir.mkdir(exist_ok=True, parents=True)
     predictor.save(models_dir / "score_predictor.pkl")
 
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("✓ MODEL TRAINING COMPLETE")
-    print("="*70)
+    print("=" * 70)

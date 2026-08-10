@@ -239,6 +239,8 @@ def run_split(
         colsample_bylevel=0.8,
         random_state=config.model.random_state,
         verbose=False,
+        target_formulation=config.model.target_formulation.value,
+        target_lambda_weight=config.model.target_lambda_weight,
     )
     train_metrics, val_metrics = predictor.train(X_train, y_train, X_val, y_val)
     test_metrics = predictor.evaluate(X_test, y_test, dataset_name="Test")
