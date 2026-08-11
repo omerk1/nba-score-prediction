@@ -232,7 +232,7 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 
 ---
 
-**`target_lambda_weight_0.5` / `target_lambda_weight_0.75`** (manual one-off, `scripts/sweep_target_lambda_weight.py`)
+**`target_lambda_weight_0.75`** (manual one-off, `scripts/sweep_target_lambda_weight.py`)
 - Hypothesis (section 3.3 follow-up): `target_lambda_weight=0.5` was never independently tuned for the `diff_total` training loss — it was only ever inherited from `compute_composite_score`'s own diff/total weighting (a metric-level choice, not a loss-fitting one). A different value might fit `MultiRMSE` in a way that better serves the composite score.
 - Stage 1, cheap screen (folds 3–5), grid `[0.1, 0.25, 0.5, 0.75, 1.0, 2.0]`:
 
@@ -246,7 +246,7 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
   | 2.0 | 1.3616 |
 
   0.75 best on screen; not a monotonic trend (0.1 and 1.0 both worse than 0.75 and 2.0), so this reads as a shallow, fairly flat optimum around 0.5–2.0 rather than a sharp one — still enough signal to promote 0.75 to a full-CV check per the escalation protocol.
-- Stage 2, full 5-fold CV, `0.5` (reference) vs. `0.75`:
+- Stage 2, full 5-fold CV, `0.5` (reference, not re-logged — identical to `champion_cv_baseline_diff_total`'s already-proven-deterministic numbers) vs. `0.75`:
 
   | fold | 0.5 | 0.75 |
   |---|---:|---:|
