@@ -77,13 +77,16 @@ class ModelConfig(BaseModel):
     iterations: int
     early_stopping_rounds: int
     tuning: Optional[TuningConfig] = None  # absent when not tuning
-    # EXPERIMENTS.md section 3.3 (target reformulation): home_away (status
+    # EXPERIMENTS.md section 3.3 (target reformulation): home_away (old status
     # quo) fits MultiRMSE on [PTS_home, PTS_away] directly; diff_total fits on
     # [POINT_DIFF, TOTAL_POINTS] instead, aligning the training loss with what
     # the composite metric actually rewards (diff-dominant, total at half
     # weight -- see ScorePredictor._to_training_targets for the mechanism).
-    # Ships disabled-from-adoption (home_away, byte-identical to pre-existing
-    # behavior) per the ablation-gated feature workflow.
+    # ADOPTED as the new committed default (configs/config.yaml: diff_total) --
+    # beat home_away on val_score in all 5 CV folds individually. Schema
+    # default here stays home_away (the conservative fallback if this field is
+    # ever omitted from a config), same convention as
+    # StyleMatchupConfig.raw_features_enabled's schema-vs-yaml split.
     target_formulation: TargetFormulation = TargetFormulation.home_away
     target_lambda_weight: float = 0.5
 
