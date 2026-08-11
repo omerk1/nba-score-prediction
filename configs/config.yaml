@@ -133,7 +133,14 @@ model:
   # new committed default: `diff_total`. See the target_formulation_diff_total
   # decision-log entry.
   target_formulation: diff_total
-  target_lambda_weight: 0.5
+  # target_lambda_weight sweep (EXPERIMENTS.md section 3.3 follow-up): 0.5 was
+  # only ever inherited from compute_composite_score's own diff/total
+  # weighting, never independently tuned for the training loss. A cheap
+  # 3-fold screen over [0.1, 0.25, 0.5, 0.75, 1.0, 2.0] found 0.75 best; full
+  # 5-fold CV confirmed it beats 0.5 on val_score in 4 of 5 folds (mean 1.3821
+  # vs. 1.3838) -- ADOPTED as the new committed default. See the
+  # target_lambda_weight_0.75 decision-log entry.
+  target_lambda_weight: 0.75
 
 elo_features:
   enabled: true

@@ -10,22 +10,23 @@ Decision log and research agenda for the ablation-gated feature workflow (CLAUDE
 
 **Reproducibility, verified at full precision**: two independent full 5-fold CV runs of the (then-)champion config, diffed at full float64 precision (raw metric dicts and actual val/test predictions, not the 4dp values in logged CSV rows) — byte-identical on every fold, every metric, every prediction. `std = 0.0` exactly. `target_formulation=diff_total`'s own determinism was separately re-verified (two independent fold5 runs, full precision, byte-identical) before adoption — see the `target_formulation_diff_total` decision-log entry.
 
-**Champion baseline** (`champion_cv_baseline_diff_total`, `outputs/experiments_v2.csv`): `style_matchup.raw_features_enabled=true`, `preferred_opponent_delta_enabled=true`, `style_matchup.enabled=false`, `model.target_formulation=diff_total`.
+**Champion baseline** (`target_lambda_weight_0.75`, `outputs/experiments_v2.csv`): `style_matchup.raw_features_enabled=true`, `preferred_opponent_delta_enabled=true`, `style_matchup.enabled=false`, `model.target_formulation=diff_total`, `model.target_lambda_weight=0.75`.
 
 | fold | val_score | test_score |
 |---|---:|---:|
-| 1 | 1.4371 | 1.3898 |
-| 2 | 1.3870 | 1.3884 |
-| 3 | 1.3779 | 1.3716 |
-| 4 | 1.3554 | 1.3692 |
-| 5 | 1.3612 | 1.3282 |
-| **mean** | **1.3838** | **1.3694** |
+| 1 | 1.4368 | 1.3948 |
+| 2 | 1.3898 | 1.3852 |
+| 3 | 1.3719 | 1.3713 |
+| 4 | 1.3527 | 1.3713 |
+| 5 | 1.3592 | 1.3299 |
+| **mean** | **1.3821** | **1.3705** |
 
-**Fold-1 gap, called out explicitly**: fold1's val_score (1.4371) is ~4–6% worse than every other fold (1.35–1.39 range) — the smallest training window (2018-10-16 → 2020-08-14) is the weakest fold by a clear margin, not noise. Section 2's fold-1 breakout and section 3's diagnostics/experiments (run under the prior `home_away` champion) are largely about understanding and addressing this gap; it persists under `diff_total` too, just slightly narrowed.
+**Fold-1 gap, called out explicitly**: fold1's val_score (1.4368) is ~4–6% worse than every other fold (1.35–1.39 range) — the smallest training window (2018-10-16 → 2020-08-14) is the weakest fold by a clear margin, not noise. Section 2's fold-1 breakout and section 3's diagnostics/experiments (run under the prior `home_away` champion) are largely about understanding and addressing this gap; it persists under the current champion too, just slightly narrowed.
 
-**Superseded reference points** (both kept in `experiments_v2.csv` for provenance, never overwritten, per CLAUDE.md):
+**Superseded reference points** (all kept in `experiments_v2.csv` for provenance, never overwritten, per CLAUDE.md):
 - `champion_cv_baseline` (val_score_mean 1.3850) → `champion_cv_baseline_post_injury_fix` (1.3851): PR #44 fixed a bug in `injury_layer.py`'s multi-archetype injury-delta accumulation. Effect was negligible (fold1 exactly unchanged, folds 2–5 shifted −0.0019 to +0.0028, no consistent direction) — see PR #44/#45.
-- `champion_cv_baseline_post_injury_fix` (1.3851) → `target_formulation_diff_total` (1.3838): the target-reformulation experiment (section 3.3) — fitting `MultiRMSE` on `[POINT_DIFF, TOTAL_POINTS]` instead of `[PTS_home, PTS_away]` beat the old formulation on val_score in **all 5 folds individually**, the first candidate in this project's CV-protocol history to cleanly clear the per-fold guardrail. `configs/config.yaml`'s `model.target_formulation` is now `diff_total`.
+- `champion_cv_baseline_post_injury_fix` (1.3851) → `champion_cv_baseline_diff_total` (1.3838): the target-reformulation experiment (section 3.3) — fitting `MultiRMSE` on `[POINT_DIFF, TOTAL_POINTS]` instead of `[PTS_home, PTS_away]` beat the old formulation on val_score in **all 5 folds individually**, the first candidate in this project's CV-protocol history to cleanly clear the per-fold guardrail. `configs/config.yaml`'s `model.target_formulation` is now `diff_total`.
+- `champion_cv_baseline_diff_total` (1.3838) → `target_lambda_weight_0.75` (1.3821): the `target_lambda_weight` sweep (section 3.3 follow-up) — 0.5 had only ever been inherited from `compute_composite_score`'s own diff/total weighting, never independently tuned for the training loss; a cheap 3-fold screen found 0.75 best, and full 5-fold CV confirmed it beats 0.5 on val_score in 4 of 5 folds (only fold2 regresses). `configs/config.yaml`'s `model.target_lambda_weight` is now `0.75`. No dedicated `champion_cv_baseline_*` row this time — the experiment's own row already has byte-identical values, so a second row would be pure duplication; `EXPERIMENTS.md` (here) is the pointer, not the CSV row name.
 
 ## 2. Family inventory findings
 
@@ -227,4 +228,36 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 - Conclusion: **this is the first candidate in this project's CV-protocol history to cleanly clear the per-fold guardrail** — unanimous improvement across all 5 folds, full CV, not a fold1-driven artifact. Magnitude is modest (0.0013 on val_score_mean) but real and consistent.
 - Re-audit before adoption (requested explicitly, given this changes the training loss): (1) re-derived the `_to_training_targets`/`_from_training_targets` round-trip algebra by hand; (2) confirmed CatBoost's `MultiRMSE` loss formula against official docs — `sqrt(Σᵢ Σ_d (pred−true)² · wᵢ) / Σᵢ wᵢ`, only a per-sample weight exists, no per-dimension weight (also confirmed by CatBoost GitHub issue #2906, an open feature request for per-dimension weighting *because it doesn't exist yet*) — this is exactly what the `sqrt(lambda)` scaling trick relies on; (3) empirically swept `target_lambda_weight` (0.01/0.5/50.0) on synthetic data and confirmed `total_mae`/`diff_mae` trade off monotonically in the expected direction; (4) re-verified determinism specifically for `diff_total` mode on real fold5 data (two independent runs, full float64 precision, byte-identical — the earlier determinism proof only covered `home_away` mode); (5) found and closed a real gap — `predict_game.py` loads models via `ScorePredictor.load()` for live prediction, and the save/load round-trip for `target_formulation`/`target_lambda_weight` had never been tested; verified it round-trips correctly, added as a permanent regression test; (6) diffed `target_formulation_home_away`'s full-CV row against `champion_cv_baseline_post_injury_fix` on **every** logged column (not just val_score_mean) — exact match throughout.
 - **ADOPTED.** `configs/config.yaml`'s `model.target_formulation` flipped to `diff_total` — new standing champion, logged as `champion_cv_baseline_diff_total` (a fresh `run_name`, matching the `champion_cv_baseline`/`champion_cv_baseline_post_injury_fix` naming convention — not left under the experiment's own comparison-arm name). Values are byte-identical to `target_formulation_diff_total`'s row, not re-executed: `diff_total` mode's determinism is proven, so this row *is* what any future run of the now-adopted config would produce.
-- Next: none — closed. `docs/`-level backlog candidates this doesn't cover: `target_lambda_weight` itself was never swept (only the champion's existing `lambda_weight=0.5` composite-score weighting was carried through) — retuning it jointly is a distinct, unexplored axis for a future session.
+- Next: `target_lambda_weight` itself was never swept (only the champion's existing `lambda_weight=0.5` composite-score weighting was carried through) — see the `target_lambda_weight_0.75` entry below.
+
+---
+
+**`target_lambda_weight_0.75`** (manual one-off, `scripts/sweep_target_lambda_weight.py`)
+- Hypothesis (section 3.3 follow-up): `target_lambda_weight=0.5` was never independently tuned for the `diff_total` training loss — it was only ever inherited from `compute_composite_score`'s own diff/total weighting (a metric-level choice, not a loss-fitting one). A different value might fit `MultiRMSE` in a way that better serves the composite score.
+- Stage 1, cheap screen (folds 3–5), grid `[0.1, 0.25, 0.5, 0.75, 1.0, 2.0]`:
+
+  | λ | mean val_score (folds 3-5) |
+  |---|---:|
+  | 0.1 | 1.3673 |
+  | 0.25 | 1.3624 |
+  | 0.5 (champion) | 1.3649 |
+  | **0.75** | **1.3613** |
+  | 1.0 | 1.3656 |
+  | 2.0 | 1.3616 |
+
+  0.75 best on screen; not a monotonic trend (0.1 and 1.0 both worse than 0.75 and 2.0), so this reads as a shallow, fairly flat optimum around 0.5–2.0 rather than a sharp one — still enough signal to promote 0.75 to a full-CV check per the escalation protocol.
+- Stage 2, full 5-fold CV, `0.5` (reference, not re-logged — identical to `champion_cv_baseline_diff_total`'s already-proven-deterministic numbers) vs. `0.75`:
+
+  | fold | 0.5 | 0.75 |
+  |---|---:|---:|
+  | 1 | 1.4371 | **1.4368** |
+  | 2 | **1.3870** | 1.3898 |
+  | 3 | 1.3779 | **1.3719** |
+  | 4 | 1.3554 | **1.3527** |
+  | 5 | 1.3612 | **1.3592** |
+  | **mean** | 1.3838 | **1.3821** |
+
+  0.75 wins val_score on 4 of 5 folds (only fold2 regresses, +0.0028) — not fold1-driven (fold1 also improves, by a small margin). Test-score mean is flat-to-slightly-worse (1.3705 vs. 1.3694), expected noise, not a selection criterion.
+- Conclusion: a real, mostly-consistent improvement — smaller magnitude than the `diff_total` reformulation itself (which was 5/5 folds), but clears the "not just one fold" bar with a clean majority.
+- **ADOPTED.** `configs/config.yaml`'s `model.target_lambda_weight` flipped to `0.75` — new standing champion is the `target_lambda_weight_0.75` row above. Unlike the two prior supersessions, no separate `champion_cv_baseline_*` row was added: that convention was only ever about giving the CSV a self-describing name, but it's pure duplication when the experiment's own row already carries the winning values — this doc's "Champion baseline" line (section 1) is the actual pointer.
+- Next: none — closed.
