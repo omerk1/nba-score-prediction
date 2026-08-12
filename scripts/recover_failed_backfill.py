@@ -15,16 +15,16 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Set
 
 import pandas as pd
 from nba_api.stats.endpoints import BoxScoreTraditionalV3
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
+from backfill_player_stats import STAT_COLUMNS, _insert_player_stats
+
 from src.data_processing.data_loader import NBADataLoader
 from src.utils.config_loader import load_config
-from backfill_player_stats import _insert_player_stats, STAT_COLUMNS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 SLEEP_SECONDS = 0.6
 
 
-def extract_failed_games(logfile: str) -> Set[str]:
+def extract_failed_games(logfile: str) -> set[str]:
     """
     Extract failed game IDs from backfill log.
 
@@ -46,10 +46,10 @@ def extract_failed_games(logfile: str) -> Set[str]:
         Set of game IDs that failed during backfill
     """
     failed_games = set()
-    pattern = re.compile(r'Failed to fetch box score for game (\d+):')
+    pattern = re.compile(r"Failed to fetch box score for game (\d+):")
 
     try:
-        with open(logfile, 'r') as f:
+        with open(logfile, "r") as f:
             for line in f:
                 match = pattern.search(line)
                 if match:
@@ -83,12 +83,12 @@ def fetch_box_score_with_retry(game_id: str, max_retries: int = 3) -> pd.DataFra
                 logger.warning(f"Empty box score for game {game_id}")
                 return pd.DataFrame()
 
-            df = df[df['personId'].notna()]
+            df = df[df["personId"].notna()]
             logger.info(f"✓ Fetched game {game_id} (attempt {attempt + 1}/{max_retries})")
             return df
 
         except Exception as e:
-            wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+            wait_time = 2**attempt  # Exponential backoff: 1s, 2s, 4s
             if attempt < max_retries - 1:
                 logger.warning(
                     f"Failed to fetch game {game_id} (attempt {attempt + 1}/{max_retries}): {e}. "
@@ -131,13 +131,13 @@ def recover_failed_backfill(
         all_games = loader.load_games(
             start_date="2016-10-01",
             end_date="2026-07-01",
-            allowed_season_types=['Regular Season'],
+            allowed_season_types=["Regular Season"],
         )
     finally:
         loader.close()
 
     # Build game_id -> date mapping
-    game_dates = dict(zip(all_games['GAME_ID'].astype(str), all_games['GAME_DATE'].dt.strftime('%Y-%m-%d')))
+    game_dates = dict(zip(all_games["GAME_ID"].astype(str), all_games["GAME_DATE"].dt.strftime("%Y-%m-%d")))
 
     # Retry each failed game
     recovered = 0

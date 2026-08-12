@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import requests
 
@@ -40,7 +40,7 @@ def _throttle() -> None:
     _last_request_time = time.monotonic()
 
 
-def get_json(url: str, params: Optional[Dict[str, Any]] = None) -> Any:
+def get_json(url: str, params: Optional[dict[str, Any]] = None) -> Any:
     """
     Rate-limited GET with retry + exponential backoff on 429/5xx.
 
@@ -84,7 +84,7 @@ def get_json(url: str, params: Optional[Dict[str, Any]] = None) -> Any:
 def cached_get_json(
     cache_path: str,
     url: str,
-    params: Optional[Dict[str, Any]] = None,
+    params: Optional[dict[str, Any]] = None,
     force_refresh: bool = False,
 ) -> Any:
     """

@@ -27,7 +27,7 @@ tick-level raw/rolling-median minimums.
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -63,11 +63,11 @@ class GameSeries:
     was_capped: bool  # True if the Data API's per-side offset cap was hit on at least one side
     earliest_trade_ts: Optional[int]
     pregame_coverage: bool  # True if at least one trade was observed strictly before tip-off
-    notes: List[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 def normalize_trades(
-    trades: List[Dict[str, Any]], winner_token_id: str
+    trades: list[dict[str, Any]], winner_token_id: str
 ) -> pd.DataFrame:
     """
     Convert raw trade records into a unified DataFrame referenced to
@@ -152,7 +152,7 @@ def _empty_series(
     was_capped: bool,
     earliest_trade_ts: Optional[int],
     pregame_coverage: bool,
-    notes: List[str],
+    notes: list[str],
 ) -> GameSeries:
     return GameSeries(
         df=df,
@@ -178,10 +178,10 @@ def _empty_series(
 
 
 def build_game_series(
-    trades: List[Dict[str, Any]],
+    trades: list[dict[str, Any]],
     winner_token_id: str,
     game_start_ts: Optional[int],
-    trade_meta: Dict[str, Any],
+    trade_meta: dict[str, Any],
 ) -> GameSeries:
     """
     Build the unified series + 1-minute bars + summary stats for one game's
@@ -191,7 +191,7 @@ def build_game_series(
     data_api.fetch_all_trades: {capped, buy_capped, sell_capped,
     earliest_trade_ts, buy_count, sell_count}.
     """
-    notes: List[str] = []
+    notes: list[str] = []
     df = normalize_trades(trades, winner_token_id)
     was_capped = bool(trade_meta.get("capped", False))
     trade_source = "data_api"

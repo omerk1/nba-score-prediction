@@ -15,7 +15,7 @@ re-run avoids re-downloading anything already fetched.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -34,7 +34,7 @@ from .series_builder import build_game_series
 logger = logging.getLogger(__name__)
 
 
-def _find_outcome_index(outcomes: List[str], name: str) -> Optional[int]:
+def _find_outcome_index(outcomes: list[str], name: str) -> Optional[int]:
     name_l = name.lower()
     for i, o in enumerate(outcomes):
         if o.lower() == name_l or name_l in o.lower() or o.lower() in name_l:
@@ -44,14 +44,14 @@ def _find_outcome_index(outcomes: List[str], name: str) -> Optional[int]:
 
 def process_game(
     slug: str, raw_dir: str, force_refresh: bool = False
-) -> Optional[Dict[str, Any]]:
+) -> Optional[dict[str, Any]]:
     """
     Run the full pipeline for one game. Returns a dict with two keys:
     'summary' (the games.csv row) and 'series' (the unified series DataFrame),
     or None if the game couldn't be processed at all (e.g. no event found).
     """
     logger.info(f"Processing {slug} ...")
-    flags: List[str] = []
+    flags: list[str] = []
 
     event = fetch_event_by_slug(slug, raw_dir, force_refresh=force_refresh)
     if event is None:
@@ -105,7 +105,7 @@ def process_game(
     )
     flags.extend(series.notes)
 
-    row: Dict[str, Any] = {
+    row: dict[str, Any] = {
         "slug": slug,
         "event_id": gm.event_id,
         "game_date": gm.game_date,
@@ -214,7 +214,7 @@ def process_game(
 
 
 def run_pipeline(
-    slugs: List[str],
+    slugs: list[str],
     raw_dir: str,
     games_csv_path: str,
     series_dir: str,
@@ -224,7 +224,7 @@ def run_pipeline(
     os.makedirs(series_dir, exist_ok=True)
     os.makedirs(os.path.dirname(games_csv_path) or ".", exist_ok=True)
 
-    existing_rows: Dict[str, Dict[str, Any]] = {}
+    existing_rows: dict[str, dict[str, Any]] = {}
     if not force_refresh and os.path.exists(games_csv_path):
         existing_df = pd.read_csv(games_csv_path)
         existing_rows = {r["slug"]: r.to_dict() for _, r in existing_df.iterrows()}

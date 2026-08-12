@@ -51,7 +51,7 @@ becoming unreasonably large.
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import requests
 
@@ -76,7 +76,7 @@ CACHE_SCHEMA_VERSION = 2
 _KEEP_FIELDS = ("asset", "price", "size", "side", "timestamp", "outcome", "outcomeIndex")
 
 
-def _trim_trade(t: Dict[str, Any]) -> Dict[str, Any]:
+def _trim_trade(t: dict[str, Any]) -> dict[str, Any]:
     return {k: t[k] for k in _KEEP_FIELDS if k in t}
 
 
@@ -88,7 +88,7 @@ def _trades_cache_path(raw_dir: str, condition_id: str) -> str:
 MAX_SAFETY_OFFSET = 20000  # sanity guard only; real per-side cap is ~3000-3500
 
 
-def _fetch_side_all(condition_id: str, side: str) -> Tuple[List[Dict[str, Any]], bool]:
+def _fetch_side_all(condition_id: str, side: str) -> tuple[list[dict[str, Any]], bool]:
     """
     Paginate a single `side` (BUY or SELL) to exhaustion or its own offset
     cap. Each side gets an independent ~3000-3500-offset budget (see
@@ -98,7 +98,7 @@ def _fetch_side_all(condition_id: str, side: str) -> Tuple[List[Dict[str, Any]],
     side (typically SELL) exhausted naturally, recovering full pre-game
     history even when the majority side alone was still capped.
     """
-    trades: List[Dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
     offset = 0
     capped = False
 
@@ -139,7 +139,7 @@ def _fetch_side_all(condition_id: str, side: str) -> Tuple[List[Dict[str, Any]],
     return trades, capped
 
 
-def _cache_meta_fields(cached: Dict[str, Any]) -> Dict[str, Any]:
+def _cache_meta_fields(cached: dict[str, Any]) -> dict[str, Any]:
     return {
         "capped": cached["capped"],
         "buy_capped": cached.get("buy_capped"),
@@ -152,7 +152,7 @@ def _cache_meta_fields(cached: Dict[str, Any]) -> Dict[str, Any]:
 
 def fetch_all_trades(
     condition_id: str, raw_dir: str, force_refresh: bool = False
-) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
     Fetch the full trade history for a market by paginating BUY and SELL
     separately (see _fetch_side_all) and merging, caching the merged,
@@ -201,9 +201,9 @@ def fetch_all_trades(
 
 def _fetch_side_until_before(
     condition_id: str, side: str, before_ts: int
-) -> Tuple[List[Dict[str, Any]], bool]:
+) -> tuple[list[dict[str, Any]], bool]:
     """Same early-stop-once-we-cross-before_ts logic as before, per side."""
-    trades: List[Dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
     offset = 0
     capped = False
 
@@ -239,7 +239,7 @@ def _fetch_side_until_before(
 
 def fetch_trades_until_before(
     condition_id: str, before_ts: int, raw_dir: str, force_refresh: bool = False
-) -> Tuple[List[Dict[str, Any]], bool]:
+) -> tuple[list[dict[str, Any]], bool]:
     """
     Bounded fetch for pre-game-snapshot-only use (spread/totals markets):
     page BUY and SELL separately from the most recent trade backward in
