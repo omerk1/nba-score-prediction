@@ -26,7 +26,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -52,14 +52,14 @@ class MarketRecord:
     slug: str
     question: str
     sports_market_type: Optional[str]
-    outcomes: List[str]
-    outcome_prices: List[float]
-    clob_token_ids: List[str]
+    outcomes: list[str]
+    outcome_prices: list[float]
+    clob_token_ids: list[str]
     volume: float
     game_start_time: Optional[str]
     start_date: Optional[str]
     end_date: Optional[str]
-    raw: Dict[str, Any] = field(repr=False, default_factory=dict)
+    raw: dict[str, Any] = field(repr=False, default_factory=dict)
 
     @property
     def winner_index(self) -> Optional[int]:
@@ -84,11 +84,11 @@ class GameMarkets:
     moneyline: Optional[MarketRecord]
     spread: Optional[MarketRecord]
     totals: Optional[MarketRecord]
-    dropped: List[MarketRecord]  # markets classified as "other" (exotics, props, first-half, etc.)
-    flags: List[str]
+    dropped: list[MarketRecord]  # markets classified as "other" (exotics, props, first-half, etc.)
+    flags: list[str]
 
 
-def _parse_market(m: Dict[str, Any]) -> Optional[MarketRecord]:
+def _parse_market(m: dict[str, Any]) -> Optional[MarketRecord]:
     try:
         outcomes = json.loads(m.get("outcomes") or "[]")
         outcome_prices_raw = json.loads(m.get("outcomePrices") or "[]")
@@ -117,7 +117,7 @@ def _parse_market(m: Dict[str, Any]) -> Optional[MarketRecord]:
 SLUG_RE = re.compile(r"^nba-([a-z]+)-([a-z]+)-(\d{4}-\d{2}-\d{2})$")
 
 
-def fetch_event_by_slug(slug: str, raw_dir: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+def fetch_event_by_slug(slug: str, raw_dir: str, force_refresh: bool = False) -> Optional[dict[str, Any]]:
     """Fetch (and cache) the full Gamma event payload for a game slug."""
     cache_path = os.path.join(raw_dir, "events", f"{slug}.json.gz")
     try:
@@ -134,13 +134,13 @@ def fetch_event_by_slug(slug: str, raw_dir: str, force_refresh: bool = False) ->
     return data[0]
 
 
-def classify_event_markets(event: Dict[str, Any]) -> GameMarkets:
+def classify_event_markets(event: dict[str, Any]) -> GameMarkets:
     """
     Classify an event's markets into moneyline / spread / totals (highest-volume
     line each) and everything else (dropped).
     """
     slug = event.get("slug", "")
-    flags: List[str] = []
+    flags: list[str] = []
 
     m = SLUG_RE.match(slug)
     away_from_slug, home_from_slug, date_from_slug = (m.groups() if m else (None, None, None))
@@ -198,7 +198,7 @@ def classify_event_markets(event: Dict[str, Any]) -> GameMarkets:
     )
 
 
-def parse_spread_line(question: str) -> Optional[Dict[str, Any]]:
+def parse_spread_line(question: str) -> Optional[dict[str, Any]]:
     """
     Parse a spread market question like "Spread: Spurs (-5.5)" into
     {"team": "Spurs", "line": -5.5}.

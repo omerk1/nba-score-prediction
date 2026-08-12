@@ -40,7 +40,7 @@ on 2026-07-08:
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from .gamma import SLUG_RE
 from .http_utils import get_json
@@ -57,7 +57,7 @@ def discover_nba_game_slugs(
     closed: bool = True,
     ascending: bool = True,
     max_pages: int = 200,
-) -> List[str]:
+) -> list[str]:
     """
     Paginate the Gamma /events listing to enumerate NBA game slugs.
 
@@ -76,7 +76,7 @@ def discover_nba_game_slugs(
     `ascending`), deduplicated. Non-game NBA events (futures, props, etc.)
     are dropped via slug-pattern match against gamma.SLUG_RE.
     """
-    slugs: List[str] = []
+    slugs: list[str] = []
     seen = set()
     offset = 0
 
