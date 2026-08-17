@@ -23,7 +23,7 @@ NBA game score prediction via CatBoost gradient boosting, prioritizing point-dif
 
 ## Ablation-gated feature workflow (required)
 
-Any new experimental feature must ship disabled by default and go through a real ablation — `train_model.py` baseline vs. treatment, ideally a 5-fold expanding-window CV (`--protocol cv`) — before its flag is flipped to `true`. Every `train_model.py` run appends a row to `outputs/experiments_v2.csv`, the shared cross-feature ablation log; don't lose or overwrite prior rows. (`outputs/experiments.csv`, the old 16-column schema, is a frozen historical snapshot — never written to going forward.) `docs/backlog.md` tracks feature status; `docs/*_log.md` files hold the real validation write-ups behind each adoption/rejection decision.
+Any new experimental feature must ship disabled by default and go through a real ablation — `train_model.py` baseline vs. treatment, ideally a 5-fold expanding-window CV (`--protocol cv`) — before its flag is flipped to `true`. Every `train_model.py` run appends a row to `outputs/experiments_v2.csv`, the shared cross-feature ablation log; don't lose or overwrite prior rows. (`outputs/experiments.csv`, the old 16-column schema, is a frozen historical snapshot — never written to going forward.) `docs/BACKLOG.md` tracks feature status; `docs/*_log.md` files hold the real validation write-ups behind each adoption/rejection decision.
 
 ## Leakage safety
 
@@ -31,7 +31,7 @@ Features must be point-in-time (pre-game state only) — the recurring pattern i
 
 ## Documentation style
 
-Keep `.md` docs and logs concise — state findings and numbers tersely, don't narrate every step taken. Grouping related work under a clear, self-explanatory name (e.g. "modeling improvements", "feature enrichments") is fine and encouraged. Never use bare internal codes (e.g. "A7", "B4", "Round 3") anywhere outside `docs/backlog.md` itself — not in other docs, not in code comments/docstrings, not in commit messages. Elsewhere, describe the technical reason directly.
+Keep `.md` docs and logs concise — state findings and numbers tersely, don't narrate every step taken. Grouping related work under a clear, self-explanatory name (e.g. "modeling improvements", "feature enrichments") is fine and encouraged. Never use bare internal codes (e.g. "A7", "B4", "Round 3") anywhere outside `docs/BACKLOG.md` itself — not in other docs, not in code comments/docstrings, not in commit messages. Elsewhere, describe the technical reason directly.
 
 ## Git conventions
 
