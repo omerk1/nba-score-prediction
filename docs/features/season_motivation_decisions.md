@@ -2,7 +2,7 @@
 
 Data audit + formulas for `motivation_score`, `games_to_clinch_ceiling`,
 `games_to_clinch_floor`, written before implementation. See
-`docs/SEASON_MOTIVATION_LOG.md` for what was actually built and validated.
+`docs/features/season_motivation_log.md` for what was actually built and validated.
 
 ## Goal
 
