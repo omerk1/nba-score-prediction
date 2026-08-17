@@ -1,6 +1,6 @@
 # A7: Style Matchup Score — Architecture & Design (as-built)
 
-> **Status:** Validated across nine work stages (see `docs/a7_phase_log.md` for full
+> **Status:** Validated across nine work stages (see `docs/features/a7_phase_log.md` for full
 > evidence trail). The KNN-Score Integration Test integrated it into
 > `feature_builder.py` behind a `style_matchup.enabled` config flag (default `false`)
 > and ran a real train/val/test comparison — result: no measurable accuracy
@@ -181,7 +181,7 @@ data, not hand-set, so this doc doesn't duplicate them.)
 - Confidence did not clearly predict per-game accuracy (high vs. low confidence MAE
   were comparable) — noted as a real finding, not the clean gap originally hypothesized.
 
-Full numbers, per-round detail, and every rejected alternative: `docs/a7_phase_log.md`.
+Full numbers, per-round detail, and every rejected alternative: `docs/features/a7_phase_log.md`.
 
 ---
 
@@ -208,6 +208,6 @@ adopted by default (see phase log for full detail).
 
 ## Future Work (backlogged, not blockers)
 
-- Richer style inputs (shot-chart/shot-zone data) — real scope expansion, see `docs/backlog.md`.
+- Richer style inputs (shot-chart/shot-zone data) — real scope expansion, see `docs/BACKLOG.md`.
 - PCA `n_components` sweep, further supervised-model tuning — both already lose by a clear margin; low expected value.
 - Real-time injury pipeline for Layer 4 (live prediction only).

@@ -624,7 +624,7 @@ redundant.
 **Also found (not blockers, flagged for whoever picks these up next):** a real bug
 in `_compute_h2h_3year_win_pct` (index-reindex mismatch) makes `h2h_win_pct_3yr`
 ~99.7% NaN and its apparent label correlations pure noise — live in the *default*
-feature set today, independent of A7 (see `docs/backlog.md`'s A8 item); and
+feature set today, independent of A7 (see `docs/BACKLOG.md`'s A8 item); and
 `style_matchup_confidence` is ~99.3% one constant value, structurally explaining
 the KNN-Score Integration Test's zero-importance finding for it.
 Full detail, redundant-feature list, and era-drift results: `docs/feature_eda_insights.md`.
@@ -636,7 +636,7 @@ Full detail, redundant-feature list, and era-drift results: `docs/feature_eda_in
 - **PCA `n_components` sweep, further supervised-model tuning** — both already lose to
   hand-picked/lookup by a clear, CV-confirmed margin; low expected value.
 - **Richer/shot-chart style inputs** (`nba_api` shot-chart endpoints) — real scope
-  expansion, backlogged (`docs/backlog.md`); the KNN-Score Integration Test found the
+  expansion, backlogged (`docs/BACKLOG.md`); the KNN-Score Integration Test found the
   current hand-picked metric set doesn't add real signal on top of the existing
   model, so this is now the more load-bearing open item, not just a nice-to-have.
 - **`config_loader.py` formalization** — done (`StyleMatchupConfig` added, 78 tests
