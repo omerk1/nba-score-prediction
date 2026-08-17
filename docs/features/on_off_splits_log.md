@@ -1,6 +1,6 @@
 # Player On/Off Splits — Implementation Log (Phase 2)
 
-> Companion to `docs/on_off_splits_decisions.md` (phase 1 — data-source investigation
+> Companion to `docs/features/on_off_splits_decisions.md` (phase 1 — data-source investigation
 > and design decisions, empirically tested). This document covers what was actually
 > built, the real backfill run, and validation results. All work in this file is on
 > branch `feature/on-off-splits`, committed incrementally, not pushed, no PR opened.

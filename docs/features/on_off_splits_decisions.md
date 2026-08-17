@@ -35,7 +35,7 @@ which this design bakes in from the start).
   rolling averages. No plus-minus, no on/off-court awareness.
   **Confirmed: not usable for on/off either**, though its schema/backfill pattern
   (see §3/§4) is a good precedent to reuse.
-- The original backlog entry for this feature ("B1" in `docs/backlog.md`, not
+- The original backlog entry for this feature ("B1" in `docs/BACKLOG.md`, not
   referenced further here per naming convention) assumed the data source would be
   "actual lineups from box scores" depending on the lineup-collection module. That
   premise is **wrong** — neither box scores nor the roster collector track
@@ -296,7 +296,7 @@ calls, not fewer:
    `_add_h2h_features`'s 3-year lookback), which the API's `Season` parameter
    doesn't natively support in one call — would require fetching per season and
    combining GP-weighted on our side. Not tested in this phase.
-   **Resolved in a later iteration round** (see `docs/on_off_splits_log.md` §7.3):
+   **Resolved in a later iteration round** (see `docs/features/on_off_splits_log.md` §7.3):
    this risk was confirmed rather than mitigated, so `vs_opponent` was dropped
    from the feature entirely rather than shipped with the noise unaddressed.
    Already-collected `vs_opponent` rows remain in the table for a possible future
