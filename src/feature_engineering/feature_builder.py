@@ -226,17 +226,43 @@ class FeatureBuilder:
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_rest_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Rest/schedule-density features, computed venue-blind: a team's true rest is
+        time since its LAST game regardless of home/away role, not time since its
+        last game in that specific role. Grouping directly on HOME_TEAM_ID/
+        AWAY_TEAM_ID (the prior implementation) silently skips over any interleaved
+        game the team played in the other role, understating true fatigue -- same
+        bug class _add_rolling_features's venue-blind overall-form fix addressed.
+        Uses the same team-perspective long-frame pattern as that fix and as
+        _add_opponent_quality_features.
+
+        `back_to_back` (rest_days == 1) is, by construction, exactly "this is the
+        second game of a back-to-back" for that team -- a separate second_of_b2b
+        column would be a pure duplicate once rest_days is computed correctly.
+        """
+        home_rows = pd.DataFrame({"GAME_DATE": df["GAME_DATE"].values, "team_id": df["HOME_TEAM_ID"].values})
+        away_rows = pd.DataFrame({"GAME_DATE": df["GAME_DATE"].values, "team_id": df["AWAY_TEAM_ID"].values})
+        long_df = (
+            pd.concat([home_rows, away_rows]).sort_values(["team_id", "GAME_DATE"]).reset_index(drop=True)
+        )
+
+        long_df["rest_days"] = long_df.groupby("team_id")["GAME_DATE"].diff().dt.days.fillna(3)
+        long_df["back_to_back"] = (long_df["rest_days"] == 1).astype(int)
+        long_df["games_in_4_nights"] = long_df.groupby("team_id", group_keys=False).apply(
+            lambda x: (x["GAME_DATE"].diff().dt.days.rolling(3, min_periods=1).sum() <= 4).astype(int)
+        )
+
         new_cols = {}
-        for team_col, prefix in [
-            ("HOME_TEAM_ID", "home_team"),
-            ("AWAY_TEAM_ID", "away_team"),
-        ]:
-            rest_days = df.groupby(team_col)["GAME_DATE"].diff().dt.days.fillna(3)
-            new_cols[f"{prefix}_rest_days"] = rest_days
-            new_cols[f"{prefix}_back_to_back"] = (rest_days == 1).astype(int)
-            new_cols[f"{prefix}_games_in_4_nights"] = df.groupby(team_col, group_keys=False).apply(
-                lambda x: (x["GAME_DATE"].diff().dt.days.rolling(3, min_periods=1).sum() <= 4).astype(int)
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            query = df[["GAME_DATE", team_col]].rename(columns={team_col: "team_id"})
+            merged = query.merge(
+                long_df[["GAME_DATE", "team_id", "rest_days", "back_to_back", "games_in_4_nights"]],
+                on=["GAME_DATE", "team_id"],
+                how="left",
             )
+            new_cols[f"{prefix}_rest_days"] = merged["rest_days"].values
+            new_cols[f"{prefix}_back_to_back"] = merged["back_to_back"].values
+            new_cols[f"{prefix}_games_in_4_nights"] = merged["games_in_4_nights"].values
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_style_features(self, df: pd.DataFrame) -> pd.DataFrame:
