@@ -23,12 +23,59 @@ no date overlap against games.csv fails loudly (ValueError) before any
 join is attempted, rather than silently producing an empty/meaningless
 comparison.
 
+Q1-Q3 (accuracy, disagreement, concentration) plus Q4: calibration -- are
+our stated win-probabilities (model_p_home) honest, i.e. among games where
+we say "70% home", does home actually win ~70% of the time? Gates the whole
+EV/edge question: a +EV read built on miscalibrated probabilities means
+nothing until calibration is fixed. Same held-out, market-joined sample as
+Q1-Q3, restricted to the has_moneyline subset. Reports a reliability curve
+(quantile deciles, predicted-mean vs. actual-rate per bucket) and Expected
+Calibration Error for both the model and the market's raw price, plus a
+concentration breakdown (shared game-type dimensions + each side's own
+confidence-extremity tercile) to check whether miscalibration is uniform
+or concentrated at the extremes / in specific game types.
+
+Q5: recalibration -- given Q4 found real, monotonic miscalibration
+(underconfidence at both tails), does a standard post-hoc recalibrator fix
+it out-of-sample? Fits isotonic regression and Platt scaling mapping
+model_p_home -> calibrated probability. LEAKAGE DISCIPLINE: the calibrator
+is fit ONLY on the champion model's predictions on fold's own VALIDATION
+set (chronologically strictly prior to the test window -- e.g. fold5:
+validation ends 2025-04-13, test starts 2025-10-21, zero overlap,
+mechanically asserted, not just documented) -- the same single trained
+model instance, never re-fit, never touching the test-set games the
+calibrator is then applied to and evaluated on. This is the standard
+train/calibrate/evaluate split (fit=val, evaluate=test), not a new
+leakage-prone mechanism.
+
+Q6: market microstructure -- is Polymarket mispriced specifically where it's
+thin, independent of our model? Buckets games by games.csv's own
+spread_volume (the spread market's own liquidity -- moneyline_volume was
+the column used in the dedup fix, but spread thinness is what would
+plausibly explain a mispriced spread_line specifically) into quartiles,
+reports model-vs-market win-rate per bucket using Q2's existing
+point-prediction diff_winner definition (NOT probabilities -- per the Q5
+finding, recalibration never touches model_diff_pred, so this is
+unaffected by anything in Q4/Q5), plus a continuous log-volume correlation
+check. Applies an explicit vig bar (a bucket's model win-rate must exceed
+50%+4.5%, not just 50%, to plausibly represent real edge over realistic
+transaction costs) and flags single-season findings as unconfirmed pending
+a held-out check on a different season.
+
 Usage: venv/bin/python3 scripts/market_benchmark.py --tag <label>
 
 Outputs:
-  outputs/market_benchmark_games_<tag>.csv   -- per-game join, overwritten per run
-  outputs/market_benchmark_summary.csv       -- one row appended per run (cross-run
-                                                 history, never overwritten/truncated)
+  outputs/market_benchmark_games_<tag>.csv         -- per-game join, overwritten per run
+  outputs/market_benchmark_calibration_<tag>.csv   -- reliability curve + concentration
+                                                       (raw and recalibrated), overwritten per run
+  outputs/market_benchmark_liquidity_<tag>.csv     -- liquidity buckets + correlation, overwritten per run
+  outputs/market_benchmark_summary.csv             -- one row appended per run (Q1-Q3 headline
+                                                       numbers, cross-run history, never truncated)
+  outputs/market_benchmark_calibration_summary.csv -- one row appended per run (Q4/Q5 ECE +
+                                                       recalibrated-metric headline numbers,
+                                                       cross-run history, never truncated)
+  outputs/market_benchmark_liquidity_summary.csv   -- one row appended per run (Q6 bucket win-rates
+                                                       + correlation, cross-run history, never truncated)
 """
 
 import argparse
@@ -41,6 +88,8 @@ import numpy as np
 import pandas as pd
 from nba_api.stats.static import teams as nba_teams
 from scipy.stats import norm
+from sklearn.isotonic import IsotonicRegression
+from sklearn.linear_model import LogisticRegression
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.append(str(REPO))
@@ -69,11 +118,21 @@ def load_polymarket_games(games_csv: Path) -> pd.DataFrame:
 
     unmappable = games[~games["home_team"].isin(nick2id) | ~games["away_team"].isin(nick2id)]
     if len(unmappable):
+        # NaN home_team/away_team (upstream data-quality skips, e.g. process_game's
+        # early return for "no_moneyline_market" -- no team names ever populated for
+        # that row) vs. genuinely-present-but-unmappable names (e.g. lowercase
+        # abbreviations, All-Star exhibition team labels) need separate handling --
+        # sorted()/set() over a NaN+str mix raises TypeError.
+        named = unmappable.dropna(subset=["home_team", "away_team"])
+        n_nan = len(unmappable) - len(named)
+        named_teams = sorted(set(named["home_team"]) | set(named["away_team"]))
         print(
-            f"  Dropping {len(unmappable)} games.csv rows with unmappable team names "
-            f"(not real NBA franchise nicknames): {sorted(set(unmappable['home_team']) | set(unmappable['away_team']))}"
+            f"  Dropping {len(unmappable)} games.csv rows with unmappable team names: "
+            f"{n_nan} with no team names at all (upstream data-quality skip, e.g. "
+            f"no_moneyline_market -- see data_quality column), {len(named)} with named-but-"
+            f"unrecognized teams: {named_teams}"
         )
-        unexpected = (set(unmappable["home_team"]) | set(unmappable["away_team"])) - KNOWN_UNMAPPABLE_TEAMS
+        unexpected = set(named_teams) - KNOWN_UNMAPPABLE_TEAMS
         if unexpected:
             print(
                 f"  WARNING: unmapped team names not in the known set -- new/unexpected data-quality "
@@ -440,6 +499,262 @@ def _bucket_row(dimension: str, label: str, sub: pd.DataFrame, min_bucket_n: int
     }
 
 
+def compute_reliability_curve(probs: pd.Series, actuals: pd.Series, n_buckets: int = 10) -> pd.DataFrame:
+    """Standard reliability-curve bucketing: quantile bins (equal-N, not
+    equal-width -- avoids empty/sparse buckets when probabilities cluster)
+    of `probs`, per bucket mean predicted probability vs. actual positive
+    rate. `gap = predicted_mean - actual_rate`; positive = overconfident in
+    that bucket (predicts higher than what happens), negative = underconfident.
+    """
+    df = pd.DataFrame({"prob": probs.to_numpy(), "actual": actuals.to_numpy()}).dropna()
+    df["bucket"] = pd.qcut(df["prob"], n_buckets, duplicates="drop")
+    curve = (
+        df.groupby("bucket", observed=True)
+        .agg(n=("actual", "size"), predicted_mean=("prob", "mean"), actual_rate=("actual", "mean"))
+        .reset_index()
+    )
+    curve["bucket"] = curve["bucket"].astype(str)
+    curve["gap"] = curve["predicted_mean"] - curve["actual_rate"]
+    return curve
+
+
+def compute_ece(probs: pd.Series, actuals: pd.Series, n_buckets: int = 10) -> float:
+    """Expected Calibration Error: sum over buckets of (bucket_n / N) * |gap|."""
+    curve = compute_reliability_curve(probs, actuals, n_buckets)
+    n_total = curve["n"].sum()
+    if n_total == 0:
+        return float("nan")
+    return float((curve["n"] / n_total * curve["gap"].abs()).sum())
+
+
+def compute_calibration_concentration(cal_sub: pd.DataFrame, min_bucket_n: int) -> pd.DataFrame:
+    """Is miscalibration uniform or concentrated? Per-bucket single-number
+    calibration gap (|mean predicted prob - mean actual outcome| across the
+    whole bucket, not a full decile curve -- these subgroups are already
+    modest-sized, a full re-bucketed ECE within each would fragment too far)
+    for both model and market side by side, across: shared/objective game-type
+    dimensions (market closeness, schedule, injury -- same axes as Q3) and
+    each side's OWN confidence-extremity tercile (the direct test of "are we
+    overconfident specifically at the extremes" -- inherently self-referential,
+    computed separately per side since the two forecasters can place the same
+    game in different confidence buckets)."""
+    rows = []
+
+    def add(dimension: str, label: str, sub: pd.DataFrame) -> None:
+        n = len(sub)
+        if n == 0:
+            return
+        actual = (sub["actual_diff"] > 0).astype(float)
+        rows.append(
+            {
+                "bucket_dimension": dimension,
+                "bucket_label": label,
+                "n": n,
+                "model_abs_calibration_gap": abs(sub["model_p_home"].mean() - actual.mean()),
+                "market_abs_calibration_gap": (
+                    abs(sub["market_p_home"].mean() - actual.mean())
+                    if sub["market_p_home"].notna().any()
+                    else np.nan
+                ),
+                "low_n_flag": n < min_bucket_n,
+            }
+        )
+
+    mc = cal_sub[cal_sub["market_diff_home"].notna()]
+    for lo, hi, label in MARKET_CLOSENESS_BUCKETS:
+        add(
+            "market_closeness",
+            label,
+            mc[(mc["market_diff_home"].abs() >= lo) & (mc["market_diff_home"].abs() < hi)],
+        )
+
+    if "home_team_back_to_back" in cal_sub.columns and "away_team_back_to_back" in cal_sub.columns:
+        b2b_mask = (cal_sub["home_team_back_to_back"] == 1) | (cal_sub["away_team_back_to_back"] == 1)
+        add("schedule_condition", "either_team_b2b", cal_sub[b2b_mask])
+        add("schedule_condition", "neither_team_b2b", cal_sub[~b2b_mask])
+
+    if "home_team_n_out" in cal_sub.columns and "away_team_n_out" in cal_sub.columns:
+        n_out = cal_sub["home_team_n_out"].fillna(0) + cal_sub["away_team_n_out"].fillna(0)
+        for lo, hi, label in [(0, 1, "n_out_0"), (1, 2, "n_out_1"), (2, np.inf, "n_out_2plus")]:
+            add("injury_condition", label, cal_sub[(n_out >= lo) & (n_out < hi)])
+
+    for side, col in [("model", "model_p_home"), ("market", "market_p_home")]:
+        extremity = (cal_sub[col] - 0.5).abs()
+        for lo, hi, label in [(0, 0.1, "toss_up"), (0.1, 0.25, "lean"), (0.25, 0.5, "confident")]:
+            add(f"{side}_confidence_extremity", label, cal_sub[(extremity >= lo) & (extremity < hi)])
+
+    return pd.DataFrame(rows)
+
+
+def write_calibration_csv(curves_by_source: dict, concentration: pd.DataFrame, tag: str) -> Path:
+    labeled = []
+    for source, curve in curves_by_source.items():
+        curve = curve.copy()
+        curve["source"] = source
+        labeled.append(curve)
+    curves = pd.concat(labeled, ignore_index=True)
+
+    out_path = REPO / "outputs" / f"market_benchmark_calibration_{tag}.csv"
+    with open(out_path, "w") as f:
+        f.write("# reliability_curve\n")
+        curves.to_csv(f, index=False)
+        f.write("\n# concentration\n")
+        concentration.to_csv(f, index=False)
+    return out_path
+
+
+def write_liquidity_csv(buckets: pd.DataFrame, correlation: dict, tag: str) -> Path:
+    out_path = REPO / "outputs" / f"market_benchmark_liquidity_{tag}.csv"
+    with open(out_path, "w") as f:
+        f.write("# liquidity_buckets\n")
+        buckets.to_csv(f, index=False)
+        f.write("\n# correlation\n")
+        pd.DataFrame([correlation]).to_csv(f, index=False)
+    return out_path
+
+
+def generate_validation_calibration_fit_data(split_result, fold) -> pd.DataFrame:
+    """Q5 calibrator FIT data: the champion's own predictions on fold's
+    VALIDATION set (same single trained model instance as the test-set
+    predictions everywhere else in this script -- never re-fit). Strictly
+    prior in time to the test window this gets applied to (asserted below,
+    not just assumed from the fold's own date ordering, which
+    validate_fold_definitions already checks elsewhere -- this is an
+    independent, local double-check specific to the calibration use case)."""
+    val_features = split_result.val_features
+    preds = split_result.predictor.predict(val_features[split_result.feature_cols])
+    diff_pred = preds[:, 0] - preds[:, 1]
+    actual_diff = val_features["PTS_home"].to_numpy() - val_features["PTS_away"].to_numpy()
+
+    residual_std = np.std(actual_diff - diff_pred) or 1.0
+    fit_df = pd.DataFrame(
+        {
+            "game_date_norm": pd.to_datetime(val_features["GAME_DATE"]).dt.normalize(),
+            "model_p_home": norm.cdf(diff_pred / residual_std),
+            "actual_home_win": (actual_diff > 0).astype(float),
+        }
+    )
+
+    val_end = pd.Timestamp(fold.validation_end_date)
+    test_start = pd.Timestamp(fold.test_start_date)
+    if val_end >= test_start:
+        raise AssertionError(
+            f"Fold {fold.name!r}'s validation_end_date ({fold.validation_end_date}) is not strictly "
+            f"before test_start_date ({fold.test_start_date}) -- calibration fit/apply split is not "
+            f"leakage-safe, aborting."
+        )
+    if not (fit_df["game_date_norm"] <= val_end).all():
+        raise AssertionError(
+            "Validation-set calibration-fit rows found with GAME_DATE after validation_end_date."
+        )
+
+    return fit_df
+
+
+def fit_calibrators(fit_df: pd.DataFrame) -> dict:
+    """Isotonic regression (flexible, non-parametric monotonic map) and
+    Platt scaling (parametric logistic map) from raw model_p_home ->
+    calibrated probability, both fit ONLY on fit_df (the validation-set
+    data from generate_validation_calibration_fit_data -- never the games
+    being evaluated)."""
+    x = fit_df["model_p_home"].to_numpy().reshape(-1, 1)
+    y = fit_df["actual_home_win"].to_numpy()
+
+    isotonic = IsotonicRegression(y_min=0.0, y_max=1.0, out_of_bounds="clip")
+    isotonic.fit(x.ravel(), y)
+
+    platt = LogisticRegression()
+    platt.fit(x, y)
+
+    return {"isotonic": isotonic, "platt": platt}
+
+
+def apply_calibrators(cal_sub: pd.DataFrame, calibrators: dict) -> pd.DataFrame:
+    """Applies calibrators FIT on validation data to the TEST-set cal_sub
+    (never re-fit here) -- adds model_p_home_isotonic / model_p_home_platt
+    columns."""
+    cal_sub = cal_sub.copy()
+    x = cal_sub["model_p_home"].to_numpy().reshape(-1, 1)
+    cal_sub["model_p_home_isotonic"] = calibrators["isotonic"].predict(x.ravel())
+    cal_sub["model_p_home_platt"] = calibrators["platt"].predict_proba(x)[:, 1]
+    return cal_sub
+
+
+def compute_recalibrated_metrics(cal_sub: pd.DataFrame, n_buckets: int) -> dict:
+    """ECE + win-accuracy + Brier for each recalibrated probability column,
+    directly comparable to Q1's model_win_acc/model_brier and Q4's
+    model_ece (all computed the identical way, just on a different
+    probability column)."""
+    actual = (cal_sub["actual_diff"] > 0).astype(float)
+    metrics = {}
+    curves = {}
+    for source in ["isotonic", "platt"]:
+        col = f"model_p_home_{source}"
+        probs = cal_sub[col]
+        curves[source] = compute_reliability_curve(probs, actual, n_buckets)
+        metrics[f"{source}_ece"] = compute_ece(probs, actual, n_buckets)
+        metrics[f"{source}_win_acc"] = float(((probs > 0.5) == (actual > 0.5)).mean())
+        metrics[f"{source}_brier"] = float(((probs - actual) ** 2).mean())
+    return metrics, curves
+
+
+# Required margin over 50% for a bucket's model win-rate to plausibly clear a
+# realistic vig/transaction-cost bar -- NOT a Polymarket-specific fee lookup,
+# a conservative round-number bar (2x the standard -110/-110 breakeven margin
+# of ~2.4%) chosen deliberately before looking at any bucket's numbers.
+VIG_BAR = 0.045
+
+
+def compute_liquidity_buckets(diff_sub: pd.DataFrame, volume_col: str, min_bucket_n: int) -> pd.DataFrame:
+    """Does edge-vs-market correlate with market thinness? Buckets games by
+    Polymarket spread-market volume (liquidity) into quartiles -- boundaries
+    computed fresh from this run's own sample, same convention as Q3's
+    disagreement quartiles (a fixed RULE, not a fixed number). Reuses
+    diff_sub's existing 'diff_winner' column (Q2's point-prediction,
+    magnitude-closeness definition -- model_diff_pred vs actual, NOT
+    probability-based; per instruction, probabilities add nothing to this
+    specific test since recalibration only touches the probability column,
+    never model_diff_pred)."""
+    sub = diff_sub.dropna(subset=[volume_col]).copy()
+    sub["volume_quartile"] = pd.qcut(
+        sub[volume_col], 4, labels=["Q1_thinnest", "Q2", "Q3", "Q4_thickest"], duplicates="drop"
+    )
+    rows = []
+    for label in sub["volume_quartile"].cat.categories:
+        bucket = sub[sub["volume_quartile"] == label]
+        n = len(bucket)
+        model_win_rate = (bucket["diff_winner"] == "model").mean() if n else np.nan
+        rows.append(
+            {
+                "bucket_label": str(label),
+                "n": n,
+                "volume_min": bucket[volume_col].min() if n else np.nan,
+                "volume_max": bucket[volume_col].max() if n else np.nan,
+                "model_win_rate": model_win_rate,
+                "market_win_rate": (bucket["diff_winner"] == "market").mean() if n else np.nan,
+                "tie_rate": (bucket["diff_winner"] == "tie").mean() if n else np.nan,
+                "beats_market_on_paper": bool(model_win_rate > 0.5) if n else False,
+                "clears_vig_bar": bool(model_win_rate > 0.5 + VIG_BAR) if n else False,
+                "low_n_flag": n < min_bucket_n,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def compute_liquidity_correlation(diff_sub: pd.DataFrame, volume_col: str) -> dict:
+    """Continuous companion to the bucket table: correlation between
+    log-volume (right-skewed, log1p standard for this kind of variable) and
+    per-game model advantage (market_diff_err - model_diff_err, positive =
+    model was closer that game). Negative correlation = model does
+    relatively better as volume shrinks (the market-thinness hypothesis);
+    positive = opposite; near-zero = no relationship."""
+    sub = diff_sub.dropna(subset=[volume_col]).copy()
+    sub["model_advantage"] = sub["market_diff_err"] - sub["model_diff_err"]
+    log_vol = np.log1p(sub[volume_col])
+    r = float(np.corrcoef(log_vol, sub["model_advantage"])[0, 1])
+    return {"n": len(sub), "corr_log_volume_vs_model_advantage": r}
+
+
 def print_banner(cfg, fold, diagnostics: dict, sanity: dict) -> None:
     print("=" * 78)
     print(f"MARKET BENCHMARK -- fold={fold.name}")
@@ -528,6 +843,18 @@ def main():
     parser.add_argument("--summary-csv", default="outputs/market_benchmark_summary.csv")
     parser.add_argument("--high-disagreement-quantile", type=float, default=0.5)
     parser.add_argument("--min-bucket-n", type=int, default=30)
+    parser.add_argument(
+        "--calibration-buckets", type=int, default=10, help="Reliability-curve deciles (default 10)"
+    )
+    parser.add_argument(
+        "--calibration-summary-csv", default="outputs/market_benchmark_calibration_summary.csv"
+    )
+    parser.add_argument(
+        "--liquidity-volume-col",
+        default="spread_volume",
+        help="games.csv volume column to bucket by for the microstructure/liquidity check (default: spread_volume)",
+    )
+    parser.add_argument("--liquidity-summary-csv", default="outputs/market_benchmark_liquidity_summary.csv")
     parser.add_argument("--config", default=None)
     args = parser.parse_args()
 
@@ -589,8 +916,128 @@ def main():
         )
         print(f"    {low_n['bucket_label'].tolist()}")
 
+    print("\n=== Q4: calibration -- are our stated win-probabilities honest? ===")
+    print(
+        f"  Same held-out sample as above (fold={fold.name!r}, test window "
+        f"{fold.test_start_date}..{fold.test_end_date}, genuinely out-of-sample per the banner's "
+        f"disjointness check) -- restricted here to the has_moneyline subset "
+        f"(n={int(joined['has_moneyline'].sum())}), since model_p_home/market_p_home both require it."
+    )
+    cal_sub = joined[joined["has_moneyline"]].copy()
+    cal_actual = (cal_sub["actual_diff"] > 0).astype(float)
+    model_curve = compute_reliability_curve(cal_sub["model_p_home"], cal_actual, args.calibration_buckets)
+    market_curve = compute_reliability_curve(cal_sub["market_p_home"], cal_actual, args.calibration_buckets)
+    model_ece = compute_ece(cal_sub["model_p_home"], cal_actual, args.calibration_buckets)
+    market_ece = compute_ece(cal_sub["market_p_home"], cal_actual, args.calibration_buckets)
+
+    print(f"\n  Model reliability curve ({args.calibration_buckets} deciles by model_p_home):")
+    print(model_curve.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    print(f"\n  Market reliability curve ({args.calibration_buckets} deciles by market_p_home):")
+    print(market_curve.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    print(f"\n  model_ece = {model_ece:.4f}   market_ece = {market_ece:.4f}   (lower = better calibrated)")
+    print(
+        "  Positive gap = overconfident in that bucket (stated prob exceeds actual hit rate); negative = "
+        "underconfident. Market ECE is vs. raw Polymarket price -- no de-vig exists for this market, same "
+        "caveat as Q1's Brier score."
+    )
+
+    q4_concentration = compute_calibration_concentration(cal_sub, args.min_bucket_n)
+    print(
+        "\n  Concentration -- is miscalibration uniform or concentrated (game type / confidence extremity)?"
+    )
+    print(q4_concentration.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    low_n_cal = q4_concentration[q4_concentration["low_n_flag"]]
+    if len(low_n_cal):
+        print(
+            f"\n  {len(low_n_cal)} bucket(s) below --min-bucket-n={args.min_bucket_n}, excluded from headline claims:"
+        )
+        print(f"    {low_n_cal['bucket_label'].tolist()}")
+
+    print("\n=== Q5: recalibration -- does a standard post-hoc fix close the gap? ===")
+    fit_df = generate_validation_calibration_fit_data(split_result, fold)
+    print(
+        f"  Calibrator FIT data: fold {fold.name!r}'s own VALIDATION set "
+        f"({fold.validation_start_date}..{fold.validation_end_date}, n={len(fit_df)}), same trained "
+        f"model instance used everywhere else in this script. APPLY/evaluate data: the test-set "
+        f"has_moneyline subset above ({fold.test_start_date}..{fold.test_end_date}, n={len(cal_sub)}). "
+        f"Confirmed disjoint: validation_end_date < test_start_date, asserted in "
+        f"generate_validation_calibration_fit_data (raises if violated) -- fit and apply never touch "
+        f"the same games."
+    )
+    calibrators = fit_calibrators(fit_df)
+    cal_sub = apply_calibrators(cal_sub, calibrators)
+    recal_metrics, recal_curves = compute_recalibrated_metrics(cal_sub, args.calibration_buckets)
+
+    for source in ["isotonic", "platt"]:
+        print(f"\n  {source.capitalize()} reliability curve:")
+        print(recal_curves[source].to_string(index=False, float_format=lambda v: f"{v:.3f}"))
+    print(
+        f"\n  {'metric':<12}{'raw model':>12}{'isotonic':>12}{'platt':>12}{'market':>12}\n"
+        f"  {'-'*60}\n"
+        f"  {'ece':<12}{model_ece:>12.4f}{recal_metrics['isotonic_ece']:>12.4f}"
+        f"{recal_metrics['platt_ece']:>12.4f}{market_ece:>12.4f}\n"
+        f"  {'win_acc':<12}{q1['model_win_acc']:>12.4f}{recal_metrics['isotonic_win_acc']:>12.4f}"
+        f"{recal_metrics['platt_win_acc']:>12.4f}{q1['market_win_acc']:>12.4f}\n"
+        f"  {'brier':<12}{q1['model_brier']:>12.4f}{recal_metrics['isotonic_brier']:>12.4f}"
+        f"{recal_metrics['platt_brier']:>12.4f}{q1['market_brier']:>12.4f}"
+    )
+    print(
+        "  win_acc here is thresholded on the probability column itself (prob>0.5), not diff_pred's "
+        "sign as in Q1 -- reported separately to confirm empirically whether recalibration ever moves "
+        "the implied pick, rather than assuming a monotonic map can't (row above equal to Q1's "
+        "model_win_acc means it didn't, for this run)."
+    )
+
+    print("\n=== Q6: market microstructure -- does edge-vs-market correlate with liquidity? ===")
+    print(
+        f"  Point predictions only (model_diff_pred vs actual, Q2's existing diff_winner definition) -- "
+        f"NOT probabilities; per the recalibration finding above, probabilities add nothing here and "
+        f"this section never touches model_p_home. Bucketing games.csv's {args.liquidity_volume_col!r} "
+        f"into quartiles, boundaries computed fresh from this run's own has_spread sample."
+    )
+    liquidity_buckets = compute_liquidity_buckets(diff_sub, args.liquidity_volume_col, args.min_bucket_n)
+    print(
+        liquidity_buckets.to_string(
+            index=False,
+            formatters={
+                "volume_min": lambda v: f"{v:,.0f}",
+                "volume_max": lambda v: f"{v:,.0f}",
+                "model_win_rate": lambda v: f"{v:.3f}",
+                "market_win_rate": lambda v: f"{v:.3f}",
+                "tie_rate": lambda v: f"{v:.3f}",
+            },
+        )
+    )
+    liquidity_corr = compute_liquidity_correlation(diff_sub, args.liquidity_volume_col)
+    print(
+        f"\n  corr(log_volume, model_advantage) = "
+        f"{liquidity_corr['corr_log_volume_vs_model_advantage']:+.4f} (n={liquidity_corr['n']}) -- "
+        f"negative would mean the model does relatively better as volume shrinks (the market-thinness "
+        f"hypothesis); near-zero/positive means no such relationship or the opposite."
+    )
+    print(
+        f"  Vig bar: a bucket's model_win_rate must exceed {0.5 + VIG_BAR:.1%} (50% + {VIG_BAR:.1%}), not "
+        f"just 50%, to plausibly represent real edge over a realistic vig/transaction-cost floor."
+    )
+    clearing = liquidity_buckets[liquidity_buckets["clears_vig_bar"]]
+    if len(clearing):
+        print(
+            f"  {len(clearing)} bucket(s) clear the vig bar on THIS FOLD ALONE: "
+            f"{clearing['bucket_label'].tolist()} -- single-season, unconfirmed, see held-out check below "
+            f"before trusting this at all."
+        )
+    else:
+        print("  No bucket clears the vig bar, even before any held-out check.")
+
     games_csv_path = write_per_game_csv(joined, args.tag)
     print(f"\nWrote per-game join to {games_csv_path}")
+
+    curves_by_source = {"model_raw": model_curve, "market": market_curve, **recal_curves}
+    calibration_csv_path = write_calibration_csv(curves_by_source, q4_concentration, args.tag)
+    print(f"Wrote calibration reliability curves + concentration to {calibration_csv_path}")
+
+    liquidity_csv_path = write_liquidity_csv(liquidity_buckets, liquidity_corr, args.tag)
+    print(f"Wrote liquidity buckets + correlation to {liquidity_csv_path}")
 
     summary_row = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -608,6 +1055,48 @@ def main():
     summary_csv_path = REPO / args.summary_csv
     append_summary_row(summary_row, summary_csv_path)
     print(f"Appended summary row to {summary_csv_path}")
+
+    calibration_summary_row = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "tag": args.tag,
+        "fold_name": fold.name,
+        "n_calibration_sample": len(cal_sub),
+        "n_calibration_fit": len(fit_df),
+        "n_buckets": args.calibration_buckets,
+        "model_ece": model_ece,
+        "market_ece": market_ece,
+        "ece_diff_model_minus_market": model_ece - market_ece,
+        "isotonic_ece": recal_metrics["isotonic_ece"],
+        "isotonic_win_acc": recal_metrics["isotonic_win_acc"],
+        "isotonic_brier": recal_metrics["isotonic_brier"],
+        "isotonic_ece_diff_vs_market": recal_metrics["isotonic_ece"] - market_ece,
+        "platt_ece": recal_metrics["platt_ece"],
+        "platt_win_acc": recal_metrics["platt_win_acc"],
+        "platt_brier": recal_metrics["platt_brier"],
+        "platt_ece_diff_vs_market": recal_metrics["platt_ece"] - market_ece,
+    }
+    calibration_summary_csv_path = REPO / args.calibration_summary_csv
+    append_summary_row(calibration_summary_row, calibration_summary_csv_path)
+    print(f"Appended calibration summary row to {calibration_summary_csv_path}")
+
+    liquidity_summary_row = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "tag": args.tag,
+        "fold_name": fold.name,
+        "volume_col": args.liquidity_volume_col,
+        "vig_bar": VIG_BAR,
+        "corr_log_volume_vs_model_advantage": liquidity_corr["corr_log_volume_vs_model_advantage"],
+        "n_correlation_sample": liquidity_corr["n"],
+        "any_bucket_clears_vig_bar": bool(liquidity_buckets["clears_vig_bar"].any()),
+    }
+    for _, row in liquidity_buckets.iterrows():
+        prefix = row["bucket_label"]
+        liquidity_summary_row[f"{prefix}_n"] = row["n"]
+        liquidity_summary_row[f"{prefix}_model_win_rate"] = row["model_win_rate"]
+        liquidity_summary_row[f"{prefix}_clears_vig_bar"] = row["clears_vig_bar"]
+    liquidity_summary_csv_path = REPO / args.liquidity_summary_csv
+    append_summary_row(liquidity_summary_row, liquidity_summary_csv_path)
+    print(f"Appended liquidity summary row to {liquidity_summary_csv_path}")
 
 
 if __name__ == "__main__":

@@ -27,6 +27,16 @@ data/processed/*
 # overwritten per run, not a permanent ledger, so it stays gitignored.
 !outputs/market_benchmark_summary.csv
 
+# Same rationale, calibration (Q4) cross-run history -- the per-run
+# reliability-curve/concentration dump (market_benchmark_calibration_<tag>.csv)
+# stays gitignored, same as market_benchmark_games_<tag>.csv above.
+!outputs/market_benchmark_calibration_summary.csv
+
+# Same rationale, liquidity/microstructure (Q6) cross-run history -- the
+# per-run bucket dump (market_benchmark_liquidity_<tag>.csv) stays
+# gitignored, same as market_benchmark_games_<tag>.csv above.
+!outputs/market_benchmark_liquidity_summary.csv
+
 # Keep the comeback-dip analysis deliverables (small summary outputs, not raw
 # bulk source data -- dip_events.parquet is ~12k summary rows, recovery_matrix.csv
 # is a small p x N table), same rationale as !outputs/experiments.csv above.
