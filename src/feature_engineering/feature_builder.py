@@ -15,7 +15,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.matchups.config import CACHE_DB
+from src.matchups.config import CACHE_DB, NBA_API_DB
 from src.utils.config_loader import InjuryMissingValueStrategy, load_config
 
 logging.basicConfig(level=logging.INFO)
@@ -137,6 +137,7 @@ class FeatureBuilder:
 
     def _add_rolling_features(self, df: pd.DataFrame) -> pd.DataFrame:
         new_cols = {}
+        temp_cols = []
         for team_col, pts_col, prefix in [
             ("HOME_TEAM_ID", "PTS_home", "home_team"),
             ("AWAY_TEAM_ID", "PTS_away", "away_team"),
@@ -147,6 +148,7 @@ class FeatureBuilder:
             # Temp columns needed for groupby.transform
             df[f"_win_{prefix}"] = win_series
             df[f"_diff_{prefix}"] = diff_series
+            temp_cols += [f"_win_{prefix}", f"_diff_{prefix}"]
 
             for window in self.rolling_windows:
                 # pts_avg omitted — off_eff in _add_style_features is identical
@@ -175,7 +177,51 @@ class FeatureBuilder:
                             0, np.nan
                         )
 
-            df.drop(columns=[f"_win_{prefix}", f"_diff_{prefix}"], inplace=True)
+        # Venue-blind overall form: win pct / point-diff avg over a team's last N
+        # games regardless of home/away role. The loop above is venue-scoped only
+        # (grouped by HOME_TEAM_ID / AWAY_TEAM_ID separately), per the pipeline-audit
+        # finding that no overall-form feature exists. Added alongside the venue-scoped
+        # features, not replacing them, via the team-perspective long-frame pattern
+        # already used in _add_opponent_quality_features.
+        home_rows = pd.DataFrame(
+            {
+                "GAME_DATE": df["GAME_DATE"].values,
+                "team_id": df["HOME_TEAM_ID"].values,
+                "win": df["_win_home_team"].values,
+                "diff": df["_diff_home_team"].values,
+            }
+        )
+        away_rows = pd.DataFrame(
+            {
+                "GAME_DATE": df["GAME_DATE"].values,
+                "team_id": df["AWAY_TEAM_ID"].values,
+                "win": df["_win_away_team"].values,
+                "diff": df["_diff_away_team"].values,
+            }
+        )
+        long_df = pd.concat([home_rows, away_rows]).sort_values("GAME_DATE").reset_index(drop=True)
+
+        overall_cols = []
+        for window in self.rolling_windows:
+            win_col = f"win_pct_overall_L{window}"
+            diff_col = f"diff_avg_overall_L{window}"
+            long_df[win_col] = long_df.groupby("team_id")["win"].transform(
+                lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+            long_df[diff_col] = long_df.groupby("team_id")["diff"].transform(
+                lambda x, w=window: x.shift(1).rolling(w, min_periods=1).mean()
+            )
+            overall_cols += [win_col, diff_col]
+
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            query = df[["GAME_DATE", team_col]].rename(columns={team_col: "team_id"})
+            merged = query.merge(
+                long_df[["GAME_DATE", "team_id"] + overall_cols], on=["GAME_DATE", "team_id"], how="left"
+            )
+            for col in overall_cols:
+                new_cols[f"{prefix}_{col}"] = merged[col].values
+
+        df.drop(columns=temp_cols, inplace=True)
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
@@ -901,6 +947,8 @@ class FeatureBuilder:
                 "required, not optional)."
             )
 
+        self._warn_if_style_fingerprint_cache_stale(cache_db)
+
         calibrated = self._RAW_STYLE_CALIBRATED_METRICS
         uncalibrated = self._RAW_STYLE_UNCALIBRATED_METRIC
         all_metrics = calibrated + [uncalibrated]
@@ -952,6 +1000,36 @@ class FeatureBuilder:
             new_cols[f"style_{metric}_diff"] = side_values["home"][metric] - side_values["away"][metric]
 
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    @staticmethod
+    def _warn_if_style_fingerprint_cache_stale(cache_db: Path) -> None:
+        """`matchup_fingerprints` (CACHE_DB) is a periodic offline precompute
+        (`src/matchups/precompute_scores.py`), not computed fresh per call — see
+        that script's "OPERATIONAL REQUIREMENT" docstring. Nothing previously
+        checked its age against the raw DB it's derived from (docs/PIPELINE_AUDIT.md's
+        fingerprint-cache-freshness finding), so a cache that stopped being
+        refreshed would silently keep serving each team's last-cached fingerprint
+        with no signal that it had fallen behind. This only warns (asof lookups in
+        `_add_style_fingerprint_features` above already degrade gracefully to the
+        most recent cached value, so staleness isn't fatal) — it makes drift
+        visible instead of leaving it undetectable.
+        """
+        with sqlite3.connect(f"file:{cache_db}?mode=ro", uri=True) as conn:
+            cache_max = conn.execute("SELECT MAX(game_date) FROM matchup_fingerprints").fetchone()[0]
+        with sqlite3.connect(f"file:{NBA_API_DB}?mode=ro", uri=True) as conn:
+            raw_max = conn.execute(
+                "SELECT MAX(game_date) FROM game WHERE season_type = 'Regular Season'"
+            ).fetchone()[0]
+
+        if cache_max is None or raw_max is None:
+            return
+        if pd.Timestamp(cache_max) < pd.Timestamp(raw_max):
+            logger.warning(
+                f"style_fingerprint cache is stale: cache max game_date={cache_max}, "
+                f"raw DB regular-season max game_date={raw_max}. Live lookups will "
+                "keep using each team's last-cached fingerprint until the cache is "
+                "rebuilt — run `python src/matchups/precompute_scores.py` to refresh."
+            )
 
     def _add_on_off_splits_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """

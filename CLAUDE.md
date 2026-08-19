@@ -23,7 +23,7 @@ NBA game score prediction via CatBoost gradient boosting, prioritizing point-dif
 
 ## Ablation-gated feature workflow (required)
 
-Any new experimental feature must ship disabled by default and go through a real ablation — `train_model.py` baseline vs. treatment, ideally a 5-fold expanding-window CV (`--protocol cv`) — before its flag is flipped to `true`. Every `train_model.py` run appends a row to `outputs/experiments_v2.csv`, the shared cross-feature ablation log; don't lose or overwrite prior rows. (`outputs/experiments.csv`, the old 16-column schema, is a frozen historical snapshot — never written to going forward.) `docs/backlog.md` tracks feature status; `docs/*_log.md` files hold the real validation write-ups behind each adoption/rejection decision.
+Any new experimental feature must ship disabled by default and go through a real ablation — `train_model.py` baseline vs. treatment, ideally a 5-fold expanding-window CV (`--protocol cv`) — before its flag is flipped to `true`. Every `train_model.py` run appends a row to `outputs/experiments_v2.csv`, the shared cross-feature ablation log; don't lose or overwrite prior rows. (`outputs/experiments.csv`, the old 16-column schema, is a frozen historical snapshot — never written to going forward.) `docs/BACKLOG.md` tracks feature status; `docs/*_log.md` files hold the real validation write-ups behind each adoption/rejection decision.
 
 ## Leakage safety
 
@@ -31,7 +31,7 @@ Features must be point-in-time (pre-game state only) — the recurring pattern i
 
 ## Documentation style
 
-Keep `.md` docs and logs concise — state findings and numbers tersely, don't narrate every step taken. Grouping related work under a clear, self-explanatory name (e.g. "modeling improvements", "feature enrichments") is fine and encouraged. Never use bare internal codes (e.g. "A7", "B4", "Round 3") anywhere outside `docs/backlog.md` itself — not in other docs, not in code comments/docstrings, not in commit messages. Elsewhere, describe the technical reason directly.
+Keep `.md` docs and logs concise — state findings and numbers tersely, don't narrate every step taken. Grouping related work under a clear, self-explanatory name (e.g. "modeling improvements", "feature enrichments") is fine and encouraged. Never use bare internal codes (e.g. "A7", "B4", "Round 3") anywhere outside `docs/BACKLOG.md` itself — not in other docs, not in code comments/docstrings, not in commit messages. Elsewhere, describe the technical reason directly.
 
 ## Git conventions
 
@@ -41,16 +41,16 @@ Keep `.md` docs and logs concise — state findings and numbers tersely, don't n
 
 ## Project Rules (ML experimentation)
 
-**Status: the expanding-window CV harness is implemented** (`src/evaluation/cv_harness.py`, folds in `configs/config.yaml`'s `cv.folds`, 5 folds oldest → newest, mechanically validated by `validate_fold_definitions`). `train_model.py --protocol cv` runs it; `--protocol single_split` (default) still runs today's one fixed split from `datasets_loading`'s dates — both go through the same `run_split` code path. `EXPERIMENTS.md` and `results/sessions/` (for the session-leaderboard rules below) still don't exist yet — create on first use.
+**Status: the expanding-window CV harness is implemented** (`src/evaluation/cv_harness.py`, folds in `configs/config.yaml`'s `cv.folds`, 5 folds oldest → newest, mechanically validated by `validate_fold_definitions`). `train_model.py --protocol cv` runs it; `--protocol single_split` (default) still runs today's one fixed split from `datasets_loading`'s dates — both go through the same `run_split` code path. `docs/EXPERIMENTS.md` and `results/sessions/` (for the session-leaderboard rules below) still don't exist yet — create on first use.
 
 ### Running experiments
 - One experiment = one command: `venv/bin/python3 train_model.py --run-name <experiment_id> --notes "..." [--protocol single_split|cv]`.
 - Every run is logged, one row per run, per the leaderboard rules below. No run without a row.
-- Numbers → CSV only. Interpretation → `EXPERIMENTS.md` decision log (doesn't exist yet — create on first use), referenced by experiment_id.
+- Numbers → CSV only. Interpretation → `docs/EXPERIMENTS.md` decision log (doesn't exist yet — create on first use), referenced by experiment_id.
 
 ### Leaderboards & research sessions
 - `outputs/experiments_v2.csv` is the master registry (the CV-protocol schema — `val_score_mean`, `val_score_per_fold`, `test_score_mean`, `protocol`, `session_id`, plus the original per-metric columns). `outputs/experiments.csv` (the old 16-column schema) is a frozen historical snapshot, seeded into `experiments_v2.csv` once (`scripts/migrate_experiments_schema.py`) with those 5 new columns empty — pre-CV-harness rows' own naive-baseline values were never recorded, so their composite score can't be retroactively computed. Autonomous/research sessions never append to `experiments_v2.csv` directly during the run.
-- Each research session gets a session_id (`YYYYMMDD_HHMM_<slug>`, e.g. `20260804_1430_champion-cv-baseline` — timestamp for free uniqueness/sorting, a short freeform slug so `results/sessions/` and the `EXPERIMENTS.md` log stay scannable without opening files; keep the slug to 2-4 words since experiment IDs are prefixed with it) and logs every run to `results/sessions/<session_id>.csv` (`results/sessions/` doesn't exist yet — create on first use), same schema as `experiments_v2.csv` + `session_id`.
+- Each research session gets a session_id (`YYYYMMDD_HHMM_<slug>`, e.g. `20260804_1430_champion-cv-baseline` — timestamp for free uniqueness/sorting, a short freeform slug so `results/sessions/` and the `docs/EXPERIMENTS.md` log stay scannable without opening files; keep the slug to 2-4 words since experiment IDs are prefixed with it) and logs every run to `results/sessions/<session_id>.csv` (`results/sessions/` doesn't exist yet — create on first use), same schema as `experiments_v2.csv` + `session_id`.
 - At session end, append to `experiments_v2.csv`: (a) the session's best row by mean validation score under full CV, and (b) any other row that beats the current champion. Session CSVs are archived, never deleted.
 - Manual one-off experiments run interactively may log directly to `experiments_v2.csv` (already how `train_model.py` works today).
 
@@ -66,7 +66,7 @@ Keep `.md` docs and logs concise — state findings and numbers tersely, don't n
 
 ### Process
 - Branch `experiments`, one commit per experiment (message = experiment_id).
-- After each run: append to `EXPERIMENTS.md` decision log (hypothesis → result → conclusion → next). At session end: append a session summary (session_id, what was explored, what was promoted, what was dropped and why).
+- After each run: append to `docs/EXPERIMENTS.md` decision log (hypothesis → result → conclusion → next). At session end: append a session summary (session_id, what was explored, what was promoted, what was dropped and why).
 - Cheap screening runs may use the last 3 folds only; full CV required before an experiment is promoted or declared a new best.
 - Failed twice → log as failed, move on.
 - Preprocessing changes go through the central pipeline only, no per-feature ad hoc handling.

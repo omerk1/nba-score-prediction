@@ -29,8 +29,19 @@ logger = logging.getLogger(__name__)
 
 SLEEP_SECONDS = 0.7
 BOX_SCORE_COLS = [
-    "fgm", "fga", "fg3m", "fg3a", "ftm", "fta",
-    "oreb", "dreb", "ast", "stl", "blk", "tov", "pts",
+    "fgm",
+    "fga",
+    "fg3m",
+    "fg3a",
+    "ftm",
+    "fta",
+    "oreb",
+    "dreb",
+    "ast",
+    "stl",
+    "blk",
+    "tov",
+    "pts",
 ]
 
 
@@ -41,36 +52,46 @@ def _existing_game_ids() -> set[str]:
     return {r["game_id"] for r in rows}
 
 
-def _cached_game_ids() -> set[str]:
+def _cached_game_id_counts() -> dict[str, int]:
+    """Row count per game_id currently in the box_score_stats cache. Each game
+    needs exactly 2 rows (home + away team); a count of 1 means a prior fetch
+    partially failed and left that game silently incomplete."""
     conn = cache_conn()
     if not table_exists(conn, "box_score_stats"):
         conn.close()
-        return set()
-    rows = conn.execute("SELECT DISTINCT game_id FROM box_score_stats").fetchall()
+        return {}
+    rows = conn.execute("SELECT game_id, COUNT(*) AS n FROM box_score_stats GROUP BY game_id").fetchall()
     conn.close()
-    return {r["game_id"] for r in rows}
+    return {r["game_id"]: r["n"] for r in rows}
 
 
 def _fetch_season_boxscores(season: str, season_type: str) -> pd.DataFrame:
-    df = LeagueGameLog(
-        season=season, season_type_all_star=season_type, league_id="00"
-    ).get_data_frames()[0]
+    df = LeagueGameLog(season=season, season_type_all_star=season_type, league_id="00").get_data_frames()[0]
     if df.empty:
         return pd.DataFrame()
 
     is_home = df["MATCHUP"].str.contains(r"vs\.")
-    out = pd.DataFrame({
-        "game_id": df["GAME_ID"],
-        "team_id": df["TEAM_ID"],
-        "is_home": is_home.astype(int),
-        "game_date": df["GAME_DATE"],
-        "fgm": df["FGM"], "fga": df["FGA"],
-        "fg3m": df["FG3M"], "fg3a": df["FG3A"],
-        "ftm": df["FTM"], "fta": df["FTA"],
-        "oreb": df["OREB"], "dreb": df["DREB"],
-        "ast": df["AST"], "stl": df["STL"], "blk": df["BLK"], "tov": df["TOV"],
-        "pts": df["PTS"],
-    })
+    out = pd.DataFrame(
+        {
+            "game_id": df["GAME_ID"],
+            "team_id": df["TEAM_ID"],
+            "is_home": is_home.astype(int),
+            "game_date": df["GAME_DATE"],
+            "fgm": df["FGM"],
+            "fga": df["FGA"],
+            "fg3m": df["FG3M"],
+            "fg3a": df["FG3A"],
+            "ftm": df["FTM"],
+            "fta": df["FTA"],
+            "oreb": df["OREB"],
+            "dreb": df["DREB"],
+            "ast": df["AST"],
+            "stl": df["STL"],
+            "blk": df["BLK"],
+            "tov": df["TOV"],
+            "pts": df["PTS"],
+        }
+    )
     return out
 
 
@@ -81,17 +102,23 @@ def build_box_score_cache(force_refresh: bool = False) -> dict:
     required parity check.
 
     Returns a dict summary: {n_game_table, n_cached, n_matched, n_missing_in_cache,
-    n_extra_in_cache, parity_ok, missing_game_ids (sample)}.
+    n_incomplete_in_cache, n_extra_in_cache, parity_ok, missing_game_ids (sample),
+    incomplete_game_ids (sample)}.
     """
     init_cache_db()
     cfg = load_config()
     game_ids_needed = _existing_game_ids()
-    already_cached = set() if force_refresh else _cached_game_ids()
-    missing = game_ids_needed - already_cached
+    cached_counts = {} if force_refresh else _cached_game_id_counts()
+    # Complete = exactly 2 rows (home + away). A game with 0 or 1 cached rows
+    # both need (re-)fetching -- treating 1-row games as "already cached" is
+    # exactly the gap that let a partially-failed fetch go unnoticed and never
+    # get completed on a later run.
+    complete = {gid for gid, n in cached_counts.items() if n >= 2}
+    missing = game_ids_needed - complete
 
     logger.info(
-        f"Box score cache: {len(already_cached)} already cached, "
-        f"{len(missing)} to fetch (of {len(game_ids_needed)} total games in `game` table)"
+        f"Box score cache: {len(complete)} complete, "
+        f"{len(missing)} to (re-)fetch (of {len(game_ids_needed)} total games in `game` table)"
     )
 
     if missing:
@@ -125,26 +152,36 @@ def build_box_score_cache(force_refresh: bool = False) -> dict:
         conn.close()
         logger.info(f"Inserted {total_inserted} new box_score_stats rows")
 
-    # --- Required parity check ---
-    cached_now = _cached_game_ids()
-    n_matched = len(game_ids_needed & cached_now)
+    # --- Required parity check: every needed game_id must have EXACTLY 2 rows
+    # (home + away), not just >=1 -- a game with only 1 row is a partially-failed
+    # fetch, silently incomplete rather than genuinely missing. ---
+    cached_counts_now = _cached_game_id_counts()
+    cached_now = set(cached_counts_now)
+    complete_now = {gid for gid, n in cached_counts_now.items() if n >= 2}
+    incomplete_now = {gid for gid in game_ids_needed if cached_counts_now.get(gid, 0) == 1}
+    n_matched = len(game_ids_needed & complete_now)
     n_missing = len(game_ids_needed - cached_now)
+    n_incomplete = len(incomplete_now)
     n_extra = len(cached_now - game_ids_needed)
-    parity_ok = n_missing == 0
+    parity_ok = n_missing == 0 and n_incomplete == 0
 
     summary = {
         "n_game_table": len(game_ids_needed),
         "n_cached": len(cached_now),
         "n_matched": n_matched,
         "n_missing_in_cache": n_missing,
+        "n_incomplete_in_cache": n_incomplete,
         "n_extra_in_cache": n_extra,
         "parity_ok": parity_ok,
         "missing_sample": sorted(game_ids_needed - cached_now)[:10],
+        "incomplete_sample": sorted(incomplete_now)[:10],
     }
     if not parity_ok:
         logger.warning(f"PARITY MISMATCH: {summary}")
     else:
-        logger.info(f"Parity OK: {n_matched}/{len(game_ids_needed)} game_ids match 1:1")
+        logger.info(
+            f"Parity OK: {n_matched}/{len(game_ids_needed)} game_ids have exactly 2 rows (home + away)"
+        )
     return summary
 
 

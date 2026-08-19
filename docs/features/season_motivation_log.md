@@ -1,6 +1,6 @@
 # Season Motivation & Seeding Incentive — Implementation Log
 
-> Companion to `docs/SEASON_MOTIVATION_DECISIONS.md` (data audit + formula
+> Companion to `docs/features/season_motivation_decisions.md` (data audit + formula
 > decisions). Branch `feature/season-motivation`, committed incrementally.
 
 ## 1. Data Audit

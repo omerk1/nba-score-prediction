@@ -4,7 +4,7 @@ Concise findings from `notebooks/02_feature_eda.ipynb` — a full-feature-set ED
 (127 cols: 107 default-enabled + `style_matchup.enabled`'s 2 KNN-lookup cols +
 `raw_features_enabled`'s 18 raw-fingerprint cols, both flags locally overridden to
 `true` for this analysis only, `configs/config.yaml` unchanged). General feature
-analysis, not A7-specific — see `docs/a7_phase_log.md`'s Feature EDA section for
+analysis, not A7-specific — see `docs/features/a7_phase_log.md`'s Feature EDA section for
 the pointer.
 
 ---
