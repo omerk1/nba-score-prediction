@@ -10,6 +10,88 @@ any session. One investigation = one session. `/clear` between them.
 
 ---
 
+## Status log (every session updates this before stopping)
+
+This doc is not a fixed plan — it's the continuity mechanism between
+sessions, so it has to reflect what actually happened, not just what was
+intended. Every session prompt below ends with "append a status log entry"
+— that means literally editing this section before stopping, not just
+reporting results in the chat transcript that gets `/clear`'d away.
+
+Each entry, in order completed:
+
+```
+### [Track/item, e.g. "A1"] — [date]
+Result: [CV delta, market_benchmark delta, or "audit only, no numeric change"]
+Findings: [anything unexpected, one or two lines]
+Adjusts later steps: [does this change priority/scope of any item below?
+"None" is a valid answer]
+```
+
+**Before starting any session, read this log first** — not just the
+static prompt for that item — in case an earlier session already changed
+its scope or priority. If a prompt below conflicts with something the log
+says happened, the log wins; update the prompt to match before running it.
+
+### B0 — 2026-08-20
+Result: audit only, no numeric change. Deliverable: `docs/FEATURE_REPRESENTATION_AUDIT.md`.
+Findings: `style_fingerprint_features` (rank 1, 29.0%) is already 6-dimensional and
+already decay-weighted (`halflife=13.2`) — not an enrichment candidate despite being the
+top-importance family. `style_features`/`rolling_features` (ranks 2/3, 18.9%/16.1%) are
+both genuinely mean-only (or volume-weighted-ratio-only) at every window (L5/L10/L20),
+no std/trend anywhere. `elo_features` (rank 4, 8.3%) has zero volatility/rate-of-change
+representation — only a point-in-time running rating. `opponent_quality_features` (rank
+6, 7.7%) is mean-only but structurally capped by schedule balance (per
+`docs/EXPERIMENTS.md` §2), not a representation gap. `matchup_features` (rank 5, 7.9%)
+is purely derived from families 2/3, no independent representation of its own.
+`rest_features` isn't top-6 by importance (11th, 1.4%) despite being named in Track B's
+framing, but the rest/back-to-back differential (`b2b_diff`/`rest_diff`) from
+`docs/EXPLORATION.md`'s Area 2 is a specific, already-measured, unimplemented feature —
+Track A item 3 fixed the underlying venue-blind bug and confirmed `second_of_b2b` would
+be a pure duplicate, but did not add the separate `b2b_diff`/`rest_diff` differential.
+Adjusts later steps: priority order for B1+ is (1) `style_features` +
+`rolling_features` decay-weighting swap, bundled as one session — highest importance
+among genuinely enrichable families, cheapest test (zero new columns, reuse
+`fingerprint.py`'s proven `_decayed_weighted_mean`); (2) `elo_features`
+volatility/rate-of-change — real importance, untested axis, but needs new construction
+(no drop-in swap available); (3) `opponent_quality_features` and `matchup_features` —
+deprioritized, first for a measured structural ceiling, second for having no independent
+representation to enrich; (4) `style_fingerprint_features` — excluded from the B-series
+list entirely, no gap to close. Flagging one cross-cutting note for whoever sequences
+B1+: `rest_features`' differential idea ranks #1 by evidence quality in
+`docs/EXPERIMENTS.md`'s own decisive shortlist despite ranking 11th by importance —
+worth considering for an early slot on evidence-quality grounds even though the
+family-importance-first ordering above puts it last.
+
+### B0 correction pass — 2026-08-20
+Result: audit only, no numeric change. Edited `docs/FEATURE_REPRESENTATION_AUDIT.md`'s
+priority-list justifications only — no code, training, or family-importance re-run.
+Findings: (1) `elo_features`' priority-3 justification cited a permutation-importance
+number (0.0303, rank 2) from the pre-Track-A family-importance run, while every other
+family in the list is ordered by the newer post-A2 CatBoost-share numbers — a
+methodology mismatch. Removed the permutation citation entirely; re-verified priority 3
+holds on two grounds that don't need it: elo's post-A2 CatBoost share (8.3%) is already
+the highest among the non-swap, non-excluded families under the same metric used
+throughout the doc, and a volatility/rate-of-change feature has no existing function to
+reuse (unlike items 1-2's drop-in decay-weight swap), so it's correctly costed as more
+expensive/lower-confidence than the swap regardless of which importance metric is used.
+(2) Checked whether `opponent_quality_features` had the same stale-permutation-number
+issue — it doesn't, because no post-A2 permutation number was ever logged for it (only
+`rolling_features` got a fresh permutation delta in the A2 log entry), so there's no
+newer figure to compare against and nothing to find. Its deprioritization was also never
+built on a permutation number in the first place — it rests on the schedule-balance
+construction argument alone, independent of any importance metric. No finding
+manufactured for this family; stated plainly in the doc instead.
+Adjusts later steps: **none — priority order for B1+ is unchanged**
+(style_features+rolling_features swap, then elo, then opponent_quality/matchup
+deprioritized, style_fingerprint excluded, rest_features flagged separately on
+evidence-quality grounds; see the B0 entry above for the full order). Only the stated
+justification for elo's rank changed, not the rank itself or any other family's rank.
+
+(Log entries go here as sessions complete.)
+
+---
+
 ## Track A — Queued model-quality fixes
 
 Run in order, one Claude Code session each, **stop after each**, full CV +
@@ -122,6 +204,11 @@ importance that family already carries (higher current importance +
 scalar-only = higher priority, since that's where a representation fix is
 most likely to move CV/market_benchmark). STOP after the doc is written.
 Do not implement anything.
+
+Before stopping: append a status log entry to docs/NEXT_PHASE_SESSIONS.md
+per the Status log section — "Adjusts later steps" should list the
+priority order for B1+ sessions, since that order isn't decided until this
+inventory exists.
 ```
 
 ### B1+ — Per-family enrichment (one session per family, in priority order from B0)
@@ -149,9 +236,17 @@ Rules:
   one that "works." One or a small bundle of test additions per session,
   not an open-ended search.
 - STOP after reporting. Do not start the next family's session.
+- Before stopping: append a status log entry. "Adjusts later steps" should
+  say explicitly whether this result changes the priority or scope of the
+  remaining B-series families — e.g. a strong hit might make a related
+  family worth promoting; a clean null might deprioritize a family you
+  expected to matter for similar reasons. "No change to remaining order"
+  is a valid entry if that's genuinely the case.
 ```
 
-Repeat B1+ for each family B0 flagged, in priority order, same
+Before running each subsequent B1+ session, re-read the status log — the
+priority order is whatever B0 set *as adjusted by* any later entries, not
+a fixed list decided once. Repeat B1+ for each family, same
 stop-after-each discipline as Track A. Note on scope: this is deliberately
 *not* an open-ended trial-and-error search — each session tests a small,
 specific, hypothesis-driven set of representation candidates per family,
@@ -224,6 +319,11 @@ decision, not autonomous next steps. Do not start integrating any source.
   a session going "just in case" after a clean finding, and don't let a
   per-family enrichment session widen into an open-ended search for a
   candidate that finally moves the number.
+- Every session — A1 through C, not just Track B — ends with a status log
+  entry per the Status log section above, before stopping. This is what
+  makes the doc trustworthy as the continuity mechanism between `/clear`
+  boundaries: if a session doesn't write back what it found, the next
+  fresh session has no way to know.
 
 ---
 
