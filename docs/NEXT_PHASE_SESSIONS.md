@@ -130,6 +130,46 @@ this class of near-duplicate-collinearity issue, now with one concrete empirical
 instance (0.985-0.998 correlation) as a worked example of why it matters, though A4
 itself has nothing to trim here since the code was reverted rather than adopted.
 
+### B2 (elo_features momentum + volatility enrichment) — 2026-08-21
+Result: **split — momentum adopted, volatility rejected.** Step 1
+(`elo_momentum_L{5,10,20}`, 9 new cols): full CV val_score_mean 1.3803 vs. baseline
+(`a3_rest_venue_blind_fix`) 1.3811, Δ−0.0008, 3/5 folds improve (no catastrophic
+regressions) — a real, modest improvement. `market_benchmark` leans positive (win_acc
++0.0057, total_mae/brier better, only diff_mae slightly worse). Correlation with
+`elo_diff` (computed before CV, per this session's explicit instruction): 0.20-0.36 —
+low-to-moderate, genuinely distinct information, unlike B1's 0.985-0.998 near-duplicates.
+**Adopted as an always-on structural feature** (139→148 total columns).
+Step 2 (also `elo_volatility_L{5,10,20}`, rolling std of rating deltas, 9 more cols):
+val_score_mean 1.3816 cumulative (Δ+0.0005 vs. baseline, roughly flat) but Δ+0.0013
+incremental from step 1 — volatility's own contribution is a regression, driven
+substantially by one large single-fold miss (fold3 +0.0099). `market_benchmark`
+unanimous regression on all 4 metrics vs. both baseline and step 1. Correlation with
+`elo_diff` (~0) and momentum (0.06-0.10) ruled out B1-style collinearity up front, but
+the CV/benchmark result was negative anyway — diagnosed as a different failure mode: a
+real, non-collinear signal (own CatBoost importance rank 23-33/157) that's simply too
+noisy to generalize (std over only 2-20 delta values is a high-variance estimator at
+these window lengths). **Rejected** — `compute_elo_volatility` and its wiring/test
+removed after the result came in; momentum's wiring/test kept.
+Full write-up: `docs/EXPERIMENTS.md`'s `b2_elo_momentum` / `b2_elo_momentum_and_volatility`
+entry.
+Findings: the pre-CV correlation check (adopted from the B1 postmortem, applied here for
+the first time) correctly predicted momentum would NOT suffer B1's collinearity failure
+mode, and it didn't — but it also correctly showed volatility wasn't collinear either,
+and volatility still failed, for an unrelated reason (small-sample noise, not
+redundancy). So the correlation check is necessary-but-not-sufficient for predicting
+generalization: it rules out one specific failure mode, not all of them. Worth carrying
+forward as standard practice for any future new-construction feature (elo or otherwise),
+but not as a green light on its own.
+Adjusts later steps: this was the last priority family from the B0 inventory (style+
+rolling bundled #1-2, elo #3; opponent_quality/matchup deprioritized; style_fingerprint
+excluded) — **a Track B rollup (per the B-final template) is now appropriate**, not
+started in this session per its own scope (elo only). The rollup should compare
+pre-Track-B baseline (`a3_rest_venue_blind_fix`, 1.3811) against the current state
+(elo_momentum only survives from the B-series, 1.3803) — a small net win for Track B as
+a whole so far. A4 (VIF trim) stays correctly deferred until after that rollup, per the
+existing plan; nothing about elo momentum specifically demands an early A4 (only 9 new,
+non-collinear columns, no known redundancy to trim).
+
 (Log entries go here as sessions complete.)
 
 ---
