@@ -88,6 +88,48 @@ deprioritized, style_fingerprint excluded, rest_features flagged separately on
 evidence-quality grounds; see the B0 entry above for the full order). Only the stated
 justification for elo's rank changed, not the rank itself or any other family's rank.
 
+### B1 (style_features + rolling_features decay-weighting swap) — 2026-08-21
+Result: rejected, both steps. Step 1 (`style_features`'s `off_eff_L{w}`/`def_eff_L{w}` →
+decay-weighted, added alongside as new cols): full CV val_score_mean 1.3814 vs. baseline
+(`a3_rest_venue_blind_fix`) 1.3811, Δ+0.0003, 2/5 folds improve, 3/5 regress — null,
+`market_benchmark` mixed (diff_mae worse, total_mae better, win_acc worse, brier flat).
+Step 2 (also `rolling_features`'s `win_pct_L{w}`/`diff_avg_L{w}`/`win_pct_overall_L{w}`/
+`diff_avg_overall_L{w}` → decay-weighted): full CV val_score_mean 1.3832 cumulative
+(Δ+0.0021 vs. baseline) / Δ+0.0018 incremental from step 1 — `rolling_features`' own
+contribution regresses 3/5 folds incrementally, 4/5 folds cumulatively vs. baseline.
+`market_benchmark` unanimous regression on all 4 metrics vs. both baseline and step 1.
+Full write-up: `docs/EXPERIMENTS.md`'s `b1_style_features_decay_weighted` /
+`b1_style_and_rolling_decay_weighted` entry.
+Findings: diagnostic single_split importance run showed 7/12 `style_features` decay
+columns land in the top-20 CatBoost-importance features (all 12 in top 33), but none of
+the 24 `rolling_features` decay columns crack the top 40 — and every flat-mean/
+decay-weighted column pair checked correlates at 0.985-0.998 (near-duplicate, since
+`halflife=13.2` games is long relative to L5/L10/L20 windows). This explains both
+results: high split-importance without real generalization gain for `style_features`
+(collinear near-duplicate, CatBoost splits importance across it and the original without
+adding signal), and a real regression for `rolling_features` (same collinearity, but
+these columns rank low to begin with, so the added complexity is pure cost with no
+offsetting benefit). Code reverted (`git checkout` on `feature_builder.py`) — no
+decay-weighted columns left in the feature set; the two CV rows + two market_benchmark
+rows stay in `outputs/experiments_v2.csv`/`outputs/market_benchmark_summary.csv` as
+permanent negative-result evidence.
+Adjusts later steps: **elo_features (priority #3) is unaffected in scope** — its own
+audit finding (zero volatility/rate-of-change representation, no existing function to
+reuse) is independent of this result and was never contingent on B1 succeeding. This
+result does add one general caution for however elo's volatility feature ends up built:
+watch for the same near-duplicate-collinearity failure mode if any candidate
+construction (e.g. a rolling std/slope of Elo ratings) ends up highly correlated with
+the existing point-in-time `elo_diff` — check correlation against the base feature
+before or alongside the CV run, not only after a null/negative result, given this
+session's evidence that CatBoost's importance ranking alone doesn't distinguish "adds
+signal" from "correlated near-duplicate." No change to the deprioritization of
+`opponent_quality_features`/`matchup_features` or the exclusion of
+`style_fingerprint_features` — those calls didn't depend on this result either. A4 (VIF
+trim, still deferred until Track B settles) remains appropriately scoped for exactly
+this class of near-duplicate-collinearity issue, now with one concrete empirical
+instance (0.985-0.998 correlation) as a worked example of why it matters, though A4
+itself has nothing to trim here since the code was reverted rather than adopted.
+
 (Log entries go here as sessions complete.)
 
 ---
@@ -336,4 +378,3 @@ movement is trustworthy rather than a multiple-comparisons artifact. A4
 moves after B so collinearity gets trimmed once, on the final
 representation, not twice. C stays last and optional — it's a bet on new
 data mattering more than better-represented data you already have, worth
-revisiting only if B genuinely runs dry.
