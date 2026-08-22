@@ -199,6 +199,41 @@ was already planned, not expanded by this track. Track C stays last/optional per
 original ordering. **Per this session's explicit instruction, A4/Track C are not started
 here — that's a separate human decision.**
 
+### A4 (VIF trim, L10/L20 feature block) — 2026-08-22
+Result: rejected, not adopted. Full-feature-set VIF (`scripts/full_feature_vif.py`, new
+script) on the live 148-column feature set flagged 22 columns above VIF=10; the largest,
+cleanest cluster was `_add_rolling_features`' venue-blind "overall" `win_pct`/`diff_avg`
+at `L10`/`L20` (8 cols, VIF 19.5-36.5 — the top 8 of the whole ranking), vs. the same
+block's own `L5` columns (VIF 9.1-9.6, the only window not flagged). Tested dropping the
+`L10`/`L20` overall columns (148→140 features): full CV val_score_mean 1.3801 vs.
+baseline (`b2_elo_momentum`) 1.3803 — Δ−0.0002, but 3 of 5 folds regress (only 2 improve),
+failing the fold-majority guardrail despite the near-flat mean. `market_benchmark`
+leaned slightly negative too (3/4 metrics worse, 1 flat). Code reverted to the
+post-Track-B state; both rows kept in the CSVs as negative-result evidence. Full
+write-up: `docs/EXPERIMENTS.md`'s `a4_vif_trim_overall_form` entry, including the
+phase-wide cumulative delta (pre-Track-A `target_lambda_weight_0.75`, 127 features →
+final `b2_elo_momentum` state, 148 features: CV Δ−0.0018, 4/5 folds improve;
+`market_benchmark` unanimous improvement, all 4 metrics).
+Findings: an incidental process error this session — `git checkout --` (intended to
+revert only the trim edit) discarded the *entire* uncommitted `feature_builder.py` diff,
+including the not-yet-committed `b2_elo_momentum` wiring from the prior session. Caught
+immediately via `git status`/`git diff HEAD`, and the wiring was reconstructed by hand
+(re-adding the `compute_elo_momentum` call + column merge in `_add_elo_features`) and
+verified by re-running full CV — reproduced `b2_elo_momentum`'s exact numbers (mean
+1.3803, per-fold 1.4336/1.3888/1.3708/1.3479/1.3605, byte-identical to 4dp) before
+proceeding, so no work was actually lost, but this is a sharp reminder that `git checkout
+-- <file>` on a file with *prior* uncommitted changes reverts all of them, not just the
+change just made — a narrower tool (manual edit reversal, or committing intermediate
+states before testing a risky one) is safer when a file already carries unstaged work
+worth keeping in future sessions of this kind.
+Adjusts later steps: none — A4 is closed, rejected. The other 14 VIF-flagged-but-untested
+columns (style_fingerprint `offensive_rating`/`defensive_rating`, raw `elo_features`
+levels, `opponent_quality_features` `L20`, venue-scoped `win_pct_L10`/`fg_pct_L10`) are
+left flagged in `outputs/full_feature_vif_a4_diag.csv` for a future session's own
+judgment call — none is queued. Track C (new orthogonal data) is next per the original
+ordering, pending a separate human decision; the live feature set stays exactly at
+`b2_elo_momentum`'s 148 columns.
+
 (Log entries go here as sessions complete.)
 
 ---
@@ -447,3 +482,4 @@ movement is trustworthy rather than a multiple-comparisons artifact. A4
 moves after B so collinearity gets trimmed once, on the final
 representation, not twice. C stays last and optional — it's a bet on new
 data mattering more than better-represented data you already have, worth
+revisiting only if B genuinely runs dry.
