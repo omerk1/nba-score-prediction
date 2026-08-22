@@ -453,6 +453,99 @@ decision, not autonomous next steps. Do not start integrating any source.
 
 ---
 
+## Backlog — creative feature engineering (untested)
+
+Candidate ideas only — not scheduled work, no priority order, no session
+scoped for any of these yet. Each was checked against existing scripts/docs
+before being logged here (same discipline as B0's inventory: don't assume
+novelty without checking).
+
+1. **Explicit trend/slope over rolling windows** (linear-regression slope of
+   efficiency over L10). Distinct from the decay-weighted mean tested and
+   rejected in B1. **Partial overlap, not the same construction**:
+   `docs/EXPLORATION.md` (Area 1) already tested a *proxy* for trend —
+   `trend = diff_avg_L5 − diff_avg_L20` — and found it structurally, not
+   just empirically, redundant (exact linear combination of two columns
+   already in the model, residual correlation exactly 0.0000 after
+   regressing on the L5/L10/L20 baseline). That result is about *this
+   specific two-point-difference proxy*, not a true within-window
+   linear-regression slope (which weights every game in the window, not
+   just the two endpoint means) — the idea as stated here has not actually
+   been tried. Worth noting the redundancy argument doesn't obviously
+   transfer: a real regression slope is a different statistic from a
+   difference of two existing columns, so it isn't automatically covered by
+   the same "exactly zero residual correlation" argument.
+2. **Distributional shape features**: skewness of the scoring-margin
+   distribution; explicit clutch/close-game (≤5 pt) performance splits
+   separate from blowout performance. **Not covered.** `docs/MARKET_EDGE.md`
+   has a "close games" finding, but that's `market_benchmark.py` doing
+   post-hoc diagnostic analysis of already-made predictions against market
+   odds — not a training feature, and not skewness in any form. No existing
+   script computes skewness or a clutch/blowout split as a model input.
+3. **Asymmetric style-clash features**: team A's specific offensive
+   strength vs. team B's specific defensive weakness, rather than the
+   symmetric differential `matchup_features` already computes. **Partial
+   overlap, coarser than what's proposed.** `_add_matchup_features` already
+   has some directional asymmetry (`home_off_vs_away_def_L{w}`,
+   `away_off_vs_home_def_L{w}`), but only at the level of single aggregate
+   `off_eff`/`def_eff` scalars — it doesn't decompose which *specific*
+   style dimension (pace, 3pt reliance, paint activity, assist rate, etc.,
+   the 6 metrics `style_fingerprint_features` already tracks) is the
+   strength/weakness being exploited. `style_matchup`'s KNN score
+   (`run_style_matchup_cv.py`) is a single symmetric similarity score, not
+   a directional clash either. A genuine dimension-level asymmetric
+   strength-vs-weakness pairing hasn't been built or tested.
+4. **Rest × elo / schedule-density × style interaction terms** — worth
+   pursuing only where the interaction requires domain framing CatBoost's
+   own tree splits are unlikely to find on raw columns alone. **Argued
+   against, not empirically tested.** `docs/EXPLORATION.md` (Area 3,
+   "Interaction features") already reasoned through this class of idea:
+   CatBoost's depth-6 trees can already combine two features within one
+   tree, so hand-engineering pairwise interactions like `elo×rest` or
+   `injury×style` was judged speculative and deprioritized — weaker case
+   than the one interaction feature that *was* confirmed to help (the rest
+   differential, Area 2/A3). That's a reasoned skip, not a CV result, so it
+   doesn't rule this out definitively — but any future attempt should
+   engage with that argument directly (why would this specific interaction
+   need domain framing a tree split can't discover on its own?) rather than
+   restart from scratch.
+5. **Retrospective opponent-adjustment**: a team's own rolling stats
+   adjusted for the quality of opponents already faced in that window
+   (distinct from `opponent_quality_features`, which is about the upcoming
+   opponent). **Already tried for one construction, rejected — drop the
+   "untested" framing for that variant.** `season_motivation`'s
+   `opponent_adjusted_form_score` (`docs/features/season_motivation_log.md`
+   §10, `configs/config.yaml`'s `opponent_adjusted_form_enabled: false`) is
+   exactly this idea applied to win/loss outcomes: a rolling mean (window=10)
+   of a signed, opponent-strength-weighted result. It passed an initial CV
+   screen at window=10 but inverted at windows 5/15 in a robustness sweep —
+   judged a favorable draw, not a robust effect, and disabled
+   (`docs/BACKLOG.md`'s B-series entry). The narrower open question: nobody
+   has tried the same opponent-adjustment logic on *other* rolling stats
+   (e.g. opponent-quality-adjusted `off_eff`/`def_eff`, not just win/loss
+   outcome) — a real gap, but one that inherits genuine skepticism from
+   this result rather than starting fresh.
+6. **Lineup stability/continuity as its own signal**, separate from average
+   roster quality — check first whether existing player/on-off-split work
+   already covers this angle. **Checked, not covered.**
+   `docs/features/on_off_splits_decisions.md`/`on_off_splits_log.md`
+   (`on_off_splits.enabled: false`, not adopted) is about per-player on/off
+   point-differential impact for currently-missing players — "how much does
+   this player's absence cost," not "how stable/continuous is the team's
+   rotation." No existing feature or script measures lineup
+   continuity/turnover as its own signal.
+7. **Referee/officiating-crew tendencies** (foul rate, pace inflation) —
+   flagged as data-feasibility-first, likely exotic/low-priority. **Not
+   covered anywhere in the codebase.** No existing data source, script, or
+   doc addresses officiating at all (the only text match for "referee" in
+   the whole codebase is an unrelated CDN URL string in the injury-PDF
+   scraper). Genuinely untested, and per the idea's own framing, feasibility
+   (does usable referee-assignment/tendency data even exist pre-tip) should
+   be checked before any construction work, same as Track C's other
+   candidates.
+
+---
+
 ## Track D — Ongoing hygiene (applies to every session above)
 
 - One investigation per session. `/clear` before starting a new track or
