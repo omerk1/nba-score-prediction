@@ -301,3 +301,58 @@ exploration memo, and it wasn't in scope for Track A item 3 (which fixed the und
 venue-blind bug but didn't add the differential itself, per A3's own log: "no new column
 added — fixed the existing computation instead," referring to `second_of_b2b`
 specifically, not the separate `b2b_diff`/`rest_diff` differential idea).
+
+---
+
+## Track B rollup — pre-Track-B baseline vs. fully-settled state
+
+All three B0-priority families have now had their enrichment session (`docs/EXPERIMENTS.md`'s
+`b1_style_features_decay_weighted` / `b1_style_and_rolling_decay_weighted` /
+`b2_elo_momentum` / `b2_elo_momentum_and_volatility` entries). This section is a rollup
+only — numbers pulled from those already-logged rows, nothing re-run or re-derived.
+
+**Before (`a3_rest_venue_blind_fix`, pre-Track-B, 2026-08-19):** 139 features. Full CV
+val_score_mean **1.3811** (per-fold: 1.4345, 1.3883, 1.3720, 1.3522, 1.3586).
+`market_benchmark` (fold5): diff_mae 11.412, total_mae 15.366, win_acc 0.6738,
+brier 0.20797.
+
+**After (`b2_elo_momentum`, current live state, 2026-08-21):** 148 features (+9, all
+`elo_momentum_L{5,10,20}` — the only surviving B-series addition). Full CV
+val_score_mean **1.3803** (per-fold: 1.4336, 1.3888, 1.3708, 1.3479, 1.3605).
+`market_benchmark` (fold5): diff_mae 11.430, total_mae 15.357, win_acc 0.6795,
+brier 0.20779.
+
+**Cumulative delta (after − before):** val_score_mean **−0.0008** (improvement).
+Per-fold: fold1 −0.0009, fold2 +0.0005, fold3 −0.0012, fold4 −0.0043, fold5 +0.0019 — 3
+of 5 folds improve, the other 2 regress only slightly (largest +0.0019, inside this
+project's established noise floor). `market_benchmark`: diff_mae +0.018 (worse),
+total_mae −0.009 (better), win_acc +0.0057 (better), brier −0.0002 (flat/better) — 3 of
+4 metrics move the right way.
+
+**Net yield of the three B0-priority families, stated plainly:**
+
+| Family | Candidate(s) tested | Outcome |
+|---|---|---|
+| `style_features` | decay-weighted `off_eff`/`def_eff` | Rejected — null (mixed CV, mixed benchmark) |
+| `rolling_features` | decay-weighted `win_pct`/`diff_avg` (venue-scoped + venue-blind) | Rejected — real, small, consistent regression |
+| `elo_features` | rate-of-change (`elo_momentum`) | **Adopted** — real, small, consistent improvement |
+| `elo_features` | volatility (`elo_volatility`, rolling std of rating deltas) | Rejected — real, small, consistent regression |
+
+One of three targeted families (elo) yielded an adopted feature; the other two
+(style_features, rolling_features) were tested and closed off with a confirmed null and
+a confirmed regression respectively — real information (a specific, now-documented
+reason not to revisit either representation question without new evidence), but zero
+net addition to the feature set. Of elo's own two candidates, one of two was adopted.
+
+This is a **small, real, but genuinely modest result** — not a breakthrough. The
+cumulative CV movement (Δ−0.0008) is on the same order of magnitude as this project's
+established noise floor (cf. A1's own +0.0003 jitter, attributed to incremental raw-data
+refresh, not a real change) and smaller than the clearer wins earlier in this project's
+history (`target_lambda_weight_0.75`'s Δ−0.0017 on a 4/5-fold margin, the `diff_total`
+reformulation's unanimous 5/5-fold Δ−0.0013). It clears this project's adoption bar
+(majority-of-folds improvement, no catastrophic single-fold regression, plausible
+mechanism — low correlation with the existing `elo_diff`) and is worth keeping, but two
+of the three families this track targeted produced no feature-set change at all, and the
+one that did was a genuinely marginal win, not a decisive one. Stated for the record so
+a future session doesn't read "Track B shipped a feature" as "Track B was a clear
+success" — both are true, but the second overstates the first.

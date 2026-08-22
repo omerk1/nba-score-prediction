@@ -130,6 +130,110 @@ this class of near-duplicate-collinearity issue, now with one concrete empirical
 instance (0.985-0.998 correlation) as a worked example of why it matters, though A4
 itself has nothing to trim here since the code was reverted rather than adopted.
 
+### B2 (elo_features momentum + volatility enrichment) — 2026-08-21
+Result: **split — momentum adopted, volatility rejected.** Step 1
+(`elo_momentum_L{5,10,20}`, 9 new cols): full CV val_score_mean 1.3803 vs. baseline
+(`a3_rest_venue_blind_fix`) 1.3811, Δ−0.0008, 3/5 folds improve (no catastrophic
+regressions) — a real, modest improvement. `market_benchmark` leans positive (win_acc
++0.0057, total_mae/brier better, only diff_mae slightly worse). Correlation with
+`elo_diff` (computed before CV, per this session's explicit instruction): 0.20-0.36 —
+low-to-moderate, genuinely distinct information, unlike B1's 0.985-0.998 near-duplicates.
+**Adopted as an always-on structural feature** (139→148 total columns).
+Step 2 (also `elo_volatility_L{5,10,20}`, rolling std of rating deltas, 9 more cols):
+val_score_mean 1.3816 cumulative (Δ+0.0005 vs. baseline, roughly flat) but Δ+0.0013
+incremental from step 1 — volatility's own contribution is a regression, driven
+substantially by one large single-fold miss (fold3 +0.0099). `market_benchmark`
+unanimous regression on all 4 metrics vs. both baseline and step 1. Correlation with
+`elo_diff` (~0) and momentum (0.06-0.10) ruled out B1-style collinearity up front, but
+the CV/benchmark result was negative anyway — diagnosed as a different failure mode: a
+real, non-collinear signal (own CatBoost importance rank 23-33/157) that's simply too
+noisy to generalize (std over only 2-20 delta values is a high-variance estimator at
+these window lengths). **Rejected** — `compute_elo_volatility` and its wiring/test
+removed after the result came in; momentum's wiring/test kept.
+Full write-up: `docs/EXPERIMENTS.md`'s `b2_elo_momentum` / `b2_elo_momentum_and_volatility`
+entry.
+Findings: the pre-CV correlation check (adopted from the B1 postmortem, applied here for
+the first time) correctly predicted momentum would NOT suffer B1's collinearity failure
+mode, and it didn't — but it also correctly showed volatility wasn't collinear either,
+and volatility still failed, for an unrelated reason (small-sample noise, not
+redundancy). So the correlation check is necessary-but-not-sufficient for predicting
+generalization: it rules out one specific failure mode, not all of them. Worth carrying
+forward as standard practice for any future new-construction feature (elo or otherwise),
+but not as a green light on its own.
+Adjusts later steps: this was the last priority family from the B0 inventory (style+
+rolling bundled #1-2, elo #3; opponent_quality/matchup deprioritized; style_fingerprint
+excluded) — **a Track B rollup (per the B-final template) is now appropriate**, not
+started in this session per its own scope (elo only). The rollup should compare
+pre-Track-B baseline (`a3_rest_venue_blind_fix`, 1.3811) against the current state
+(elo_momentum only survives from the B-series, 1.3803) — a small net win for Track B as
+a whole so far. A4 (VIF trim) stays correctly deferred until after that rollup, per the
+existing plan; nothing about elo momentum specifically demands an early A4 (only 9 new,
+non-collinear columns, no known redundancy to trim).
+
+### B-final (Track B rollup) — 2026-08-22
+Result: rollup only, numbers pulled from B1/B2's already-logged rows, nothing re-run.
+Pre-Track-B baseline (`a3_rest_venue_blind_fix`, 139 features) → current live state
+(`b2_elo_momentum`, 148 features, the only surviving B-series addition): full CV
+val_score_mean 1.3811 → 1.3803, Δ**−0.0008** (3/5 folds improve, largest regression only
++0.0019). `market_benchmark` (fold5): diff_mae +0.018 worse, total_mae −0.009 better,
+win_acc +0.0057 better, brier −0.0002 flat/better — 3/4 metrics improve. Full numbers
+and the per-family yield table saved to `docs/FEATURE_REPRESENTATION_AUDIT.md`'s new
+"Track B rollup" section.
+Findings: of the three B0-priority families, only `elo_features` produced an adopted
+feature (`elo_momentum`, 1 of its own 2 tested candidates); `style_features` and
+`rolling_features` were both tested and rejected (a confirmed null and a confirmed small
+regression respectively) — real, documented information, but zero net feature-set
+change. Stated plainly per this session's instruction: the cumulative movement (Δ−0.0008)
+is modest, on the same order as this project's established noise floor, smaller than
+earlier clear wins in this project's history (`target_lambda_weight_0.75`,
+`target_formulation_diff_total`) — a real, adoption-bar-clearing result, not a
+breakthrough. Two of three targeted families yielded nothing.
+Adjusts later steps: **A4 (VIF trim) is next**, per the existing plan — Track B is
+settled (all B0-priority families have had their session; `style_fingerprint_features`
+was excluded from the start, `opponent_quality_features`/`matchup_features` stay
+deprioritized on their original structural grounds, unaffected by this rollup). A4
+should run on the current 148-feature set (139 baseline + elo_momentum's 9 non-collinear
+columns) — no known redundancy to trim from elo_momentum specifically (correlation with
+`elo_diff` was checked and found low, 0.20-0.36), so A4's scope is unchanged from what
+was already planned, not expanded by this track. Track C stays last/optional per the
+original ordering. **Per this session's explicit instruction, A4/Track C are not started
+here — that's a separate human decision.**
+
+### A4 (VIF trim, L10/L20 feature block) — 2026-08-22
+Result: rejected, not adopted. Full-feature-set VIF (`scripts/full_feature_vif.py`, new
+script) on the live 148-column feature set flagged 22 columns above VIF=10; the largest,
+cleanest cluster was `_add_rolling_features`' venue-blind "overall" `win_pct`/`diff_avg`
+at `L10`/`L20` (8 cols, VIF 19.5-36.5 — the top 8 of the whole ranking), vs. the same
+block's own `L5` columns (VIF 9.1-9.6, the only window not flagged). Tested dropping the
+`L10`/`L20` overall columns (148→140 features): full CV val_score_mean 1.3801 vs.
+baseline (`b2_elo_momentum`) 1.3803 — Δ−0.0002, but 3 of 5 folds regress (only 2 improve),
+failing the fold-majority guardrail despite the near-flat mean. `market_benchmark`
+leaned slightly negative too (3/4 metrics worse, 1 flat). Code reverted to the
+post-Track-B state; both rows kept in the CSVs as negative-result evidence. Full
+write-up: `docs/EXPERIMENTS.md`'s `a4_vif_trim_overall_form` entry, including the
+phase-wide cumulative delta (pre-Track-A `target_lambda_weight_0.75`, 127 features →
+final `b2_elo_momentum` state, 148 features: CV Δ−0.0018, 4/5 folds improve;
+`market_benchmark` unanimous improvement, all 4 metrics).
+Findings: an incidental process error this session — `git checkout --` (intended to
+revert only the trim edit) discarded the *entire* uncommitted `feature_builder.py` diff,
+including the not-yet-committed `b2_elo_momentum` wiring from the prior session. Caught
+immediately via `git status`/`git diff HEAD`, and the wiring was reconstructed by hand
+(re-adding the `compute_elo_momentum` call + column merge in `_add_elo_features`) and
+verified by re-running full CV — reproduced `b2_elo_momentum`'s exact numbers (mean
+1.3803, per-fold 1.4336/1.3888/1.3708/1.3479/1.3605, byte-identical to 4dp) before
+proceeding, so no work was actually lost, but this is a sharp reminder that `git checkout
+-- <file>` on a file with *prior* uncommitted changes reverts all of them, not just the
+change just made — a narrower tool (manual edit reversal, or committing intermediate
+states before testing a risky one) is safer when a file already carries unstaged work
+worth keeping in future sessions of this kind.
+Adjusts later steps: none — A4 is closed, rejected. The other 14 VIF-flagged-but-untested
+columns (style_fingerprint `offensive_rating`/`defensive_rating`, raw `elo_features`
+levels, `opponent_quality_features` `L20`, venue-scoped `win_pct_L10`/`fg_pct_L10`) are
+left flagged in `outputs/full_feature_vif_a4_diag.csv` for a future session's own
+judgment call — none is queued. Track C (new orthogonal data) is next per the original
+ordering, pending a separate human decision; the live feature set stays exactly at
+`b2_elo_momentum`'s 148 columns.
+
 (Log entries go here as sessions complete.)
 
 ---
@@ -378,3 +482,4 @@ movement is trustworthy rather than a multiple-comparisons artifact. A4
 moves after B so collinearity gets trimmed once, on the final
 representation, not twice. C stays last and optional — it's a bet on new
 data mattering more than better-represented data you already have, worth
+revisiting only if B genuinely runs dry.

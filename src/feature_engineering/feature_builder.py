@@ -720,7 +720,7 @@ class FeatureBuilder:
             return df
 
         from src.data_processing.data_loader import NBADataLoader
-        from src.feature_engineering.elo import compute_elo_ratings
+        from src.feature_engineering.elo import compute_elo_momentum, compute_elo_ratings
 
         loader = NBADataLoader(db_path=cfg.data_paths.raw_db)
         try:
@@ -742,8 +742,10 @@ class FeatureBuilder:
             mov_multiplier=elo_cfg.mov_multiplier,
             season_regression=elo_cfg.season_regression,
         )
+        momentum_df = compute_elo_momentum(all_games, elo_df, windows=self.rolling_windows)
 
         merged = df[["GAME_ID"]].merge(elo_df, on="GAME_ID", how="left")
+        momentum_merged = df[["GAME_ID"]].merge(momentum_df, on="GAME_ID", how="left")
 
         new_cols = {
             "home_team_elo": merged["home_team_elo"].values,
@@ -752,6 +754,10 @@ class FeatureBuilder:
             + elo_cfg.home_advantage
             - merged["away_team_elo"].values,
         }
+        for col in momentum_df.columns:
+            if col == "GAME_ID":
+                continue
+            new_cols[col] = momentum_merged[col].values
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_injury_features(self, df: pd.DataFrame) -> pd.DataFrame:
