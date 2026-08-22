@@ -170,6 +170,35 @@ a whole so far. A4 (VIF trim) stays correctly deferred until after that rollup, 
 existing plan; nothing about elo momentum specifically demands an early A4 (only 9 new,
 non-collinear columns, no known redundancy to trim).
 
+### B-final (Track B rollup) — 2026-08-22
+Result: rollup only, numbers pulled from B1/B2's already-logged rows, nothing re-run.
+Pre-Track-B baseline (`a3_rest_venue_blind_fix`, 139 features) → current live state
+(`b2_elo_momentum`, 148 features, the only surviving B-series addition): full CV
+val_score_mean 1.3811 → 1.3803, Δ**−0.0008** (3/5 folds improve, largest regression only
++0.0019). `market_benchmark` (fold5): diff_mae +0.018 worse, total_mae −0.009 better,
+win_acc +0.0057 better, brier −0.0002 flat/better — 3/4 metrics improve. Full numbers
+and the per-family yield table saved to `docs/FEATURE_REPRESENTATION_AUDIT.md`'s new
+"Track B rollup" section.
+Findings: of the three B0-priority families, only `elo_features` produced an adopted
+feature (`elo_momentum`, 1 of its own 2 tested candidates); `style_features` and
+`rolling_features` were both tested and rejected (a confirmed null and a confirmed small
+regression respectively) — real, documented information, but zero net feature-set
+change. Stated plainly per this session's instruction: the cumulative movement (Δ−0.0008)
+is modest, on the same order as this project's established noise floor, smaller than
+earlier clear wins in this project's history (`target_lambda_weight_0.75`,
+`target_formulation_diff_total`) — a real, adoption-bar-clearing result, not a
+breakthrough. Two of three targeted families yielded nothing.
+Adjusts later steps: **A4 (VIF trim) is next**, per the existing plan — Track B is
+settled (all B0-priority families have had their session; `style_fingerprint_features`
+was excluded from the start, `opponent_quality_features`/`matchup_features` stay
+deprioritized on their original structural grounds, unaffected by this rollup). A4
+should run on the current 148-feature set (139 baseline + elo_momentum's 9 non-collinear
+columns) — no known redundancy to trim from elo_momentum specifically (correlation with
+`elo_diff` was checked and found low, 0.20-0.36), so A4's scope is unchanged from what
+was already planned, not expanded by this track. Track C stays last/optional per the
+original ordering. **Per this session's explicit instruction, A4/Track C are not started
+here — that's a separate human decision.**
+
 (Log entries go here as sessions complete.)
 
 ---
