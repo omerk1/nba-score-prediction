@@ -38,7 +38,7 @@ ALL_METRICS = CALIBRATED_METRICS + [UNCALIBRATED_METRIC]
 
 def _mock_config():
     mock_cfg = MagicMock()
-    mock_cfg.style_matchup = MagicMock(enabled=False, raw_features_enabled=True)
+    mock_cfg.style_matchup = MagicMock(enabled=False, raw_features_enabled=True, official_pace_enabled=False)
     return mock_cfg
 
 
@@ -55,16 +55,14 @@ def _write_cache_db(cache_path, fingerprint_rows):
     """
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(cache_path))
-    conn.execute(
-        """
+    conn.execute("""
         CREATE TABLE matchup_fingerprints (
             game_id TEXT, team_id INTEGER, game_date TEXT, layer INTEGER,
             pace_score REAL, three_pt_reliance REAL, paint_activity REAL,
             defensive_rating REAL, assist_rate REAL, offensive_rating REAL,
             n_games_in_window INTEGER
         )
-        """
-    )
+        """)
     for game_id, team_id, game_date, seed in fingerprint_rows:
         values = _metric_values(seed)
         for layer in (1, 2):
@@ -75,9 +73,16 @@ def _write_cache_db(cache_path, fingerprint_rows):
                     n_games_in_window)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    game_id, team_id, game_date, layer,
-                    values["pace_score"], values["three_pt_reliance"], values["paint_activity"],
-                    values["defensive_rating"], values["assist_rate"], values["offensive_rating"],
+                    game_id,
+                    team_id,
+                    game_date,
+                    layer,
+                    values["pace_score"],
+                    values["three_pt_reliance"],
+                    values["paint_activity"],
+                    values["defensive_rating"],
+                    values["assist_rate"],
+                    values["offensive_rating"],
                     10,
                 ),
             )
@@ -86,18 +91,24 @@ def _write_cache_db(cache_path, fingerprint_rows):
 
 
 def _query_df(game_id, game_date, home_team_id, away_team_id):
-    return pd.DataFrame([{
-        "GAME_ID": game_id,
-        "GAME_DATE": pd.Timestamp(game_date),
-        "HOME_TEAM_ID": home_team_id,
-        "AWAY_TEAM_ID": away_team_id,
-    }])
+    return pd.DataFrame(
+        [
+            {
+                "GAME_ID": game_id,
+                "GAME_DATE": pd.Timestamp(game_date),
+                "HOME_TEAM_ID": home_team_id,
+                "AWAY_TEAM_ID": away_team_id,
+            }
+        ]
+    )
 
 
 class TestStyleFingerprintAsofLookup:
 
     @patch("src.feature_engineering.feature_builder.load_config")
-    def test_new_game_id_after_last_cached_entry_gets_most_recent_fingerprint(self, mock_config, tmp_path, monkeypatch):
+    def test_new_game_id_after_last_cached_entry_gets_most_recent_fingerprint(
+        self, mock_config, tmp_path, monkeypatch
+    ):
         """
         Mimics predict_game.py's exact pattern: a never-before-seen GAME_ID
         ('upcoming') for a real team_id, dated after that team's last cached
@@ -130,7 +141,9 @@ class TestStyleFingerprintAsofLookup:
             assert pd.isna(result.loc[0, f"style_{metric}_diff"])
 
     @patch("src.feature_engineering.feature_builder.load_config")
-    def test_exact_game_id_and_date_match_still_returns_that_games_value(self, mock_config, tmp_path, monkeypatch):
+    def test_exact_game_id_and_date_match_still_returns_that_games_value(
+        self, mock_config, tmp_path, monkeypatch
+    ):
         """Parity check: querying with the SAME game_id/date as a cached row must still
         return that row's own value (the historical/training behavior the old exact-match
         join already handled correctly)."""

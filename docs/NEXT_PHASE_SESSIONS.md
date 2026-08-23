@@ -234,6 +234,95 @@ judgment call — none is queued. Track C (new orthogonal data) is next per the 
 ordering, pending a separate human decision; the live feature set stays exactly at
 `b2_elo_momentum`'s 148 columns.
 
+### Track C (new orthogonal data feasibility) — 2026-08-22
+Result: audit only, no numeric change. Deliverable: `docs/NEW_DATA_FEASIBILITY.md`.
+Findings: (1) Player availability/confirmed lineups — mostly already built or
+already tested. Injury status (who's out) is a live, adopted pipeline (NBA PDF +
+ESPN nightly → `injury_layer.py`'s archetype-based style-fingerprint adjustment);
+`MARKET_EDGE.md` already found this offers no *market* edge (100% public, same
+timing), which doesn't argue against its accuracy value. On/off-court impact
+weighting for missing players (`on_off_splits`) was fully built, backfilled, CV'd,
+and found small/mixed — parked, not adopted. The one real gap (confirmed starting
+lineups, distinct from injury status) has a genuine sourcing/timing problem
+(typically public ~30min pre-tip, this project's pipeline is same-day/nightly, not
+near-tip) and low expected incremental lift over the already-tested on/off-splits
+result. (2) Pace/possession data — not new data at all: `pace_score`
+(`style_fingerprint_features`) is already the #1/#2-importance feature, computed
+from a standard box-score possession estimate. nba_api's official `PACE`/`POSS`
+would be a more precise version of the same signal, cheap to fetch (existing dep,
+existing rate-limit pattern), but flagged as high near-duplicate risk against the
+existing proxy (same collinear-near-duplicate failure mode B1 already found for
+decay-weighted columns) — reframed as a cheap B-series-style refinement, not a
+Track-C item. (3) Play-by-play shot-quality — the one genuinely new/orthogonal
+candidate, but high-cost (per-game granular calls, ~12,793-game backfill scale,
+multi-hour/multi-session effort, real stats.nba.com rate-limit/blocking risk) and
+lower-confidence than it first appears: raw shot-zone-mix risks being a
+near-duplicate of existing `three_pt_reliance`/`paint_activity`; a genuine
+shot-*quality* (xFG-style) signal needs a small modeling subproject of its own, not
+just a data pull, since nba_api's public endpoints don't expose defender-proximity/
+tracking data. Already scoped once before (`docs/BACKLOG.md`'s "Richer
+Style-Fingerprint Inputs (Shot Charts)" entry, deferred) — its stated revisit
+condition ("current 5-metric encoding's ceiling looks limiting") isn't clearly met
+by anything Track B found (style_fingerprint was explicitly excluded from B-series
+as already well-represented).
+Adjusts later steps: none — this is a feasibility read for a human decision, not a
+scheduling change. If pursued, recommends splitting shot-quality into a cheap
+zone-mix redundancy check first, before any xFG modeling work; recommends
+reframing pace/possession as a small swap-in refinement (correlation check against
+`pace_score` before any CV run) rather than a full Track-C session; recommends
+treating player-availability/lineups as effectively closed pending a genuinely new
+angle. Full source/cost/effort/redundancy breakdown and a summary table in
+`docs/NEW_DATA_FEASIBILITY.md`. Nothing implemented or scheduled.
+
+### Track C follow-up (pace/possession swap-in test) — 2026-08-23
+Result: **rejected, not promoted.** Full 5-fold CV: val_score_mean 1.3832 vs.
+baseline (`b2_elo_momentum`) 1.3803 — Δ+0.0029, 4/5 folds regress (only fold5
+improves). `market_benchmark` 3/4 metrics worse (diff_mae, total_mae, brier;
+win_acc slightly better). Full write-up:
+`docs/EXPERIMENTS.md`'s `official_pace_poss_new_columns` entry.
+Findings: implemented `src/matchups/pace_possession.py` (new nba_api
+`TeamGameLogs`/Advanced collection module, season-level bulk calls — ~20 calls,
+~1 minute, not per-game) + a new `team_advanced_stats` cache table, wired
+official PACE/POSS into `fingerprint.py`'s rolling decay-weighted computation
+(Layer 1/uncalibrated only, same scope cut as `offensive_rating`) and
+`feature_builder.py` (gated by new `style_matchup.official_pace_enabled`, added
+alongside `pace_score`, not replacing it — 148→154 features when enabled).
+Backfill: 12,793/12,793 games, 100% parity. Pre-CV correlation check (required
+by this session's own instruction): `official_pace` vs. `pace_score` — 0.72-0.73
+(moderate, NOT a B1-style near-duplicate of the existing feature, so the
+standard collinearity-against-existing-features check would not have flagged
+this in advance). But `official_pace` vs. `official_poss` (the two NEW columns
+against **each other**) — 0.976, a near-duplicate pair. Diagnosis: single_split
+importance shows both new columns landing very high (`away_style_official_pace`
+rank 4/154, `away_style_official_poss` rank 7/154) — the same "high in-sample
+importance, no CV generalization" signature B1 found, but via a different
+mechanism than B1's: not redundancy with an existing feature, but redundancy
+**between the two new columns themselves** (CatBoost splits importance across
+two near-identical new axes instead of one, without adding two independent
+units of real signal). Code kept (not reverted, unlike `b1`/`a4`) since the
+collection infra is a genuine, cheap, working data source — `official_pace_enabled`
+stays `false`, same treatment as the `injury_features.missing_value_strategy`
+rejected variant (kept as a disabled option, not deleted), in case a future
+session wants to test pace or poss alone rather than both together. One
+pre-existing test fixture needed a fix (a bare `MagicMock()` attribute is
+truthy by default, so `tests/test_style_fingerprint_features.py`'s mock config
+needed `official_pace_enabled=False` set explicitly) — unrelated to the
+ablation result itself, a mechanical fallout of adding a new boolean config
+field. Full suite: 192/192 passing with the flag at its shipped default (false).
+Adjusts later steps: closes the pace/possession half of
+`docs/NEW_DATA_FEASIBILITY.md`'s three candidates as tested-and-rejected (that
+doc's prior verdict — "cheap swap-in worth testing" — now has a real, negative,
+CV-backed answer instead of a prediction). Relevant to the remaining shot-quality
+candidate specifically: this session shows that a correlation check against
+*existing* features (the standard B1-derived discipline) is not sufficient when
+a candidate adds multiple new columns at once — check collinearity **among the
+new columns themselves** too, before CV, not just against what's already in the
+model. Shot-quality would likely add several zone/quality columns in one batch,
+the same shape as this session's pace/poss pair — worth carrying this specific
+lesson into that session if it's ever run. No change to Track C's overall
+standing (still optional/deprioritized, per the original ordering) — this was a
+single-candidate follow-up, not a new track.
+
 (Log entries go here as sessions complete.)
 
 ---

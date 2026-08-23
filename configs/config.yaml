@@ -200,6 +200,18 @@ style_matchup:
   # win_acc/brier -- ADOPTED as the new committed default: `true`. See
   # docs/a7_phase_log.md's Raw-Fingerprint Feature Redesign section.
   raw_features_enabled: true
+  # Pace/possession swap-in test (docs/NEW_DATA_FEASIBILITY.md, src/matchups/
+  # pace_possession.py): official PACE/POSS (nba_api's TeamGameLogs, MeasureType=
+  # Advanced) added as NEW columns alongside pace_score, not a replacement.
+  # Pre-CV correlation with pace_score: 0.72-0.73 (moderate, not a near-duplicate
+  # of pace_score) -- but official_pace vs official_poss correlate 0.976 with
+  # EACH OTHER. Full 5-fold CV: val_score_mean 1.3832 vs baseline 1.3803
+  # (Δ+0.0029, 4/5 folds regress); market_benchmark 3/4 metrics worse. REJECTED --
+  # not promoted. Stays `false`; code kept (not reverted) since the collection
+  # infra/cache are real, working, and cheap to leave gated off for any future
+  # revisit (e.g. testing pace or poss alone, rather than both at once) -- see
+  # docs/NEXT_PHASE_SESSIONS.md's status log for the full write-up.
+  official_pace_enabled: false
   # Correction made during the KNN-score integration test:
   # fingerprint_window/decay_halflife/similarity_method/knn_k/
   # min_confidence_sample/full_confidence_sample below were the untuned Phase-0
