@@ -38,9 +38,7 @@ def cache_conn() -> sqlite3.Connection:
 
 
 def table_exists(conn: sqlite3.Connection, table: str) -> bool:
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-    ).fetchone()
+    row = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
     return row is not None
 
 
@@ -95,6 +93,19 @@ CACHE_SCHEMAS = {
             PRIMARY KEY (game_id, team_id, layer)
         )
     """,
+    # Official per-team-game PACE/POSS from nba_api's TeamGameLogs (MeasureType=
+    # Advanced) -- see src/matchups/pace_possession.py. Same shape as
+    # box_score_stats (Gap 1 raw inputs), a separate source table since PACE/POSS
+    # aren't derivable from box_score_stats's Base-measure-type columns.
+    "team_advanced_stats": """
+        CREATE TABLE IF NOT EXISTS team_advanced_stats (
+            game_id TEXT NOT NULL,
+            team_id INTEGER NOT NULL,
+            pace REAL,
+            poss REAL,
+            PRIMARY KEY (game_id, team_id)
+        )
+    """,
 }
 
 
@@ -113,5 +124,11 @@ def init_cache_db() -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(matchup_fingerprints)").fetchall()}
         if "offensive_rating" not in cols:
             conn.execute("ALTER TABLE matchup_fingerprints ADD COLUMN offensive_rating REAL")
+        # Migration (Track C pace/possession swap-in test): official_pace/official_poss,
+        # uncalibrated Layer-1-only metrics -- same treatment as offensive_rating above.
+        if "official_pace" not in cols:
+            conn.execute("ALTER TABLE matchup_fingerprints ADD COLUMN official_pace REAL")
+        if "official_poss" not in cols:
+            conn.execute("ALTER TABLE matchup_fingerprints ADD COLUMN official_poss REAL")
     conn.commit()
     conn.close()

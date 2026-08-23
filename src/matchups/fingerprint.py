@@ -47,25 +47,40 @@ import pandas as pd
 from src.matchups.box_scores import build_box_score_cache
 from src.matchups.config import load_style_matchup_config
 from src.matchups.db import cache_conn, init_cache_db, nba_api_conn
+from src.matchups.pace_possession import build_advanced_stats_cache
 
 logger = logging.getLogger(__name__)
 
 FINGERPRINT_METRICS = [
-    "pace_score", "three_pt_reliance", "paint_activity", "defensive_rating", "assist_rate",
+    "pace_score",
+    "three_pt_reliance",
+    "paint_activity",
+    "defensive_rating",
+    "assist_rate",
     "offensive_rating",
 ]
 
+# Track C pace/possession swap-in test (docs/NEW_DATA_FEASIBILITY.md): official
+# PACE/POSS from nba_api's TeamGameLogs (Advanced), src/matchups/pace_possession.py.
+# Deliberately NOT added to FINGERPRINT_METRICS -- same "Layer 1 (uncalibrated)
+# only" scope cut as offensive_rating (see this module's own docstring): no
+# archetype's injury_impact config entry references these, and unlike
+# offensive_rating this list is never passed through injury_layer.py at all
+# (kept fully decoupled from that module rather than relying on a no-op
+# pass-through), so feature_builder.py reads these from layer=1 directly.
+OFFICIAL_PACE_POSS_METRICS = ["official_pace", "official_poss"]
+
 
 def _load_raw_team_game_metrics() -> pd.DataFrame:
-    """One row per (game_id, team_id) with the 6 raw per-game style metrics + game_date."""
+    """One row per (game_id, team_id) with the 6 raw per-game style metrics +
+    official_pace/official_poss + game_date."""
     conn = cache_conn()
     box = pd.read_sql_query("SELECT * FROM box_score_stats", conn)
+    advanced = pd.read_sql_query("SELECT game_id, team_id, pace, poss FROM team_advanced_stats", conn)
     conn.close()
 
     # Opponent points, joined on game_id (the other team's row).
-    opp = box[["game_id", "team_id", "pts"]].rename(
-        columns={"team_id": "opp_team_id", "pts": "opp_pts"}
-    )
+    opp = box[["game_id", "team_id", "pts"]].rename(columns={"team_id": "opp_team_id", "pts": "opp_pts"})
     merged = box.merge(opp, on="game_id")
     merged = merged[merged["team_id"] != merged["opp_team_id"]].copy()
     # Each game_id should now have exactly 2 rows (home perspective + away perspective).
@@ -82,9 +97,15 @@ def _load_raw_team_game_metrics() -> pd.DataFrame:
     # Offensive-quality counterpart to defensive_rating, same possessions estimate.
     merged["offensive_rating"] = (merged["pts"] / possessions * 100).fillna(0.0)
 
-    return merged[["game_id", "team_id", "game_date"] + FINGERPRINT_METRICS].sort_values(
-        ["team_id", "game_date"]
-    )
+    # Official PACE/POSS (Track C candidate) -- left join, team_advanced_stats has
+    # full parity with box_score_stats's game_id set as of the last cache build, but
+    # left join (not inner) so a future gap degrades to NaN rather than silently
+    # dropping team-games from every other metric too.
+    merged = merged.merge(advanced, on=["game_id", "team_id"], how="left")
+    merged = merged.rename(columns={"pace": "official_pace", "poss": "official_poss"})
+
+    all_metrics = FINGERPRINT_METRICS + OFFICIAL_PACE_POSS_METRICS
+    return merged[["game_id", "team_id", "game_date"] + all_metrics].sort_values(["team_id", "game_date"])
 
 
 def _decay_weight(position, halflife: float):
@@ -119,12 +140,13 @@ def compute_rolling_fingerprints(window: int = 20, halflife: float = 5.0) -> pd.
     by game_date with one row per game (shift(1) == "all games strictly before this one").
     """
     raw = _load_raw_team_game_metrics()
+    all_metrics = FINGERPRINT_METRICS + OFFICIAL_PACE_POSS_METRICS
     out_frames = []
     for team_id, g in raw.groupby("team_id", sort=False):
         g = g.sort_values("game_date").reset_index(drop=True)
         result = {"game_id": g["game_id"], "team_id": team_id, "game_date": g["game_date"]}
         n_games = g[FINGERPRINT_METRICS[0]].shift(1).rolling(window, min_periods=1).count()
-        for metric in FINGERPRINT_METRICS:
+        for metric in all_metrics:
             shifted = g[metric].shift(1)
             result[metric] = shifted.rolling(window, min_periods=1).apply(
                 lambda x: _decayed_weighted_mean(x, halflife), raw=True
@@ -145,6 +167,7 @@ def build_fingerprint_cache(layer: int = 1, min_games: int = 5) -> dict:
     """
     init_cache_db()
     build_box_score_cache()  # ensure box scores are present/parity-checked
+    build_advanced_stats_cache()  # ensure official PACE/POSS are present/parity-checked
     cfg = load_style_matchup_config()
     fp = compute_rolling_fingerprints(window=cfg["fingerprint_window"], halflife=cfg["decay_halflife"])
     fp = fp[fp["n_games_in_window"] >= min_games].copy()
@@ -154,17 +177,28 @@ def build_fingerprint_cache(layer: int = 1, min_games: int = 5) -> dict:
     conn.execute("DELETE FROM matchup_fingerprints WHERE layer = ?", (layer,))
     rows = [
         (
-            r.game_id, int(r.team_id), r.game_date, layer,
-            r.pace_score, r.three_pt_reliance, r.paint_activity,
-            r.defensive_rating, r.assist_rate, r.offensive_rating, int(r.n_games_in_window),
+            r.game_id,
+            int(r.team_id),
+            r.game_date,
+            layer,
+            r.pace_score,
+            r.three_pt_reliance,
+            r.paint_activity,
+            r.defensive_rating,
+            r.assist_rate,
+            r.offensive_rating,
+            r.official_pace,
+            r.official_poss,
+            int(r.n_games_in_window),
         )
         for r in fp.itertuples(index=False)
     ]
     conn.executemany(
         """INSERT OR REPLACE INTO matchup_fingerprints
            (game_id, team_id, game_date, layer, pace_score, three_pt_reliance,
-            paint_activity, defensive_rating, assist_rate, offensive_rating, n_games_in_window)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            paint_activity, defensive_rating, assist_rate, offensive_rating,
+            official_pace, official_poss, n_games_in_window)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         rows,
     )
     conn.commit()

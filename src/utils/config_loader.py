@@ -165,6 +165,15 @@ class StyleMatchupConfig(BaseModel):
 
     enabled: bool
     raw_features_enabled: bool = False
+    # Track C pace/possession swap-in test (docs/NEW_DATA_FEASIBILITY.md): gates
+    # feature_builder.py's addition of official_pace/official_poss (nba_api's own
+    # PACE/POSS, src/matchups/pace_possession.py) alongside pace_score -- a
+    # separate flag from raw_features_enabled so this candidate can be ablated
+    # independently of the already-adopted 18 raw-fingerprint columns. Requires
+    # raw_features_enabled=true (checked in feature_builder.py) since these are
+    # added inside the same method. Ships disabled by default per CLAUDE.md's
+    # ablation-gated feature workflow.
+    official_pace_enabled: bool = False
     fingerprint_window: int
     decay_halflife: float
     encoding: str

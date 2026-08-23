@@ -886,6 +886,11 @@ class FeatureBuilder:
     # (where it would be numerically identical, since no injury delta touches it --
     # see injury_layer.py).
     _RAW_STYLE_UNCALIBRATED_METRIC = "offensive_rating"
+    # Track C pace/possession swap-in test (docs/NEW_DATA_FEASIBILITY.md): official
+    # PACE/POSS from nba_api's TeamGameLogs (Advanced). Layer 1 only, same treatment
+    # as offensive_rating -- gated separately via style_matchup.official_pace_enabled
+    # (default false) so this candidate is independently ablatable.
+    _RAW_STYLE_OFFICIAL_PACE_METRICS = ["official_pace", "official_poss"]
 
     def _add_style_fingerprint_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -952,7 +957,11 @@ class FeatureBuilder:
 
         Adds, for each of the 6 metrics: two raw columns (home_style_{metric},
         away_style_{metric}) and one differential column (style_{metric}_diff,
-        home - away) — 18 new columns total.
+        home - away) — 18 new columns total. If `style_matchup.official_pace_enabled`
+        is also true, adds official_pace/official_poss (nba_api's own PACE/POSS,
+        src/matchups/pace_possession.py) the same way — 6 more columns, alongside
+        pace_score rather than replacing it (Track C pace/possession swap-in test,
+        docs/NEW_DATA_FEASIBILITY.md).
 
         Unlike `_add_style_matchup_features` above (soft warn+skip on a missing
         cache — that feature stays optional/disabled by default), this flag is
@@ -982,8 +991,10 @@ class FeatureBuilder:
         self._warn_if_style_fingerprint_cache_stale(cache_db)
 
         calibrated = self._RAW_STYLE_CALIBRATED_METRICS
-        uncalibrated = self._RAW_STYLE_UNCALIBRATED_METRIC
-        all_metrics = calibrated + [uncalibrated]
+        uncalibrated = [self._RAW_STYLE_UNCALIBRATED_METRIC]
+        if cfg.style_matchup.official_pace_enabled:
+            uncalibrated = uncalibrated + self._RAW_STYLE_OFFICIAL_PACE_METRICS
+        all_metrics = calibrated + uncalibrated
 
         with sqlite3.connect(f"file:{cache_db}?mode=ro", uri=True) as conn:
             layer2 = pd.read_sql_query(
@@ -993,7 +1004,9 @@ class FeatureBuilder:
                 conn,
             )
             layer1_uncalibrated = pd.read_sql_query(
-                f"SELECT game_id, team_id, {uncalibrated} FROM matchup_fingerprints WHERE layer = 1",
+                "SELECT game_id, team_id, "
+                + ", ".join(uncalibrated)
+                + " FROM matchup_fingerprints WHERE layer = 1",
                 conn,
             )
 
