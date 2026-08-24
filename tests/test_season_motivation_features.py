@@ -802,6 +802,8 @@ def _mock_config(
     performance_vs_expectation_window: int = 10,
     opponent_adjusted_form_enabled: bool = False,
     opponent_adjusted_form_window: int = 10,
+    opponent_adjusted_efficiency_enabled: bool = False,
+    opponent_adjusted_efficiency_window: int = 10,
     preferred_opponent_delta_enabled: bool = False,
     preferred_opponent_delta_window_games: int = 20,
     elo_features_enabled: bool = False,
@@ -829,6 +831,8 @@ def _mock_config(
         performance_vs_expectation_window=performance_vs_expectation_window,
         opponent_adjusted_form_enabled=opponent_adjusted_form_enabled,
         opponent_adjusted_form_window=opponent_adjusted_form_window,
+        opponent_adjusted_efficiency_enabled=opponent_adjusted_efficiency_enabled,
+        opponent_adjusted_efficiency_window=opponent_adjusted_efficiency_window,
         preferred_opponent_delta_enabled=preferred_opponent_delta_enabled,
         preferred_opponent_delta_window_games=preferred_opponent_delta_window_games,
     )

@@ -380,6 +380,15 @@ season_motivation:
   performance_vs_expectation_window: 10  # rolling window, games. Explored 5/10/15.
   opponent_adjusted_form_enabled: false
   opponent_adjusted_form_window: 10      # rolling window, games. Explored 5/10/15.
+  # Retrospective opponent-adjusted efficiency (docs/NEXT_PHASE_SESSIONS.md
+  # backlog item 5) -- extends opponent_adjusted_form's own template from
+  # win/loss to off_eff/def_eff. Does not need elo_features.enabled. Rejected
+  # (final): fold3 regressed at all 3 tested windows (5/10/20) and never
+  # resolved cleanly across 3 diagnostic passes; the windowed-opponent-quality
+  # fix that helped fold3 at window=10 broke cross-window robustness at
+  # window=20. See docs/EXPERIMENTS.md's fold3 fresh-diagnosis+re-sweep entry.
+  opponent_adjusted_efficiency_enabled: false
+  opponent_adjusted_efficiency_window: 10  # rolling window, games. Explored 5/10/20.
   # Passed CV AND held up across all three tested windows (15/20/25), unlike
   # the two signals above. Log section 11 + FINAL SUMMARY. Adopted.
   preferred_opponent_delta_enabled: true

@@ -1345,9 +1345,15 @@ class FeatureBuilder:
         `motivation_score_enabled` -- not adopted, see FINAL SUMMARY);
         `_performance_vs_expectation_score`/`_opponent_adjusted_form_score`
         (each independently gated, requires `elo_features.enabled=true` --
-        not adopted, failed a window-robustness check); and
-        `_preferred_opponent_delta` (gated by `preferred_opponent_delta_enabled`
-        -- adopted, the only signal to pass that check).
+        not adopted, failed a window-robustness check);
+        `_opponent_adjusted_off_score`/`_opponent_adjusted_def_score` (gated
+        by `opponent_adjusted_efficiency_enabled` -- does NOT need
+        `elo_features.enabled`, computed straight from points scored/allowed;
+        docs/NEXT_PHASE_SESSIONS.md backlog item 5's retrospective
+        opponent-adjustment idea, extending `opponent_adjusted_form`'s own
+        template to off_eff/def_eff); and `_preferred_opponent_delta` (gated
+        by `preferred_opponent_delta_enabled` -- adopted, the only signal to
+        pass that check).
 
         Soft-disabled (warn + skip) if the injury features cache is missing.
         """
@@ -1490,6 +1496,21 @@ class FeatureBuilder:
                         sm_cfg.opponent_adjusted_form_window,
                     )
 
+        opponent_adjusted_efficiency = None
+        if sm_cfg.opponent_adjusted_efficiency_enabled:
+            from src.feature_engineering.season_motivation import (
+                compute_opponent_adjusted_efficiency_scores,
+                compute_team_offense_defense_history,
+            )
+
+            off_def_history = compute_team_offense_defense_history(
+                all_games, sm_cfg.opponent_adjusted_efficiency_window
+            )
+            opponent_adjusted_efficiency = compute_opponent_adjusted_efficiency_scores(
+                off_def_history,
+                sm_cfg.opponent_adjusted_efficiency_window,
+            )
+
         preferred_opponent_delta = None
         if sm_cfg.preferred_opponent_delta_enabled:
             preferred_opponent_delta = compute_preferred_opponent_delta_scores(
@@ -1541,6 +1562,17 @@ class FeatureBuilder:
                 oaf_merged = rb_lookup.merge(opponent_adjusted_form, on=["team_id", "game_date"], how="left")
                 new_cols[f"{prefix}_opponent_adjusted_form_score"] = (
                     oaf_merged["opponent_adjusted_form_score"].fillna(0.0).values
+                )
+
+            if opponent_adjusted_efficiency is not None:
+                oae_merged = rb_lookup.merge(
+                    opponent_adjusted_efficiency, on=["team_id", "game_date"], how="left"
+                )
+                new_cols[f"{prefix}_opponent_adjusted_off_score"] = (
+                    oae_merged["opponent_adjusted_off_score"].fillna(0.0).values
+                )
+                new_cols[f"{prefix}_opponent_adjusted_def_score"] = (
+                    oae_merged["opponent_adjusted_def_score"].fillna(0.0).values
                 )
 
             if preferred_opponent_delta is not None:
