@@ -232,6 +232,14 @@ class SeasonMotivationConfig(BaseModel):
     performance_vs_expectation_window: int = 10
     opponent_adjusted_form_enabled: bool = False
     opponent_adjusted_form_window: int = 10
+    # Retrospective opponent-adjusted efficiency (docs/NEXT_PHASE_SESSIONS.md
+    # backlog item 5) -- direct extension of opponent_adjusted_form's own
+    # template from win/loss to off_eff/def_eff. Does NOT need
+    # elo_features.enabled (unlike performance_vs_expectation/
+    # opponent_adjusted_form above, which reuse Elo ratings) -- computed
+    # straight from points scored/allowed.
+    opponent_adjusted_efficiency_enabled: bool = False
+    opponent_adjusted_efficiency_window: int = 10
     preferred_opponent_delta_enabled: bool = False
     preferred_opponent_delta_window_games: int = 20
 

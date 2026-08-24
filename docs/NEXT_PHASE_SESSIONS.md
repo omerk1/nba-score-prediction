@@ -10,6 +10,34 @@ any session. One investigation = one session. `/clear` between them.
 
 ---
 
+## Phase status: CLOSED — 2026-08-24
+
+**Track A, Track B, A4, and Track C are all closed.** Nothing below is a
+queued next step — see the "Phase rollup" section (bottom of this doc) for
+the full accounting. Summary: 2 features adopted out of 9 tested
+(venue-blind overall form, elo momentum; 127→148 features), cumulative CV
+`val_score_mean` Δ−0.0018, all 4 `market_benchmark` metrics improved. The
+last open thread (retrospective opponent-adjusted efficiency, off/def)
+closed as a final REJECT the same day after three diagnostic sessions.
+Representation-enrichment (Track B's core method) is judged low-expected-
+value going forward on this feature set's current record.
+
+A short plain-language summary of this phase also lives in `CLAUDE.md`
+under "Phase history," for anyone who doesn't open this doc at all.
+
+**If picking up model-quality work again**, the live options per the
+rollup are: Track C's shot-quality play-by-play candidate (deferred, not
+rejected — expensive, lower-confidence than it first looks) or the
+untested creative-feature-engineering backlog below (trend/slope,
+distributional shape, asymmetric style-clash, lineup stability, referee
+tendencies) — those are logged candidates, not a queue; pick one up only
+with a deliberate reason, not by default. Do not resume Track A/B/A4/C's
+own per-item session prompts below as if they were still open — they are
+kept in this doc as a historical record of the phase's methodology, not as
+live instructions.
+
+---
+
 ## Status log (every session updates this before stopping)
 
 This doc is not a fixed plan — it's the continuity mechanism between
@@ -323,11 +351,220 @@ lesson into that session if it's ever run. No change to Track C's overall
 standing (still optional/deprioritized, per the original ordering) — this was a
 single-candidate follow-up, not a new track.
 
+### Backlog item 5 follow-up (retrospective opponent-adjusted efficiency, single falsifiable test) — 2026-08-23
+Result: **not adopted (out of scope for this session), but a real, unusually
+robust positive result.** Extended `compute_opponent_adjusted_form_scores`'
+own template from win/loss to `off_eff`/`def_eff` (new
+`opponent_adjusted_off_score`/`opponent_adjusted_def_score` columns,
+148→152 features). Tested all of L5/L10/L20, full 5-fold CV each (per the
+documented window-instability in the closest precedent). All 3 windows beat
+the champion (`b2_elo_momentum`, 1.3803) on mean val_score (L5 1.3788, L10
+1.3790, L20 1.3797) and independently clear the per-fold guardrail: folds
+2/4/5 improve at every window, only fold3 regresses at every window
+(consistently, not noise-sized), fold1 is small/mixed. Full write-up:
+`docs/EXPERIMENTS.md`'s `opponent_adjusted_efficiency_L5`/`_L10`/`_L20` entry.
+Findings: **this does NOT replicate its precedent's window-sign-inversion
+pattern** — `opponent_adjusted_form_score` flipped which folds favored it
+between window=10 and windows 5/15; here direction is identical at all 3
+windows (same folds improve, same fold regresses, magnitude drifts smoothly
+rather than flipping). Also does not replicate the
+`official_pace_poss_new_columns`/`b1_style_and_rolling_decay_weighted`
+pattern (high importance/correlation without CV generalization) — despite a
+real, moderate 0.65–0.76 correlation against the existing `off_eff`/`def_eff`
+columns it's built from (flagged as a risk before CV, comparable in
+magnitude to `official_pace`'s 0.72–0.73 that DID produce a regression),
+this candidate generalized anyway. **So: not a third confirmation of either
+prior instability/failure pattern — this one genuinely behaves differently,
+and that's worth naming as the standing lesson**: neither "passed at one
+window, precedent says check others" nor "correlates with an existing
+feature at official_pace's magnitude" is a reliable predictor of failure on
+its own — both flags were real and correctly raised per this project's own
+discipline, and both turned out not to doom this particular candidate. The
+one reproducible weak point is fold3, which regresses by a consistent
++0.0076 to +0.0108 at all three mechanically-different window widths —
+plausibly a real fold3-specific (2022-23 season val/test window)
+characteristic rather than a construction artifact, flagged for whoever
+investigates fold3 next rather than chased here.
+Logged all 3 rows to `results/sessions/20260823_1525_retro-opp-adjust.csv`
+and to `outputs/experiments_v2.csv` (all 3 beat the champion, per CLAUDE.md's
+leaderboard rule). Config restored to the disabled default
+(`opponent_adjusted_efficiency_enabled: false`) — this session's own scope
+was "report," not "adopt."
+Adjusts later steps: **flags a genuine adoption candidate for a follow-up
+human decision** — stronger and more cross-window-robust than several
+already-adopted candidates by this project's own bar (cf.
+`target_lambda_weight_0.75`'s 4/5-fold win), but not acted on here. If
+adopted: window choice is low-stakes (all 3 close, same direction) unlike
+the win/loss precedent where window choice flipped the verdict; fold3's
+reproducible regression is worth a look either before or alongside
+flipping the flag, not blocking it.
+
+### Backlog item 5 follow-up, fold3 diagnosis — 2026-08-23
+Result: audit only, no numeric/config change (verified via `git status` on
+`configs/config.yaml` before/after — untouched; the treatment run used an
+in-process monkeypatch of `load_config`, not a file edit). Full write-up:
+`docs/EXPERIMENTS.md`'s `opponent_adjusted_efficiency fold3 regression —
+diagnosis` entry.
+Findings: **both plausible "known 2022-23 anomaly" hypotheses (Feb 9 2023
+trade-deadline chaos — Durant/Irving/Westbrook all traded within days; the
+unusually pronounced tank-for-Wembanyama stretch) are directly falsified**,
+not just unconfirmed. Rebuilt fold3 baseline vs. `opponent_adjusted_efficiency
+(L10)` and bucketed per-game error deltas by date: regression is concentrated
+Oct 2022–Jan 2023 (monthly mean Δerror +0.09 to +0.22, worse), and *reverses
+to an improvement* from the Feb 9 deadline through the tank stretch (deadline→
+tank −0.05, tank stretch +0.005, essentially flat/better) — the opposite of
+what either anomaly hypothesis predicts. Found a real, code-verified,
+generalizable mechanism instead: `season_motivation.py`'s
+`compute_team_offense_defense_history` builds its opponent-quality input as a
+**lifetime cumulative average** (no window, no season reset), structurally
+slower-adapting than the already-adopted `opponent_quality_features` family's
+own rolling-window convention — most exposed to stale (pre-off-season)
+information in exactly the Oct–Jan stretch where the regression concentrates.
+Plausible (not confirmed) contributing factor: 2022-23 followed an unusually
+active 2022 offseason trade period (Gobert, Mitchell, Murray, among others),
+which would make this specific staleness bias larger than in other folds'
+opening months.
+Adjusts later steps: **recommendation is HOLD, not adopt as currently
+built, and not reject either** — this is a fixable construction issue, not
+a fundamental flaw or a fold1-style noise artifact. Concrete next step for
+whoever picks this up: swap the cumulative opponent-quality term for
+`_add_opponent_quality_features`'s already-computed windowed
+`opp_off_quality_L{w}`/`opp_def_quality_L{w}` columns, re-test fold3 alone
+first (cheap single-fold falsification check) before a full 5-fold re-sweep.
+Not scheduled as a numbered queue item — logged here for whoever revisits
+`docs/BACKLOG.md` item 5 next.
+
+### Backlog item 5 follow-up, fold3 fix + retest + blast-radius check — 2026-08-23
+Result: **fix implemented, fold3 partially but not cleanly resolved — HOLD,
+not adopt, not reject.** Full write-up: `docs/EXPERIMENTS.md`'s
+`opponent_adjusted_efficiency fold3 fix attempt + blast-radius check` entry.
+Findings: **corrected an imprecision in the prior diagnosis session's own
+"Next" recommendation before implementing it** — that entry literally named
+reusing `opp_off_quality_L{w}`/`opp_def_quality_L{w}` as the fix, but those
+columns measure a team's own recent *schedule strength* (average of the
+last N distinct opponents faced), not "today's specific opponent's own
+current form" — substituting them verbatim would have been a category
+error, not a fix. Implemented the semantically-correct version instead:
+`compute_team_offense_defense_history` keeps its existing self-merge-by-
+opponent-identity structure and only swaps the *inner* per-team quality
+estimator from a lifetime cumulative average to
+`shift(1).rolling(window, min_periods=1).mean()` (`_add_style_features`'s
+own `off_eff_L{w}` construction, reused as a pattern, not as literal
+columns), threaded through the same `window` value already used by the
+outer residual rolling mean. Full suite: 198/198 passing (added 1 new test
+proving the computation is genuinely windowed, not cumulative-under-a-new-
+name). Fold3 retest (read-only, in-process `load_config` monkeypatch, zero
+`configs/config.yaml` writes, verified via `git status`), L10: regression
+shrank from **+0.0076 to +0.0055** (val_score delta vs. baseline) — a real,
+reproducible ~28% reduction (this project's CatBoost training is exactly
+deterministic), but fold3 still regresses. Per this session's own explicit
+instruction, **the full 5-fold × 3-window sweep was NOT re-run** since
+fold3 didn't resolve cleanly.
+Blast-radius check (read-only, whole `src/` tree, part 2 of this session):
+exactly **one** other instance of the same lifetime-cumulative-average
+pattern found — `compute_team_performance_history`'s `win_pct_before`
+(`season_motivation.py`), feeding `compute_opponent_adjusted_form_scores`
+(the win/loss precedent, already not-adopted for a documented
+window-instability: passed at window=10, inverted at 5/15). Flagged, not
+fixed (out of scope this session) — plausible, unconfirmed lead for why
+that earlier signal was window-unstable (the opponent-quality term never
+varied with the outer window in that sweep, only the residual's own
+rolling window did). Two other `cumcount`/`cumsum` usages checked and
+confirmed legitimate, not the same bug (both correctly season-scoped:
+`_build_team_game_log`'s standings computation, `feature_builder.py`'s
+`season_progress`). No hits outside `season_motivation.py`/`feature_builder.py`.
+Adjusts later steps: **not adopted, not scheduled for the full sweep** —
+next actions are both explicitly optional future work, not queued: (a)
+re-run the full 5-fold × 3-window sweep now that the fix is confirmed a
+real, non-trivial, non-no-op change; (b) `win_pct_before`'s own
+cumulative-average fix + a re-test of `opponent_adjusted_form_score`'s
+window-instability, as a separate, independently-scoped follow-up.
+`season_motivation.opponent_adjusted_efficiency_enabled` stays `false`
+(never flipped this session).
+
+### Backlog item 5 follow-up, fold3 fresh diagnosis + full re-sweep + final verdict — 2026-08-24
+Result: **REJECT (final) — thread closed.** Full write-up:
+`docs/EXPERIMENTS.md`'s `opponent_adjusted_efficiency fold3 -- fresh
+diagnosis + full re-sweep + final verdict` entry.
+Findings: two fresh hypotheses for fold3's still-residual regression were
+tested and both falsified (backwards, not just unconfirmed): (1)
+season-boundary window crossing -- forcing a season-reset variant of the
+windowed opponent-quality estimator made fold3 *worse* (Δ+0.0154 vs. the
+fix's own +0.0055), meaning the cross-season history the fix still carries
+is net-stabilizing, not the remaining problem; (2) 2022-offseason
+superteam-trade staleness (Gobert/Mitchell/Murray, flagged but untested in
+the prior session) -- games involving the 5 trade-affected franchises
+showed *smaller* error-delta regression (+0.001) than games that didn't
+(+0.059), the opposite of what the hypothesis predicts. The monthly error
+pattern also shifted, not just shrank, after the fix: Oct/Jan cleaned up to
+flat/improved, but Nov/Dec/Feb are now the worst months (previously Feb
+onward was net-improving) -- diffuse, no single remaining mechanism found.
+**Ran the full 5-fold × 3-window re-sweep with the fix applied**
+(session `20260824_1638_opp-adjust-close`) and found the fix does not
+uniformly help: because it threads one `window` value into both the
+residual's outer rolling mean AND the inner opponent-quality estimator
+(previously only the outer term varied by window), L10 improves as
+designed (fold3 Δ+0.0076→+0.0055, mean edge over champion Δ−0.0014,
+4/5 folds), but **L20 regresses sharply (fold3 Δ+0.0166, nearly triple the
+pre-fix magnitude) and drops from 4/5-folds-improving to 2/5 -- failing
+this project's own per-fold guardrail outright, something it did not do
+before the fix.** L5 also weakens (fold3 Δ+0.0106, worse than pre-fix).
+This reproduces, in the fixed version, the exact window-instability
+failure mode this candidate was originally praised for *not* having
+(`opponent_adjusted_form_score`'s window=10-only pass, inverted at 5/15).
+Adjusts later steps: **closes backlog item 5 -- REJECT, not held.** Two
+independently-sufficient reasons: fold3 survived three diagnostic passes
+across two sessions without a clean resolution (diminishing returns,
+matching the phase rollup's own stated pattern for this vintage of
+finding), and the fix needed to make any progress on fold3 destroys the
+feature's original best-in-phase strength (cross-window robustness) at
+L20 and thins it at L5, leaving only a single working window -- the same
+shape already rejected once for this feature's closest precedent.
+`opponent_adjusted_efficiency_enabled` stays `false` (config diff
+confirmed via `git status` before/after this session's diagnostic runs and
+after the re-sweep script's own restore). Logged L5/L10 (both beat
+champion; L20 doesn't) to `outputs/experiments_v2.csv` as
+`opponent_adjusted_efficiency_{L5,L10}_windowed_fix`, distinct run_names
+from the pre-fix rows already logged under session
+`20260823_1525_retro-opp-adjust`. The windowed-opponent-quality code fix
+itself stays in `season_motivation.py` (still a more correct construction
+than the cumulative version it replaced) even though the feature is
+rejected. `compute_team_performance_history`'s `win_pct_before` (the
+still-unfixed sibling instance of the original cumulative-average pattern)
+remains flagged, not fixed -- lower priority now that this session showed
+windowing that kind of estimator is not a reliable win on its own.
+
+### Phase close — 2026-08-24
+Result: doc-only, no code/config changes. Marked Track A, Track B, A4, and
+Track C as **CLOSED** (headers updated in this doc), added a "Phase
+status: CLOSED" marker directly under the top-of-doc summary (above this
+Status log section) so a future session sees the phase is done without
+reading to the rollup, and added a short plain-language phase-outcome
+summary to `CLAUDE.md` under a new "Phase history" section.
+Findings: nothing new — this session verified the phase's last open
+thread (retrospective opponent-adjusted efficiency) was already closed as
+REJECT in the prior session's log entry above, and that the Phase rollup
+section (bottom of this doc, dated 2026-08-24) already reflects the final
+2-adopted/7-rejected tally. No further investigation performed, per this
+session's own explicit scope.
+Adjusts later steps: **none — this is the terminal entry for the phase.**
+Any future session should read the "Phase status: CLOSED" marker and the
+Phase rollup section first; per that section, the live options are Track
+C's deferred shot-quality play-by-play candidate or the untested
+creative-feature-engineering backlog (both logged, neither queued) —
+picking either up starts a new phase, not a continuation of this one.
+
 (Log entries go here as sessions complete.)
 
 ---
 
-## Track A — Queued model-quality fixes
+## Track A — Queued model-quality fixes — **CLOSED 2026-08-24**
+
+**Closed, all 3 items run.** Outcome: venue-blind overall form adopted
+(+12 features), fingerprint-cache audit found nothing broken,
+`second_of_b2b` confirmed a pure duplicate (not added). See the Phase
+rollup section for the full accounting. The session prompts below are kept
+as a historical record, not live instructions.
 
 Run in order, one Claude Code session each, **stop after each**, full CV +
 market_benchmark after every item. **A4 (VIF trim) moved to run after
@@ -383,7 +620,18 @@ NOT run VIF trim yet — that's now Track A4, scheduled after Track B.
 
 ---
 
-## Track B — Rolling-window representation audit + enrichment (the core of this phase)
+## Track B — Rolling-window representation audit + enrichment (the core of this phase) — **CLOSED 2026-08-24**
+
+**Closed, all priority families from the B0 inventory run, plus the
+opponent-adjusted-efficiency thread that grew out of the creative-feature
+backlog.** Outcome: elo momentum adopted (+9 features); style/rolling
+decay-weighting and elo volatility rejected; the later
+retrospective-opponent-adjustment candidate looked like the phase's
+strongest result before ultimately being rejected too, after 3 diagnostic
+sessions (see Phase rollup). Net: 2 adopted out of 9 candidates tested
+across this whole phase. Representation-enrichment as a method is judged
+low-expected-value going forward on this feature set. Session prompts
+below are kept as a historical record, not live instructions.
 
 **The question:** feature importance tells you the *current* representation
 of a family is valuable. It doesn't tell you the family's full information
@@ -504,7 +752,13 @@ Track C without a separate human decision.
 
 ---
 
-## A4 — VIF L10 trim (moved here, run after Track B settles)
+## A4 — VIF L10 trim (moved here, run after Track B settles) — **CLOSED 2026-08-24**
+
+**Closed, rejected.** Dropping the highest-VIF L10/L20 overall-form block
+was near-flat on the mean but failed the per-fold guardrail (3/5 folds
+regress) — see the Phase rollup section and `docs/EXPERIMENTS.md`'s
+`a4_vif_trim_overall_form` entry. Session prompt below is kept as a
+historical record, not a live instruction.
 
 ```
 Read CLAUDE.md, docs/EXPERIMENTS.md, docs/FEATURE_REPRESENTATION_AUDIT.md.
@@ -523,7 +777,19 @@ STOP after reporting.
 
 ---
 
-## Track C — New orthogonal data (optional, deprioritized — only after A4)
+## Track C — New orthogonal data (optional, deprioritized — only after A4) — **CLOSED 2026-08-24**
+
+**Closed, feasibility assessed for all 3 candidates** (see
+`docs/NEW_DATA_FEASIBILITY.md`): player availability/lineups — closed,
+already covered by adopted/parked work, no genuine remaining gap;
+pace/possession — tested directly (not just audited) and rejected, the
+two new columns were near-duplicates of each other; shot-quality
+play-by-play — the one candidate left **deferred, not rejected**:
+genuinely orthogonal, but expensive (~12,793-game backfill, real
+rate-limit/blocking risk) and lower-confidence than it first appears. This
+is the one live, un-rejected new-data option if model-quality work resumes
+— see the Phase rollup section. Session prompt below is kept as a
+historical record, not a live instruction.
 
 ```
 Read docs/MARKET_EDGE.md, docs/PIPELINE_AUDIT.md, and
@@ -543,7 +809,6 @@ decision, not autonomous next steps. Do not start integrating any source.
 ---
 
 ## Backlog — creative feature engineering (untested)
-
 Candidate ideas only — not scheduled work, no priority order, no session
 scoped for any of these yet. Each was checked against existing scripts/docs
 before being logged here (same discipline as B0's inventory: don't assume
@@ -584,6 +849,36 @@ novelty without checking).
    (`run_style_matchup_cv.py`) is a single symmetric similarity score, not
    a directional clash either. A genuine dimension-level asymmetric
    strength-vs-weakness pairing hasn't been built or tested.
+   **Scoping pass — 2026-08-23 (read-only, confirms novelty + complexity,
+   nothing implemented):** re-verified directly against `_add_matchup_features`
+   (`feature_builder.py:405-439`) and `fingerprint.py`'s `FINGERPRINT_METRICS`
+   — confirmed novelty holds exactly as stated above. Key constraint found:
+   `style_fingerprint_features`' defense side has only **one** quality metric,
+   `defensive_rating` (aggregate points allowed per 100 possessions,
+   `fingerprint.py`) — no shot-type/zone-specific defensive breakdown exists
+   (no "3pt defense allowed," no "paint defense allowed"). So the idea's own
+   framing ("team A's *specific* strength vs. team B's *specific* weakness")
+   only has a real dimension-matched counterpart to pair against for the
+   defensive side in one dimension, not four. Two distinct build scopes fall
+   out of this: (a) **cheap variant, LOW complexity** — pair each of the 4
+   offense-only descriptors (`pace_score`, `three_pt_reliance`,
+   `paint_activity`, `assist_rate`) asymmetrically against the single
+   existing `defensive_rating` (e.g. `home_style_pace_score` ×
+   `away_style_defensive_rating`); pure reuse of already-materialized raw
+   fingerprint columns, no new data or new computation; (b) **full variant,
+   HIGH complexity** — genuinely dimension-matched pairing (3pt-reliance vs.
+   3pt-defense-allowed, paint-activity vs. paint-defense-allowed) requires
+   new defensive metrics that don't exist yet, new construction in
+   `fingerprint.py`, not reuse; not scoped further here. Collinearity risk
+   for the cheap variant: **HIGH** — any product/diff of two raw columns
+   already live in the model (`home_style_X`, `away_style_defensive_rating`)
+   is a near-linear recombination CatBoost's depth-6 trees can already form
+   in one split (the same argument already used against backlog item 4's
+   interaction terms), and risks the same "differences of means, not a
+   distinct representation question" verdict `FEATURE_REPRESENTATION_AUDIT.md`
+   already gave `matchup_features`' existing differentials. Risk not
+   assessed for the full variant — depends on defensive metrics that don't
+   exist yet.
 4. **Rest × elo / schedule-density × style interaction terms** — worth
    pursuing only where the interaction requires domain framing CatBoost's
    own tree splits are unlikely to find on raw columns alone. **Argued
@@ -614,6 +909,63 @@ novelty without checking).
    (e.g. opponent-quality-adjusted `off_eff`/`def_eff`, not just win/loss
    outcome) — a real gap, but one that inherits genuine skepticism from
    this result rather than starting fresh.
+   **Scoping pass — 2026-08-23 (read-only, confirms novelty + complexity,
+   nothing implemented):** re-verified `_add_opponent_quality_features`
+   (`feature_builder.py:300-345`) does exactly what the entry above says —
+   it reports the average quality of opponents faced as its own separate
+   column, and never uses that quality to reweight/adjust the team's own
+   `off_eff`/`def_eff` rolling stats. Novelty for the `off_eff`/`def_eff`
+   variant confirmed clean. Complexity: **LOW-MEDIUM, layers on top cheaply,
+   no rolling-feature restructuring needed.** A direct, already-built
+   template exists to copy: `season_motivation.py`'s
+   `compute_team_performance_history`/`compute_opponent_adjusted_form_scores`
+   already implement this exact pattern (per-game residual — team's own
+   result minus an opponent-conditioned expectation — then
+   `shift(1).rolling(w).mean()` over a team-perspective long frame) for the
+   win/loss-outcome case; swapping the residual definition to
+   `team's own game PTS − opponent's def_eff at that point` (or the
+   symmetric def-side version) reuses the same long-frame plumbing
+   `opponent_quality_features` and `season_motivation.py` both already have
+   working. Scope is comparable to `elo_momentum`'s build (one new function
+   + wiring + a leakage/point-in-time regression test), not a new subsystem.
+   Collinearity risk: **HIGH — the load-bearing finding here.**
+   `docs/EXPERIMENTS.md` §2 already established `opponent_quality_features`
+   is structurally capped by schedule balance (opponent-quality variance is
+   inherently small across an 82-game balanced schedule) — so the adjustment
+   term this idea would add is a small perturbation on top of the team's own
+   raw `off_eff`/`def_eff`, and the resulting "adjusted" rolling stat is
+   expected to correlate very highly with the existing unadjusted
+   `off_eff`/`def_eff_L{w}` columns already in the model — the same
+   near-duplicate mechanism that sank `b1_style_and_rolling_decay_weighted`
+   (0.985-0.998 correlation). A second, independent reason for caution: the
+   only already-tested instance of this exact adjustment mechanism
+   (`opponent_adjusted_form_score`, the win/loss version) passed CV at
+   `window=10` only and **inverted sign** at `window=5`/`window=15` in the
+   robustness sweep (`docs/features/season_motivation_log.md` §10,
+   lines 274-305) — a documented instability in the mechanism itself, not
+   just a generic collinearity worry. If built, also check correlation
+   between the new columns' own windows (L5/L10/L20 adjusted vs. each
+   other) before any CV run, per the `official_pace_poss_new_columns`
+   lesson (collinearity among new columns, not just against existing ones).
+
+**Recommendation (2026-08-23 scoping pass, read-only, nothing built):**
+build **retrospective opponent-adjustment (item 5)** first, if either is
+picked up. Both ideas carry real, specific collinearity risk (not generic
+caution) — but item 5 has a direct, already-working code template to copy
+(`season_motivation.py`'s own opponent-adjustment functions) and a cleaner,
+undiluted novelty claim, vs. item 3's only low-complexity path (the cheap
+variant, pairing offense descriptors against the single existing
+`defensive_rating`) being a weak realization of the idea's own "specific
+strength vs. specific weakness" framing — its genuinely novel, dimension-
+matched version needs new defensive metrics that don't exist yet, pushing
+that variant to HIGH complexity. Given the documented window-sensitivity
+of the closest tested precedent (§10's window=10-only pass, inverted at
+5/15), scope item 5 as a single, cheap-to-falsify test — reuse
+`season_motivation_log.md`'s own robustness-sweep discipline (test more
+than one window before treating any single-window pass as real) and run
+the pre-CV correlation check against existing `off_eff`/`def_eff_L{w}`
+first, per the `official_pace`/B1 precedent, before committing to a full
+5-fold CV run.
 6. **Lineup stability/continuity as its own signal**, separate from average
    roster quality — check first whether existing player/on-off-split work
    already covers this angle. **Checked, not covered.**
@@ -665,3 +1017,127 @@ moves after B so collinearity gets trimmed once, on the final
 representation, not twice. C stays last and optional — it's a bet on new
 data mattering more than better-represented data you already have, worth
 revisiting only if B genuinely runs dry.
+
+---
+
+## Phase rollup — 2026-08-24
+
+Cumulative, doc-only summary of everything since the original pre-Track-A
+baseline. No code changes this session.
+
+**Per-track outcome:**
+- **Track A** (fingerprint/parity audit, venue-blind form, `second_of_b2b`)
+  — **adopted (partial)**. Venue-blind overall form closed a real
+  representation gap (4/5 folds improve, always-on, +12 features).
+  Fingerprint-cache staleness/parity check found nothing broken (audit
+  only, no fix needed). `second_of_b2b` was confirmed a pure duplicate of
+  the existing rest-day features — not added.
+- **Track B, style/rolling decay-weighting** — **rejected**.
+  `style_features` decay-weighting was a clean null (high in-sample
+  importance, zero CV generalization — near-duplicate of existing mean
+  columns, r=0.985-0.998); `rolling_features` decay-weighting was a real,
+  small, consistently-signed regression (4/5 folds).
+- **Track B, elo momentum** — **adopted**. Real, low-correlation
+  (r=0.20-0.36) new signal, 3/5 folds improve, no catastrophic
+  regressions, +9 features, always-on.
+- **Track B, elo volatility** — **rejected**. Not collinear with anything
+  existing, but too noisy to generalize (std over only 2-20 delta values);
+  regression driven substantially by one large single-fold miss.
+- **A4, VIF trim** — **rejected**. Dropping the highest-VIF L10/L20
+  overall-form block was near-flat on the mean but failed the per-fold
+  guardrail (3/5 folds regress).
+- **Track C, player availability/lineups** — **closed**. Injury status is
+  already a live, adopted pipeline; on/off-splits for missing players was
+  already built, CV'd, and parked (small/mixed); confirmed starting
+  lineups has a genuine sourcing/timing gap (public ~30min pre-tip vs.
+  this pipeline's same-day/nightly cadence) and low expected lift over the
+  already-tested on/off-splits result.
+- **Track C, pace/possession** — **rejected**. Official PACE/POSS was
+  tested directly, not just audited — moderate correlation to the
+  existing `pace_score` proxy (r=0.72-0.73) did not predict the actual
+  failure mode; the two new columns turned out to be near-duplicates of
+  *each other* (r=0.976), and CV regressed on 4/5 folds.
+- **Track C, shot-quality play-by-play** — **deferred**. The one
+  genuinely orthogonal candidate assessed, but expensive (~12,793-game
+  backfill, real rate-limit/blocking risk) and lower-confidence than it
+  first looks — raw shot-zone-mix risks near-duplicating
+  `three_pt_reliance`/`paint_activity`, and a real shot-*quality* signal
+  needs its own small modeling subproject, since nba_api's public
+  endpoints don't expose defender-proximity data.
+- **Retrospective opponent-adjustment (off/def efficiency)** — **rejected
+  (final)**. Originally the single largest, most cross-window-consistent
+  improvement found anywhere in this phase (all 3 windows beat champion,
+  cleared the per-fold guardrail independently). Diagnosed fold3's
+  regression to a real, generalizable construction bug (a
+  lifetime-cumulative, not windowed, opponent-quality estimator) and fixed
+  it (~28% smaller fold3 regression), but two further fresh hypotheses for
+  the remainder (season-boundary window crossing, 2022-offseason
+  superteam-trade staleness) were both tested and falsified, and the full
+  re-sweep with the fix applied showed the fix itself breaks the
+  candidate's original cross-window robustness — L20 drops from
+  4/5-folds-improving to 2/5 (fails the guardrail), L5 thins, only L10
+  (the window the fix was tuned on) still clears it. Closed as REJECT, not
+  held — fold3 never resolved cleanly across 3 diagnostic passes, and the
+  fix reproduces the exact single-window-only failure mode this candidate
+  was originally praised for avoiding. The win/loss precedent's
+  likely-related bug (`win_pct_before`, same cumulative-average pattern)
+  was flagged, not fixed — now lower-priority given this result.
+
+**Cumulative numbers, original baseline → current live feature set:**
+- Feature count: 127 → 148. Two permanent additions account for all of
+  it: +12 (venue-blind overall form, Track A), +9 (elo momentum, Track B).
+  Everything else tested this phase was rejected or an audit with no
+  column-count change.
+- Full 5-fold CV `val_score_mean`: 1.3821 → 1.3803, **Δ−0.0018**
+  (val_score is minimized, so this is an improvement).
+- `market_benchmark` (fold5, 127-feature baseline → current 148-feature
+  state): diff_mae 11.487→11.430, total_mae 15.403→15.357, win_acc
+  0.6738→0.6795, brier 0.2093→0.2078 — **all 4 metrics improve**.
+- Model-vs-Polymarket gap (same fold5 window; Polymarket's own numbers are
+  fixed — 10.812 diff_mae / 14.683 total_mae / 0.6943 win_acc / 0.1943
+  brier, per the 2026-08-17 `docs/MARKET_EDGE.md` finding): the model
+  still trails the market on all 4 metrics, but the gap narrowed modestly
+  over the phase — diff_mae gap 0.675→0.618, total_mae gap 0.720→0.674,
+  win_acc gap 0.0205→0.0148, brier gap 0.0150→0.0135 (roughly 8-12%
+  narrower per metric). This phase's CV gains are real but nowhere near
+  closing the market gap `MARKET_EDGE.md` originally found.
+- Of the 9 concrete candidates that actually went through a CV ablation
+  this phase (excluding pure audits/feasibility write-ups): **2 adopted
+  (22%)** — venue-blind overall form, elo momentum; **7 rejected (78%)**
+  — `second_of_b2b`, style-feature decay-weighting, rolling-feature
+  decay-weighting, elo volatility, the VIF trim, official pace/possession,
+  opponent-adjusted efficiency (closed 2026-08-24 after the fold3 thread
+  ran its course — see above). Stated plainly, same standard as the Track
+  B rollup: a real, adoption-bar-clearing cumulative result, but a modest
+  one — smaller than this project's earlier clear wins
+  (`target_lambda_weight_0.75`, `target_formulation_diff_total`), built
+  from 2 successful ideas out of 9 tested.
+
+**Honest read:** representation-enrichment on the existing feature
+families — the actual method Track B was built around (decay-weighting,
+volatility, VIF-driven trims, a cheap pace/possession swap-in) — is
+running dry on this feature set. 7 of 9 tested candidates failed outright,
+and three of those failures (B1's near-duplicate collinearity,
+pace/possession's collinearity *between* its own two new columns, and
+opponent-adjusted efficiency's fold3 regression) needed a dedicated
+diagnostic session — in opponent-adjusted efficiency's case, three across
+two sessions — to fully explain rather than failing cleanly on the first
+pass. That density of "looked promising, took real work to explain, still
+not fully clean" outcomes is itself the signal: each remaining idea in
+this vein got more expensive to evaluate for a shrinking hit rate, and the
+one candidate that looked like an exception (opponent-adjusted efficiency,
+the single largest and most cross-window-robust improvement found
+anywhere in this phase, larger mean CV delta than elo momentum) ultimately
+followed the same pattern once fully chased down — closed 2026-08-24 as a
+final REJECT after three diagnostic passes, not an open loose end.
+
+With that thread now closed, this phase's representation-enrichment
+method (Track B's core approach) has no remaining open candidates —
+2 adopted (venue-blind overall form, elo momentum) out of 9 tested is the
+final tally. Whoever picks this phase back up should treat further generic
+representation search on this feature set as low-expected-value based on
+this phase's own record, and look toward Track C's new-orthogonal-data
+candidates (deprioritized, per the original ordering) or a different class
+of idea entirely (`docs/NEXT_PHASE_SESSIONS.md`'s creative-feature-
+engineering backlog, items 2/3/6/7 remain genuinely untested) if further
+model-quality work on this feature set is wanted.

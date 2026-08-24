@@ -22,6 +22,25 @@ window value, inverted at neighboring ones):
 - `compute_opponent_adjusted_form_scores`: rolling opponent-strength-weighted
   record.
 
+Retrospective opponent-adjusted efficiency (docs/NEXT_PHASE_SESSIONS.md
+backlog item 5, distinct from `opponent_quality_features` in
+`feature_builder.py`, which reports the quality of the *upcoming* opponent
+rather than adjusting a team's own already-played rolling stats) -- direct
+extension of `compute_opponent_adjusted_form_scores`' own template
+(per-game signed residual vs. opponent's pre-game quality, then a
+`shift(1)` rolling mean of that residual) from win/loss to points
+scored/allowed:
+- `compute_team_offense_defense_history`: per-team-per-game points
+  scored/allowed plus each team's own rolling (windowed) pre-game
+  offensive/defensive average -- the `off_eff`/`def_eff` analogue of
+  `_add_style_features`' `off_eff_L{w}`/`def_eff_L{w}` rather than
+  `compute_team_performance_history`'s still-cumulative `win_pct_before`
+  (fixed post-fold3-diagnosis, see the function's own docstring).
+- `compute_opponent_adjusted_efficiency_scores`: rolling mean of the signed
+  offensive/defensive residual (points scored vs. what this opponent's
+  defense typically allows; points allowed vs. what this opponent's offense
+  typically scores) over each team's previous `window` games.
+
 Seeding-target signal (log section 11, adopted):
 - `compute_preferred_opponent_delta_scores`: how much a team's Round 1
   opponent would change in strength if its own seed shifted by one spot --
@@ -103,18 +122,22 @@ def _build_team_game_log(games_df: pd.DataFrame) -> pd.DataFrame:
     everywhere else in feature_builder.py (rolling stats via shift(1), Elo's
     pre-game rating, on/off-splits' `game_date - 1 day` lookup key).
     """
-    home = pd.DataFrame({
-        "season_id": games_df["SEASON_ID"].values,
-        "game_date": games_df["GAME_DATE"].values,
-        "team_id": games_df["HOME_TEAM_ID"].values,
-        "win": games_df["HOME_TEAM_WINS"].astype(bool).values,
-    })
-    away = pd.DataFrame({
-        "season_id": games_df["SEASON_ID"].values,
-        "game_date": games_df["GAME_DATE"].values,
-        "team_id": games_df["AWAY_TEAM_ID"].values,
-        "win": ~games_df["HOME_TEAM_WINS"].astype(bool).values,
-    })
+    home = pd.DataFrame(
+        {
+            "season_id": games_df["SEASON_ID"].values,
+            "game_date": games_df["GAME_DATE"].values,
+            "team_id": games_df["HOME_TEAM_ID"].values,
+            "win": games_df["HOME_TEAM_WINS"].astype(bool).values,
+        }
+    )
+    away = pd.DataFrame(
+        {
+            "season_id": games_df["SEASON_ID"].values,
+            "game_date": games_df["GAME_DATE"].values,
+            "team_id": games_df["AWAY_TEAM_ID"].values,
+            "win": ~games_df["HOME_TEAM_WINS"].astype(bool).values,
+        }
+    )
     team_games = pd.concat([home, away], ignore_index=True)
     team_games["game_date"] = pd.to_datetime(team_games["game_date"]).dt.normalize()
     team_games = team_games.sort_values(["season_id", "team_id", "game_date"]).reset_index(drop=True)
@@ -154,15 +177,21 @@ def _standings_panel(team_games: pd.DataFrame) -> pd.DataFrame:
                 columns={"game_date": "as_of"}
             )
             merged = pd.merge_asof(
-                left, right, left_on="lookup_date", right_on="as_of",
-                direction="backward", allow_exact_matches=True,
+                left,
+                right,
+                left_on="lookup_date",
+                right_on="as_of",
+                direction="backward",
+                allow_exact_matches=True,
             )
             merged["wins"] = merged["wins_after"].fillna(0).astype(int)
             merged["losses"] = merged["losses_after"].fillna(0).astype(int)
             merged["games_remaining"] = merged["games_remaining_after"].fillna(total_games).astype(int)
             merged["season_id"] = season_id
             merged["team_id"] = team_id
-            panels.append(merged[["season_id", "team_id", "snapshot_date", "wins", "losses", "games_remaining"]])
+            panels.append(
+                merged[["season_id", "team_id", "snapshot_date", "wins", "losses", "games_remaining"]]
+            )
 
     return pd.concat(panels, ignore_index=True)
 
@@ -203,8 +232,12 @@ def _pressure_from_seed(panel: pd.DataFrame, grp_cols: list[str], seed: int) -> 
     return (1 - gb_from_line.abs() / (panel["games_remaining"] + 1)).clip(0.0, 1.0)
 
 
-def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, direct_playoff_seed: int = None,
-                               direct_playoff_weight: float = 0.5) -> pd.DataFrame:
+def compute_standings_metrics(
+    games_df: pd.DataFrame,
+    playoff_line_seed: int,
+    direct_playoff_seed: int = None,
+    direct_playoff_weight: float = 0.5,
+) -> pd.DataFrame:
     """Returns (season_id, team_id, snapshot_date) -> pressure_raw,
     games_to_clinch_ceiling, games_to_clinch_floor. See
     docs/SEASON_MOTIVATION_DECISIONS.md sections 2a/3 for the formulas.
@@ -238,13 +271,19 @@ def compute_standings_metrics(games_df: pd.DataFrame, playoff_line_seed: int, di
     min_final_wins = panel["wins"]
     panel["games_to_clinch_ceiling"] = (max_final_wins - panel["above_wins"]).clip(lower=0).fillna(0.0)
     panel["games_to_clinch_floor"] = (
-        panel["below_wins"] + panel["below_games_remaining"] - min_final_wins
-    ).clip(lower=0).fillna(0.0)
+        (panel["below_wins"] + panel["below_games_remaining"] - min_final_wins).clip(lower=0).fillna(0.0)
+    )
 
-    return panel[[
-        "season_id", "team_id", "snapshot_date",
-        "pressure_raw", "games_to_clinch_ceiling", "games_to_clinch_floor",
-    ]]
+    return panel[
+        [
+            "season_id",
+            "team_id",
+            "snapshot_date",
+            "pressure_raw",
+            "games_to_clinch_ceiling",
+            "games_to_clinch_floor",
+        ]
+    ]
 
 
 def _player_importance_score(rows: pd.DataFrame, weights) -> pd.Series:
@@ -421,8 +460,11 @@ def compute_recent_minutes_trend_scores(
             prior = prior_pool.sort_values("as_of_date").groupby("player_id").tail(1)
 
             merged = current[["player_id", "importance", "minutes_per_game"]].merge(
-                prior[["player_id", "minutes_per_game"]].rename(columns={"minutes_per_game": "prior_minutes"}),
-                on="player_id", how="inner",  # only players with a prior-enough snapshot to compare against
+                prior[["player_id", "minutes_per_game"]].rename(
+                    columns={"minutes_per_game": "prior_minutes"}
+                ),
+                on="player_id",
+                how="inner",  # only players with a prior-enough snapshot to compare against
             )
             if merged.empty:
                 results.append((team_id, row.game_date, 0.0))
@@ -430,7 +472,9 @@ def compute_recent_minutes_trend_scores(
 
             drop = np.where(
                 merged["prior_minutes"] > 0,
-                ((merged["prior_minutes"] - merged["minutes_per_game"]) / merged["prior_minutes"]).clip(0.0, 1.0),
+                ((merged["prior_minutes"] - merged["minutes_per_game"]) / merged["prior_minutes"]).clip(
+                    0.0, 1.0
+                ),
                 0.0,
             )
             weighted_drop = (merged["importance"] * drop).sum()
@@ -451,14 +495,17 @@ def _fit_elo_margin_scale(games_df: pd.DataFrame, elo_ratings: pd.DataFrame, hom
     """
     merged = games_df.merge(elo_ratings, on="GAME_ID", how="inner")
     elo_diff = merged["home_team_elo"] + home_advantage - merged["away_team_elo"]
-    denom = (elo_diff ** 2).sum()
+    denom = (elo_diff**2).sum()
     if denom <= 0:
         return 0.0
     return float((elo_diff * merged["POINT_DIFF"]).sum() / denom)
 
 
 def compute_team_performance_history(
-    games_df: pd.DataFrame, elo_ratings: pd.DataFrame, home_advantage: float, elo_margin_scale: float,
+    games_df: pd.DataFrame,
+    elo_ratings: pd.DataFrame,
+    home_advantage: float,
+    elo_margin_scale: float,
 ) -> pd.DataFrame:
     """Long-format per-team-per-game log of actual vs. Elo-expected margin
     and opponent-adjusted outcome, from each team's own perspective -- shared
@@ -470,26 +517,46 @@ def compute_team_performance_history(
     expected), `win`, `opponent_win_pct` (opponent's own cumulative win% pre-game,
     leakage-safe), `signed_opponent_adjusted_score` (`opponent_win_pct` for a
     win, `-(1 - opponent_win_pct)` for a loss).
+
+    **`win_pct_before`/`opponent_win_pct` are still a lifetime cumulative
+    average (`cumsum`/`cumcount`, no window, no season reset)** -- the same
+    pattern `compute_team_offense_defense_history` had until the fold3
+    diagnosis fix (see that function's docstring, `docs/EXPERIMENTS.md`).
+    Flagged, not fixed here (out of scope -- read-only blast-radius check
+    only): this feeds `compute_opponent_adjusted_form_scores`
+    (`opponent_adjusted_form_enabled`, already not-adopted for a documented
+    window-instability -- passed CV at window=10, inverted sign at
+    windows 5/15, `docs/features/season_motivation_log.md` section 10). A
+    lifetime-cumulative opponent-quality term that never changes with the
+    outer window, while only the outer rolling window varies across that
+    5/10/15 sweep, is a plausible contributing mechanism for that
+    instability -- not confirmed, not investigated further here.
+    `compute_performance_vs_expectation_scores` does not use `win_pct_before`
+    (it's Elo-residual-based), so it's unaffected.
     """
     merged = games_df.merge(elo_ratings, on="GAME_ID", how="left")
-    home = pd.DataFrame({
-        "game_id": merged["GAME_ID"].values,
-        "game_date": merged["GAME_DATE"].values,
-        "team_id": merged["HOME_TEAM_ID"].values,
-        "opponent_id": merged["AWAY_TEAM_ID"].values,
-        "actual_margin": merged["POINT_DIFF"].values,
-        "elo_diff": (merged["home_team_elo"] + home_advantage - merged["away_team_elo"]).values,
-        "win": (merged["POINT_DIFF"] > 0).values,
-    })
-    away = pd.DataFrame({
-        "game_id": merged["GAME_ID"].values,
-        "game_date": merged["GAME_DATE"].values,
-        "team_id": merged["AWAY_TEAM_ID"].values,
-        "opponent_id": merged["HOME_TEAM_ID"].values,
-        "actual_margin": (-merged["POINT_DIFF"]).values,
-        "elo_diff": (merged["away_team_elo"] - (merged["home_team_elo"] + home_advantage)).values,
-        "win": (merged["POINT_DIFF"] < 0).values,
-    })
+    home = pd.DataFrame(
+        {
+            "game_id": merged["GAME_ID"].values,
+            "game_date": merged["GAME_DATE"].values,
+            "team_id": merged["HOME_TEAM_ID"].values,
+            "opponent_id": merged["AWAY_TEAM_ID"].values,
+            "actual_margin": merged["POINT_DIFF"].values,
+            "elo_diff": (merged["home_team_elo"] + home_advantage - merged["away_team_elo"]).values,
+            "win": (merged["POINT_DIFF"] > 0).values,
+        }
+    )
+    away = pd.DataFrame(
+        {
+            "game_id": merged["GAME_ID"].values,
+            "game_date": merged["GAME_DATE"].values,
+            "team_id": merged["AWAY_TEAM_ID"].values,
+            "opponent_id": merged["HOME_TEAM_ID"].values,
+            "actual_margin": (-merged["POINT_DIFF"]).values,
+            "elo_diff": (merged["away_team_elo"] - (merged["home_team_elo"] + home_advantage)).values,
+            "win": (merged["POINT_DIFF"] < 0).values,
+        }
+    )
     team_games = pd.concat([home, away], ignore_index=True)
     team_games["game_date"] = pd.to_datetime(team_games["game_date"]).dt.normalize()
     team_games["expected_margin"] = team_games["elo_diff"] * elo_margin_scale
@@ -507,7 +574,9 @@ def compute_team_performance_history(
     team_games = team_games.merge(opponent_pct, on=["game_id", "opponent_id"], how="left")
 
     team_games["signed_opponent_adjusted_score"] = np.where(
-        team_games["win"], team_games["opponent_win_pct"], -(1 - team_games["opponent_win_pct"]),
+        team_games["win"],
+        team_games["opponent_win_pct"],
+        -(1 - team_games["opponent_win_pct"]),
     )
     return team_games
 
@@ -525,11 +594,13 @@ def compute_performance_vs_expectation_scores(team_games: pd.DataFrame, window: 
     )
     residual_std = team_games["performance_residual"].std() or 1.0
     score = (rolling_mean / residual_std).fillna(0.0)
-    return pd.DataFrame({
-        "team_id": team_games["team_id"].values,
-        "game_date": team_games["game_date"].values,
-        "performance_vs_expectation_score": score.values,
-    })
+    return pd.DataFrame(
+        {
+            "team_id": team_games["team_id"].values,
+            "game_date": team_games["game_date"].values,
+            "performance_vs_expectation_score": score.values,
+        }
+    )
 
 
 def compute_opponent_adjusted_form_scores(team_games: pd.DataFrame, window: int) -> pd.DataFrame:
@@ -543,14 +614,136 @@ def compute_opponent_adjusted_form_scores(team_games: pd.DataFrame, window: int)
     rolling_mean = team_games.groupby("team_id")["signed_opponent_adjusted_score"].transform(
         lambda x: x.shift(1).rolling(window, min_periods=1).mean()
     )
-    return pd.DataFrame({
-        "team_id": team_games["team_id"].values,
-        "game_date": team_games["game_date"].values,
-        "opponent_adjusted_form_score": rolling_mean.fillna(0.0).values,
-    })
+    return pd.DataFrame(
+        {
+            "team_id": team_games["team_id"].values,
+            "game_date": team_games["game_date"].values,
+            "opponent_adjusted_form_score": rolling_mean.fillna(0.0).values,
+        }
+    )
 
 
-def compute_preferred_opponent_delta_scores(games_df: pd.DataFrame, games_remaining_window: int) -> pd.DataFrame:
+def compute_team_offense_defense_history(games_df: pd.DataFrame, window: int) -> pd.DataFrame:
+    """Team-perspective long-format per-team-per-game log of points scored/
+    allowed plus each team's own rolling (windowed, strictly pre-game)
+    offensive/defensive average -- shared input for
+    `compute_opponent_adjusted_efficiency_scores`. Same `shift(1).rolling(w,
+    min_periods=1).mean()` construction as `_add_style_features`'
+    `off_eff_L{w}`/`def_eff_L{w}` (`feature_builder.py`), applied to this
+    function's own long-format team-perspective frame, then a self-merge on
+    (game_id, opponent_id) to pull the SPECIFIC opponent's own pre-game
+    windowed average onto each row.
+
+    Fixed from an original lifetime-cumulative-average version (`cumsum`/
+    `cumcount`, no window) after `docs/EXPERIMENTS.md`'s fold3 diagnosis: a
+    cumulative average is the slowest-adapting team-quality estimator
+    possible -- most exposed to stale pre-off-season roster information
+    early in a season, which is exactly where fold3's regression
+    concentrated. `window` reuses the SAME value already passed to the
+    outer `compute_opponent_adjusted_efficiency_scores` call -- one rolling
+    window for both the opponent-identity quality estimate and the
+    residual's own rolling mean, not two independently tunable knobs. Also
+    now matches `opponent_quality_features`' own already-adopted windowed
+    convention (`feature_builder.py`'s `_add_opponent_quality_features`),
+    though that family measures a different thing (a team's *own* recent
+    schedule strength, averaged across its last N distinct opponents) from
+    this one (one specific opponent's own recent form, self-merged by
+    identity) -- reusing its exact columns directly would have been a
+    category error, not a fix; only the *windowing pattern* transfers.
+
+    **Known un-fixed instance of the same original bug, out of scope for
+    this fix**: `compute_team_performance_history`'s `win_pct_before` (this
+    module, feeds `compute_opponent_adjusted_form_scores`, the not-adopted
+    win/loss precedent) is still a lifetime cumulative average today -- see
+    that function's own docstring.
+
+    A team's first game before any prior games exist has no opponent-quality
+    to reference -- left NaN rather than invented from a global average
+    (which would pull in games from later in the window this frame covers).
+    `compute_opponent_adjusted_efficiency_scores`' own rolling mean skips
+    NaNs within its window the same way `min_periods=1` already does for a
+    short history elsewhere in this codebase, so this doesn't produce a hole
+    in the final feature -- only in the one-game-old intermediate residual
+    for a genuinely brand-new team.
+    """
+    home = pd.DataFrame(
+        {
+            "game_id": games_df["GAME_ID"].values,
+            "game_date": games_df["GAME_DATE"].values,
+            "team_id": games_df["HOME_TEAM_ID"].values,
+            "opponent_id": games_df["AWAY_TEAM_ID"].values,
+            "team_pts": games_df["PTS_home"].values,
+            "opp_pts": games_df["PTS_away"].values,
+        }
+    )
+    away = pd.DataFrame(
+        {
+            "game_id": games_df["GAME_ID"].values,
+            "game_date": games_df["GAME_DATE"].values,
+            "team_id": games_df["AWAY_TEAM_ID"].values,
+            "opponent_id": games_df["HOME_TEAM_ID"].values,
+            "team_pts": games_df["PTS_away"].values,
+            "opp_pts": games_df["PTS_home"].values,
+        }
+    )
+    team_games = pd.concat([home, away], ignore_index=True)
+    team_games["game_date"] = pd.to_datetime(team_games["game_date"]).dt.normalize()
+    team_games = team_games.sort_values(["team_id", "game_date"]).reset_index(drop=True)
+
+    grp = team_games.groupby("team_id")
+    team_games["off_eff_before"] = grp["team_pts"].transform(
+        lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+    )
+    team_games["def_eff_before"] = grp["opp_pts"].transform(
+        lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+    )
+
+    opponent_quality = team_games[["game_id", "team_id", "off_eff_before", "def_eff_before"]].rename(
+        columns={
+            "team_id": "opponent_id",
+            "off_eff_before": "opponent_off_quality",
+            "def_eff_before": "opponent_def_quality",
+        }
+    )
+    team_games = team_games.merge(opponent_quality, on=["game_id", "opponent_id"], how="left")
+
+    # Positive = scored more than this opponent's defense typically allows.
+    team_games["signed_offensive_adjusted_score"] = (
+        team_games["team_pts"] - team_games["opponent_def_quality"]
+    )
+    # Positive = held this opponent below what their offense typically scores.
+    team_games["signed_defensive_adjusted_score"] = team_games["opponent_off_quality"] - team_games["opp_pts"]
+    return team_games
+
+
+def compute_opponent_adjusted_efficiency_scores(team_games: pd.DataFrame, window: int) -> pd.DataFrame:
+    """Returns (team_id, game_date) -> opponent_adjusted_off_score/
+    opponent_adjusted_def_score: rolling mean of each signed adjusted-
+    efficiency residual (see `compute_team_offense_defense_history`) over
+    each team's previous `window` games (`shift(1)`, same pre-game
+    convention as `compute_opponent_adjusted_form_scores`). High off score =
+    scoring more than opponents' defenses typically allow; high def score =
+    holding opponents below what their offense typically produces."""
+    team_games = team_games.sort_values(["team_id", "game_date"])
+    off_rolling = team_games.groupby("team_id")["signed_offensive_adjusted_score"].transform(
+        lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+    )
+    def_rolling = team_games.groupby("team_id")["signed_defensive_adjusted_score"].transform(
+        lambda x: x.shift(1).rolling(window, min_periods=1).mean()
+    )
+    return pd.DataFrame(
+        {
+            "team_id": team_games["team_id"].values,
+            "game_date": team_games["game_date"].values,
+            "opponent_adjusted_off_score": off_rolling.fillna(0.0).values,
+            "opponent_adjusted_def_score": def_rolling.fillna(0.0).values,
+        }
+    )
+
+
+def compute_preferred_opponent_delta_scores(
+    games_df: pd.DataFrame, games_remaining_window: int
+) -> pd.DataFrame:
     """Returns (season_id, team_id, snapshot_date) -> preferred_opponent_delta.
 
     The standard NBA bracket pairs conference seed s against seed (9 - s) in
@@ -612,9 +805,11 @@ def compute_preferred_opponent_delta_scores(games_df: pd.DataFrame, games_remain
     late_season = panel["games_remaining"] <= games_remaining_window
     delta = np.where(in_playoff_seed & late_season, delta, 0.0)
 
-    return pd.DataFrame({
-        "season_id": panel["season_id"].values,
-        "team_id": panel["team_id"].values,
-        "snapshot_date": panel["snapshot_date"].values,
-        "preferred_opponent_delta": delta,
-    })
+    return pd.DataFrame(
+        {
+            "season_id": panel["season_id"].values,
+            "team_id": panel["team_id"].values,
+            "snapshot_date": panel["snapshot_date"].values,
+            "preferred_opponent_delta": delta,
+        }
+    )

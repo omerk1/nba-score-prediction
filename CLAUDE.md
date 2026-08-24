@@ -70,3 +70,34 @@ Keep `.md` docs and logs concise — state findings and numbers tersely, don't n
 - Cheap screening runs may use the last 3 folds only; full CV required before an experiment is promoted or declared a new best.
 - Failed twice → log as failed, move on.
 - Preprocessing changes go through the central pipeline only, no per-feature ad hoc handling.
+
+## Phase history
+
+**Rolling-window representation-enrichment phase — closed 2026-08-24**
+(full detail: `docs/NEXT_PHASE_SESSIONS.md`, marked CLOSED at the top of
+that doc). Went through the existing feature families (rolling box-score
+aggregates, Elo, opponent quality, a retrospective opponent-adjustment
+idea) looking for richer representations than the current mean/point-in-
+time values capture. Result: 2 features adopted out of 9 tested
+candidates — a venue-blind overall-form feature and an Elo momentum
+feature — taking the live feature set from 127 to 148 columns. Cumulative
+full-CV `val_score_mean` improved Δ−0.0018, and all 4 `market_benchmark`
+metrics improved; the model-vs-Polymarket gap narrowed roughly 8-12% per
+metric but did not close. The method itself (testing richer
+representations of already-existing families) is judged low-expected-
+value going forward on this feature set: a 22% hit rate, and several of
+the rejected candidates — including the one that initially looked like
+the phase's strongest result — needed multiple dedicated diagnostic
+sessions before they could be correctly rejected rather than failing
+cleanly on a first pass.
+
+Two things from this phase are logged but not scheduled, for whoever picks
+model-quality work back up: a set of scoped-but-untested creative feature
+ideas (explicit trend/slope over rolling windows, distributional-shape
+features, asymmetric style-clash features, lineup-stability/continuity,
+referee-tendency data — `docs/NEXT_PHASE_SESSIONS.md`'s backlog section)
+that are candidates to consider, not a queue to work through by default;
+and one deferred (not rejected) new-data option, play-by-play
+shot-quality data, flagged as genuinely orthogonal signal but expensive
+(large per-game backfill, real rate-limit/blocking risk) and
+lower-confidence than it first appears (`docs/NEW_DATA_FEASIBILITY.md`).
