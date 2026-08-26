@@ -1,5 +1,10 @@
 # Project Backlog
 
+This is the original, pre-CV-harness feature backlog (Phase 1/2/3, groups A/B).
+For the current research phase's backlog, decision log, and creative-feature-
+engineering candidates, see `docs/NEXT_PHASE_SESSIONS.md` (its own "Backlog"
+section) and `docs/EXPERIMENTS.md`.
+
 ## Phase 1 Status (Complete)
 
 ### Group A — Independent Baseline Features (All Complete, Ready to Merge)
