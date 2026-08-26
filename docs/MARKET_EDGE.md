@@ -108,6 +108,31 @@ Disagreement analysis: on games where the model and market disagree, the market 
 
 ---
 
+## 2026-08-26 — Recheck: does the market-edge verdict still hold on the fully-updated model?
+
+**Question**: the original verdict above (2026-08-17, "no accessible pre-game edge") predates this project's rolling-window representation-enrichment phase (127→148 live features: venue-blind overall form and elo momentum adopted, 7 other candidates tested and rejected; phase closed 2026-08-24, `CLAUDE.md`'s "Phase history"). Does the verdict still hold on the current model, or has anything shifted enough to call one of the four already-closed edge-mechanism findings (accuracy/disagreement, informational timing, calibration, market thinness) into question?
+
+**Method**: re-ran `scripts/market_benchmark.py` exactly as the original entries did — same fold (fold5), same test window (2025-10-21→2026-04-12), same Polymarket join (`data/polymarket_prices/games.csv`), same 1,225 held-out games / 1,225 joined. The market side is therefore the byte-identical population used in every entry above; only the model side changed (fresh train on the current 148-feature pipeline). Per this session's scope, a recheck of an existing closed finding, not a new investigation — the underlying five-mechanism suite was not re-run; this reuses Q1-Q6's existing output for a same-metric, same-framing comparison.
+
+**Finding — headline verdict unchanged and the gap shape replicates closely; the one positive result did not hold up**:
+
+| Metric | Model (2026-08-17) | Model (now) | Market (unchanged) |
+|---|---:|---:|---:|
+| Diff MAE | 11.49 | 11.43 | 10.81 |
+| Total MAE | 15.40 | 15.36 | 14.68 |
+| Win accuracy | 67.4% | 68.0% | 69.4% |
+| Brier score | 0.209 | 0.208 | 0.194 |
+
+- **Model still trails the market on all four metrics, exactly as before.** Every gap narrowed slightly (diff MAE gap 0.68→0.62, total MAE 0.72→0.67, win-acc 2.0pp→1.5pp, Brier 0.015→0.0135 — roughly 7-26% narrower depending on metric), consistent with `CLAUDE.md`'s phase-history claim that all 4 `market_benchmark` metrics improved through the phase. This recheck confirms that claim rather than surfacing anything new.
+- **Disagreement analysis replicates closely**: market wins disagreements 56.5% vs. model 43.5% (was 56%/44%); model win-rate still declines from smallest to largest disagreement quartile (45.2%→44.1%→44.4%→40.1%, was 48%→37% — same direction, somewhat less pronounced); high-disagreement bucket is still worse for the model than low-disagreement (42.4% vs. 44.6%, was 41% vs. 48%). Same shape as before: the model is least trustworthy exactly where it deviates most from the market.
+- **The one narrow positive result did NOT replicate — this is the material change.** The original entry's "one narrow exception," pick'em games (`|market spread| < 3`, same n=244 games both times since the market side is unchanged), was roughly even (50.4% model / 49.6% market). On the current model it is no longer even: **47.1% model / 52.9% market** — a 5.8pp market lead, the same unfavorable direction as every other bucket. This file's own Pending section flagged that result as "not yet independently investigated for robustness"; this recheck is that robustness check, and it fails — the pick'em competitiveness result does not survive a same-population comparison across cumulative model changes.
+- **Calibration (Q4/Q5) direction unchanged, magnitude slightly closer**: model ECE 0.0489 vs. market 0.0268 (was 0.054 vs. 0.027, ~1.8x now vs. ~2x before). Isotonic recalibration still helps more than Platt (isotonic 0.0308, ~37% reduction, vs. Platt 0.0420, ~14%), and isotonic's post-recalibration ECE is now noticeably closer to the market's (0.0308 vs. 0.0268, ~15% relative gap, down from ~53% originally). But win-accuracy and Brier are essentially untouched by recalibration either time (win-acc 0.6789-0.6797 across raw/isotonic/platt vs. market's 0.6943; Brier 0.2068-0.2078 vs. market's 0.1943) — the original Q5 conclusion ("recalibration narrows ECE but doesn't create a probability edge") still holds, just from a narrower starting gap.
+- **Liquidity/microstructure (Q6) verdict unchanged**: no bucket clears the 54.5% vig bar (band now 39.8-47.7%, vs. 42-45% before — still uniformly below even 50%); `corr(log_volume, model_advantage)` = +0.020 (was +0.031), still indistinguishable from zero and still the wrong sign for the thinness hypothesis.
+
+**Implication**: the 2026-08-17 verdict — no accessible pre-game edge, model trails the market broadly, disagreements skew wrong — **still holds after the full representation-enrichment phase**. The phase's real, adopted improvements (elo momentum, venue-blind form) moved every headline metric in the right direction by a small amount, exactly as `CLAUDE.md`'s phase history already claimed, but did not close the gap or flip any qualitative finding. The one part of the original finding that did NOT hold up under this recheck is the pick'em-game near-parity result — it has reverted to the same unfavorable skew as the rest of the sample, which resolves (negatively) this file's own pending item on that result's robustness rather than opening a new investigation. No other closed edge-mechanism (informational timing, calibration, market thinness) is called into question by this recheck.
+
+---
+
 ## Pending
 
-- Venue-thinness result (pick'em-game competitiveness, sample-size-qualified) — flagged in the market-benchmark entry above as a narrow positive signal; not yet independently investigated for robustness.
+- None currently open. The venue-thinness/pick'em-competitiveness item (flagged pending as of the 2026-08-17 entry) is now resolved — see the 2026-08-26 recheck above: it did not replicate on a same-population comparison against the current model.

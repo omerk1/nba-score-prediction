@@ -554,6 +554,230 @@ C's deferred shot-quality play-by-play candidate or the untested
 creative-feature-engineering backlog (both logged, neither queued) —
 picking either up starts a new phase, not a continuation of this one.
 
+### Backlog scoping pass, items 2/4/6/7 — 2026-08-24
+Result: doc-only, no code/config changes. READ-ONLY scoping pass on the
+creative-feature-engineering backlog (bottom of this doc), same discipline
+as item 3's prior pass: confirm novelty, assess build complexity
+(low/medium/high), flag collinearity risk up front, nothing implemented.
+Findings: item 2 (distributional shape) — novelty confirmed; skewness is
+LOW complexity but inherits the already-tested rolling-std/variance
+failure (`docs/EXPLORATION.md` Area 1: correlations <0.03) one moment
+higher, so it's a weak-signal risk, not a collinearity one — recommend
+dropping it. The clutch/close-game split half is LOW-MEDIUM complexity,
+MODERATE collinearity risk, plus a data-hunger risk (few close games per
+rolling window) — the more defensible half. Item 4's existing
+argued-against verdict (`docs/EXPLORATION.md` Area 3) re-confirmed
+structurally sound; neither of the two candidates built since (elo
+momentum, opponent-adjusted efficiency) is a counter-example, both being
+single-family representations, not hand-engineered interactions. Item 6
+(lineup continuity) — novelty confirmed; HIGH complexity, worse than it
+first looked: no per-game/per-player minutes data exists anywhere in this
+pipeline (`box_score_stats` is team-level only, `player_importance` is a
+weekly cumulative snapshot, `src/lineups/lineup_collector.py` is unused
+and only fetches season-level rosters) — a real feature needs new
+per-game data collection, same cost class as Track C's shot-quality
+candidate. Collinearity risk LOW-MODERATE. Item 7 (referee tendencies) —
+confirmed the sole "referee" hit in the codebase is an unrelated CDN URL
+string; no officiating data source exists and none of `nba_api`'s
+already-integrated endpoints expose one — feasibility, not modeling, is
+the confirmed blocker, with no accessible source identified.
+Adjusts later steps: added a **Final recommendation** to the backlog
+section ranking candidates by novelty-confirmed + complexity +
+collinearity risk (item 5 excluded, already closed REJECT). Top pick is
+the **rest/back-to-back differential** (`b2b_diff`/`rest_diff`,
+`docs/EXPLORATION.md`'s Decisive-shortlist item 1 — still the only
+candidate anywhere with real measured evidence, still unimplemented,
+still ready to run first). Of this session's own scoped backlog items,
+item 2's clutch-split half and item 6 follow (best remaining risk
+profiles, though item 6 needs a deliberate new-data-collection
+commitment); item 3's cheap variant and item 7 are not recommended as
+currently scoped (flagged high collinearity risk and an unresolved
+data-feasibility blocker, respectively). No code, config, or training run
+in this session.
+
+### Correction — recommendation mislabel — 2026-08-25
+Result: doc-only, no code/config changes. The prior entry's "Final
+recommendation" labeled its top pick "item 1," which conflated two
+different numbered lists — it meant the rest/back-to-back differential
+(`docs/EXPLORATION.md`'s own Decisive-shortlist item 1), not this
+backlog's own item 1 ("explicit trend/slope over rolling windows", not in
+scope for this scoping pass and not scored by it). Corrected the Final
+recommendation section in-place to name each candidate directly instead
+of by ambiguous number; added an explicit correction note there.
+Findings: no change to any complexity/collinearity/novelty finding from
+the prior entry — this was a labeling error, not a re-scope. The
+rest/back-to-back differential's status is unchanged and reconfirmed:
+genuinely unimplemented (`b2b_diff`/`rest_diff` absent from
+`feature_builder.py`, `configs/config.yaml`, `docs/EXPERIMENTS.md`).
+Adjusts later steps: none — same ranking as before, now stated
+unambiguously. Backlog's own item 1 (trend/slope) remains unscoped by any
+session to date.
+
+### Rest/back-to-back differential (`b2b_diff`/`rest_diff`) — 2026-08-24
+Result: **REJECT.** Implemented `docs/EXPLORATION.md`'s decisive-shortlist
+item 1 — 2 new columns in `_add_rest_features` (`feature_builder.py`),
+`b2b_diff = home_back_to_back - away_back_to_back`, `rest_diff =
+clip(home_rest_days - away_rest_days, -5, 5)` — always-on, no config flag,
+mirroring `_add_matchup_features`'s existing unconditional-differential
+pattern (148→150 features). Full write-up: `docs/EXPERIMENTS.md`'s
+`b2b_rest_diff` entry.
+Findings: pre-CV correlation check (reported regardless of value, per this
+session's instruction) against existing rest features: moderate, expected/
+structural correlations against the raw per-team columns each differential
+is built from (up to |0.70|, same relationship `elo_diff` has to its two
+component ratings), −0.668 between the two new columns themselves (not a
+near-duplicate pair per the `official_pace_poss_new_columns` threshold of
+0.976), and −0.077/+0.053 against `POINT_DIFF` — closely replicating
+`docs/EXPLORATION.md`'s own measured −0.079/+0.050. Full 5-fold CV: mean
+val_score 1.3786 vs. champion (`b2_elo_momentum`) 1.3803 — Δ−0.0017
+(favorable), but per-fold delta is fold1 −0.0049, fold2 −0.0115, fold3
++0.0013, fold4 +0.0053, fold5 +0.0012 — **2 of 5 folds improve, 3
+regress**, failing the same per-fold-majority guardrail
+`a4_vif_trim_overall_form` failed on, despite a larger and more favorable
+mean movement than A4's. `market_benchmark.py` (fold5) vs. champion: 3 of
+4 metrics worse (total_mae +0.100, win_acc −0.0008, brier +0.00017;
+diff_mae better, −0.009) — leans the same negative direction as the CV
+fold count. Two independent signals (CV fold-majority, market_benchmark)
+agree; the favorable mean val_score is real but concentrated in 2 folds,
+not broad-based like the shape that got `b2_elo_momentum` adopted (3-4/5
+folds, small regressions only). Code reverted to the pre-session state
+(`git diff` on `feature_builder.py` shows zero changes) — same treatment
+as `a4`/`b1`, both other unconditional (no-flag) rejected changes; unlike
+`official_pace_enabled`, `_add_rest_features` has no existing
+enable/disable convention to gate a "kept but off" middle option behind.
+Row logged to `outputs/experiments_v2.csv` by `train_model.py`'s own
+auto-logging (manual one-off experiment, not a research session — no
+separate `results/sessions/` file).
+Adjusts later steps: closes `docs/EXPLORATION.md`'s decisive-shortlist
+item 1 and this doc's own backlog "Final recommendation" top pick — both
+now have a real, negative, CV-backed answer rather than an untested
+recommendation. Item 1 was the only backlog candidate anywhere in this
+doc's history with real measured pre-CV evidence behind it, and it still
+failed the fold-majority guardrail — worth carrying forward as a caution
+against over-weighting standalone correlation evidence (real, replicated,
+sign-sensible correlation with `POINT_DIFF` did not translate into
+broad-based CV generalization here). No other backlog item's scope or
+priority changes as a result.
+
+### Backlog item 1 (explicit trend/slope over rolling windows, off_eff/def_eff L10) — 2026-08-24
+Result: **REJECT.** Full write-up: `docs/EXPERIMENTS.md`'s
+`trend_slope_off_def_L10` entry.
+Findings: implemented a true within-window OLS slope (`_ols_slope`,
+weights every game in the window) of `off_eff`/`def_eff` at L10 only, as
+new columns alongside the existing mean-based `off_eff_L{w}`/`def_eff_L{w}`
+(148→152 features, gated by new `trend_features.enabled`/`.window`,
+disabled by default). Confirmed distinct from the already-rejected
+`diff_avg_L5 − diff_avg_L20` proxy per this backlog item's own framing —
+pre-CV correlation against that reconstructed proxy came back moderate
+(0.39–0.41 off, −0.41 def), not near-zero and not near-duplicate either.
+Correlation against existing `off_eff_L{w}`/`def_eff_L{w}`: near-zero at
+L10/L20 (−0.005 to −0.06), moderate at L5 (0.48–0.50) — no collinearity
+red flag anywhere. Full 5-fold CV: val_score_mean 1.3809 vs. champion
+(`b2_elo_momentum`) 1.3803, Δ+0.0006 (marginally worse). Fold pattern: 3/5
+folds improve (2,4,5) but the 2 regressing folds (1,3) are individually
+larger in magnitude than any of the 3 improving folds, so the mean lands
+unfavorable despite the bare majority-count — distinct from `b2b_diff`'s
+failure mode (favorable mean, concentrated 2-fold win, failed the
+fold-majority count) and closer to a genuine borderline null. Unlike
+`b2b_diff`, this is NOT rescued by a fold-count argument since the mean
+itself doesn't favor it either. `market_benchmark` (fold5): all 4 metrics
+worse (diff_mae +0.040, total_mae +0.038, win_acc −0.0066, brier +0.0011)
+— unanimous, the clearest of the three signals. Only L10 tested, per this
+session's own scope (picking one window rather than sweeping all three,
+since this is a genuinely new construction). `trend_features.enabled`
+stays `false` (config confirmed via `git status` before/after — flipped
+`true` only for the duration of the correlation check + CV run). Code kept
+(not deleted), same treatment as other rejected-but-kept-disabled options
+(`official_pace_enabled`, `opponent_adjusted_efficiency_enabled`) — L5/L20
+remain untested on this same infrastructure if a future session wants them.
+9 new regression tests added (`tests/test_trend_slope_features.py`); 4
+pre-existing test files needed an explicit `trend_features = MagicMock(enabled=False)`
+added to their config mocks (same mechanical `MagicMock()`-truthy fallout
+seen before with `official_pace_enabled`). Full suite: 207/207 passing at
+the shipped default.
+Adjusts later steps: closes backlog item 1 (trend/slope) as tested and
+rejected at L10 — joins item 5 (retrospective opponent-adjustment) and the
+rest/back-to-back differential as backlog candidates now closed with a
+real, negative, CV-backed answer rather than an untested recommendation.
+Of the original backlog, items 2 (clutch/close-game split half),
+3/4/6/7 remain either untested or previously deprioritized/argued-against
+(see the "Final recommendation" section above) — no change to their
+standing from this session. L5/L20 windows for this same trend/slope
+construction are a narrow, cheap possible follow-up (infrastructure
+already built, gated off) but not queued — this session's own scope was
+one window, and the L10 result gives no particular reason to expect a
+different verdict at the other windows.
+
+### Backlog item 2 (clutch/close-game performance split, off_eff/def_eff L10+L20) — 2026-08-24
+Result: **REJECT.** Full write-up: `docs/EXPERIMENTS.md`'s
+`clutch_split_off_def_L10_L20` entry.
+Findings: implemented `close_off_eff_L{w}`/`close_def_eff_L{w}` (venue-blind,
+new `clutch_split_features.enabled`/`.margin_threshold`/`.windows` config,
+disabled by default) — rolling off_eff/def_eff conditioned on the past game
+having been close (margin≤5), point-in-time via shift(1) before
+conditioning. **Pre-CV data-hunger check confirmed the risk flagged at
+scoping, and confirmed it's concentrated at the shortest window**: L5 —
+median 1 close game per window, 22.4% of rows have zero, 38.7% exactly one
+(61.1% combined undefined-or-single-game); L10 — median 2, 5.2% zero; L20 —
+median 5, 0.8% zero. L5 was excluded from the tested feature set on this
+evidence alone, before spending a CV run on it — a partial pre-CV
+rejection, one of this session's own permitted valid outcomes. Pre-CV
+correlation vs. existing `off_eff_L{w}`/`def_eff_L{w}`: moderate throughout
+(0.29–0.55), matching the MODERATE collinearity risk predicted at scoping,
+no near-duplicate flag. Full 5-fold CV (L10+L20 only, 156 features):
+val_score_mean 1.3824 vs. champion (`b2_elo_momentum`) 1.3803, Δ+0.0021
+(worse) — **4/5 folds regress (only fold5 improves), a broad regression**,
+not concentrated in 1-2 folds like earlier borderline candidates this
+phase. `market_benchmark` (fold5): mixed, leaning negative (total_mae
++0.069 and win_acc −0.0033 worse; diff_mae/brier marginally better).
+Unlike `b2b_rest_diff` or `trend_slope_off_def_L10`, this is an
+unambiguous reject on the primary aggregated-validation-mean criterion
+itself — no secondary fold-count guardrail argument was even needed. 6 new
+regression tests added (`tests/test_clutch_split_features.py`); the same 4
+pre-existing test files needed another `MagicMock(enabled=False)` added to
+their config mocks (3rd time this phase — `official_pace_enabled`,
+`trend_features`, now `clutch_split_features`). Full suite: 213/213
+passing at the shipped default. `clutch_split_features.enabled` stays
+`false` (config confirmed via `git status`/`git diff` before/after).
+Adjusts later steps: closes backlog item 2's clutch-split half (the
+confirmed defensible half; skewness was already dropped from
+consideration in the prior scoping pass, never built). **This was the last
+backlog item scoped for this phase — with item 2 now closed, the entire
+2026-08-24 backlog-scoping-pass list (items 1, 2's clutch-split half, 3's
+cheap variant, 4, 6, 7) has either been tested-and-rejected (items 1, 2,
+and — from the prior session — 5 and the rest/back-to-back differential)
+or is explicitly not recommended as currently scoped (item 3's cheap
+variant: high collinearity risk; item 6: needs a new per-game data-
+collection commitment, not scoped; item 7: blocked at the data-feasibility
+gate). The backlog-exhaustion effort is complete regardless of this item's
+own outcome, per this session's own explicit scope — no further backlog
+item is queued.** The new `clutch_split_features.windows` config field
+makes L5 (or any other window) directly testable later without new code,
+should league-wide close-game rates ever justify revisiting it, but
+nothing is scheduled.
+
+### Market-edge recheck (post-phase) — 2026-08-26
+Result: audit only, no code/config change. Re-ran `scripts/market_benchmark.py`
+on the current live model (148 features, unchanged from phase close) against
+fold5, same test window/join used by every prior `docs/MARKET_EDGE.md` entry.
+Full write-up: `docs/MARKET_EDGE.md`'s "Recheck: does the market-edge verdict
+still hold on the fully-updated model?" entry.
+Findings: original 2026-08-17 verdict ("no accessible pre-game edge") still
+holds — model still trails the market on all 4 headline metrics, same
+disagreement/calibration/liquidity shapes as before. All 4 metrics narrowed
+slightly (diff MAE gap 0.68→0.62, total MAE 0.72→0.67, win-acc gap
+2.0pp→1.5pp, Brier gap 0.015→0.0135), consistent with this phase's own
+already-claimed cumulative `market_benchmark` improvement — not a new
+finding, a confirmation of one. One real shift: the original's sole positive
+signal (pick'em games, `|market spread|<3`, near-even 50.4%/49.6%) did not
+replicate — now 47.1% model / 52.9% market, same unfavorable direction as
+every other bucket. This resolves `MARKET_EDGE.md`'s own pending
+robustness-check item on that result, negatively.
+Adjusts later steps: none — phase stays CLOSED, no code/config changed. The
+pick'em/venue-thinness result should no longer be cited as a positive
+signal or live pending item in either doc; `MARKET_EDGE.md`'s Pending
+section now reflects this.
+
 (Log entries go here as sessions complete.)
 
 ---
@@ -836,6 +1060,39 @@ novelty without checking).
    post-hoc diagnostic analysis of already-made predictions against market
    odds — not a training feature, and not skewness in any form. No existing
    script computes skewness or a clutch/blowout split as a model input.
+   **Scoping pass — 2026-08-24 (read-only, confirms novelty + complexity,
+   nothing implemented):** novelty re-confirmed by direct grep — no rolling
+   skewness/kurtosis computation and no close-game/blowout conditional
+   split exists anywhere in `src/feature_engineering/` or `src/matchups/`;
+   `scripts/market_benchmark.py`'s only "skewed" hit is an unrelated
+   log-volume-diagnostic comment. Build complexity: **LOW** for skewness
+   (`.rolling(w).skew()` is a stock pandas method, drop-in alongside
+   `_add_rolling_features`'/`_add_style_features`'s existing
+   `shift(1).rolling(w)` pattern, no new data); **LOW-MEDIUM** for the
+   clutch/close-game split (one added step — bucket each already-played
+   game by `abs(final_margin) <= 5` before the same `shift(1).rolling(w)`
+   aggregation; the split key comes from a past, already-completed game,
+   not the game being predicted, so no leakage). Risk, split by candidate:
+   **skewness is a weak-signal risk, not a collinearity risk** — this
+   project already tested the closest precedent directly, rolling
+   std/variance of this identical distribution (`docs/EXPLORATION.md` Area
+   1 / Decisive-shortlist "Explicitly deprioritized" entry): "all
+   correlations <0.03, R² deltas <0.15% of baseline." Skewness is one
+   moment higher and more sample-hungry than the std/variance that already
+   failed cleanly, and this project's own elo-volatility result
+   (`docs/EXPERIMENTS.md` §B2) separately found that even std over an
+   L5-L20-scale window is "a high-variance estimator" too noisy to
+   generalize — skewness inherits that failure mode at least as badly.
+   **The clutch/close-game split carries MODERATE collinearity risk**
+   (built from the same underlying per-game margin/efficiency data already
+   feeding `rolling_features`/`style_features`, just conditioned on a
+   subset — not a full duplicate, but not independent either) **plus a
+   separate data-hunger risk**: an L10-L20 window plausibly contains only
+   2-5 games clearing a `<=5pt` threshold, the same small-sample-estimator
+   problem that sank elo volatility. Net read: skewness re-runs a
+   documented failure pattern and isn't worth a session on its own; the
+   clutch/close-game split is the more defensible half of this item, if
+   either is pursued.
 3. **Asymmetric style-clash features**: team A's specific offensive
    strength vs. team B's specific defensive weakness, rather than the
    symmetric differential `matchup_features` already computes. **Partial
@@ -893,6 +1150,18 @@ novelty without checking).
    engage with that argument directly (why would this specific interaction
    need domain framing a tree split can't discover on its own?) rather than
    restart from scratch.
+   **Re-confirmed — 2026-08-24 (read-only, re-confirmation only per this
+   session's scope, not a fresh re-scope):** the argument is structural
+   (CatBoost's depth-6 trees can already combine two raw features within a
+   single split, so a hand-engineered interaction needs a specific reason a
+   tree split can't find on its own) and doesn't depend on which features
+   exist, so it isn't stale by construction. Checked whether either
+   candidate actually built since this was written counts as new evidence:
+   elo momentum (adopted) and retrospective opponent-adjusted efficiency
+   (rejected, final) are both new *representations* of a single existing
+   family, not hand-engineered cross-family interaction terms — neither is
+   a counter-example or a supporting data point either way. Argument still
+   holds; still a reasoned skip, not a CV result.
 5. **Retrospective opponent-adjustment**: a team's own rolling stats
    adjusted for the quality of opponents already faced in that window
    (distinct from `opponent_quality_features`, which is about the upcoming
@@ -975,6 +1244,35 @@ first, per the `official_pace`/B1 precedent, before committing to a full
    this player's absence cost," not "how stable/continuous is the team's
    rotation." No existing feature or script measures lineup
    continuity/turnover as its own signal.
+   **Scoping pass — 2026-08-24 (read-only, confirms novelty + complexity,
+   nothing implemented):** novelty re-confirmed — `on_off_splits` measures
+   per-player impact when *missing*, `season_motivation.py`'s
+   `compute_roster_behavior_scores` measures full-strength quality
+   *voluntarily* sitting out (tanking-adjacent); neither, nor anything
+   else, measures rotation turnover/continuity as its own signal. Build
+   complexity: **HIGH, and worse than it first looks.**
+   `src/lineups/lineup_collector.py` (`get_available_lineup`, wraps
+   `CommonTeamRoster`) exists but is unused anywhere in the actual
+   pipeline (no import outside its own package) and wouldn't help even if
+   wired in — it returns a *season-level* active roster, not per-game
+   minutes, so it can't measure week-to-week rotation change. Checked
+   every table this project actually populates for a usable substitute:
+   `box_score_stats` (`src/matchups/db.py`) is team-level only
+   (`game_id, team_id` primary key, no player rows); `player_importance`
+   (`src/news_scraping/player_importance.py`) is a *weekly cumulative
+   snapshot* (`leaguedashplayerstats` as-of a date), not per-game minutes.
+   **No per-game, per-player minutes data exists anywhere in this
+   pipeline today** — a genuine continuity/turnover feature needs a new
+   per-game boxscore-by-player pull (e.g. nba_api's
+   `BoxScoreTraditionalV2` per `game_id`), the same class of new-data-
+   collection effort as Track C's still-deferred shot-quality candidate
+   (large per-game backfill), not a computation on data already collected.
+   Collinearity risk: **LOW-MODERATE** — a minutes-redistribution signal
+   is conceptually distinct from `injury_features`/`roster_behavior_score`
+   (specific player status) and `on_off_splits` (specific missing-player
+   point impact), though real roster churn often correlates with the
+   injuries/trades those families already partly capture, so not fully
+   independent either.
 7. **Referee/officiating-crew tendencies** (foul rate, pace inflation) —
    flagged as data-feasibility-first, likely exotic/low-priority. **Not
    covered anywhere in the codebase.** No existing data source, script, or
@@ -984,6 +1282,89 @@ first, per the `official_pace`/B1 precedent, before committing to a full
    (does usable referee-assignment/tendency data even exist pre-tip) should
    be checked before any construction work, same as Track C's other
    candidates.
+   **Scoping pass — 2026-08-24 (read-only, data feasibility only, per this
+   item's own framing that feasibility — not modeling — is the likely
+   blocker):** confirmed by direct grep across the whole codebase — the
+   only "referee" match anywhere is an unrelated CDN URL string in
+   `nba_injury_pdf.py`
+   (`https://ak-static.cms.nba.com/referee/injury`, a path segment of the
+   NBA's injury-report CDN, not officiating data). No referee-assignment
+   or officiating-tendency data source, scraper, or table exists anywhere
+   in this project. `nba_api`'s public stats.nba.com endpoints — the only
+   data source this project uses beyond the injury-PDF/ESPN scrapers — do
+   not expose a referee-assignment endpoint anywhere already integrated
+   here (`TeamGameLogs`, `CommonTeamRoster`, `leaguedashplayerstats`, none
+   carry officials). Obtaining this data would mean a genuinely new,
+   unintegrated source (e.g. scraping official.nba.com's referee
+   assignment pages) — new scraper, new schema, new backfill, with no
+   existing infrastructure to build on, unlike lineups (item 6, which at
+   least has an unused-but-present roster fetcher) or shot-quality (Track
+   C, which at least extends `nba_api` usage already proven for
+   pace/possession and box scores). **Feasibility verdict: data
+   obtainability is the confirmed blocker** — this is the backlog item
+   furthest from this project's existing data-collection footprint.
+   Modeling complexity intentionally not scoped further, per this item's
+   own framing — not worth costing before a source is even identified as
+   accessible.
+
+**Final recommendation (2026-08-24 scoping pass, read-only, nothing
+built):** ranked by novelty-confirmed + lower complexity + lower
+collinearity risk, same standard used to pick item 5 last time.
+
+**Correction (2026-08-25):** the original version of this recommendation
+labeled its top pick "item 1," which was ambiguous/wrong — it meant the
+**rest/back-to-back differential** (`b2b_diff`/`rest_diff`), which is item
+1 of `docs/EXPLORATION.md`'s own "Decisive shortlist," a *different*
+numbered list from this backlog's own item 1 just above ("explicit
+trend/slope over rolling windows"). The two are unrelated candidates. This
+backlog's own item 1 (trend/slope) was **not** scoped or ranked by this
+session at all — it wasn't in scope (this pass covered items 2, 4, 6, 7).
+Relabeled below to name each candidate directly instead of by ambiguous
+number.
+
+1. **Rest/back-to-back differential** (`b2b_diff`/`rest_diff`,
+   `docs/EXPLORATION.md`'s Decisive-shortlist item 1 — not this backlog's
+   item 1). Top pick. The only candidate anywhere in this backlog or
+   shortlist with real *measured* evidence behind it (`corr=-0.079` for
+   `b2b_diff`), not just argued novelty — LOW complexity (2 columns,
+   arithmetic on data already collected), no flagged collinearity risk
+   (mirrors the already-proven `matchup_features`/venue-delta differential
+   pattern). Confirmed genuinely unimplemented (grep for `b2b_diff`/
+   `rest_diff` across `feature_builder.py`, `configs/config.yaml`,
+   `docs/EXPERIMENTS.md` returns nothing — not to be confused with
+   `second_of_b2b`, a different, already-rejected-as-duplicate feature
+   from Track A3). Still ready to run first if any of this backlog or
+   shortlist is picked up.
+2. **Backlog item 2, clutch/close-game split half only (drop skewness).**
+   LOW-MEDIUM complexity, genuinely novel (a conditional split, not a
+   redundant moment), MODERATE collinearity risk — the best-risk-profile
+   item among this session's own scoped backlog items (2/6/7). Skewness
+   should be dropped from consideration on its own evidence: it's a
+   higher-order, harder-to-estimate version of a statistic (rolling
+   std/variance) this project already measured and found unsupported.
+3. **Backlog item 6 — lineup continuity.** Genuinely novel, LOW-MODERATE
+   collinearity risk (second-best risk profile), but HIGH complexity — it
+   needs new per-game/per-player data collection this pipeline has nowhere
+   today, the same cost class as Track C's still-deferred shot-quality
+   candidate. Only worth funding as a deliberate new-data-collection bet,
+   not a quick addition.
+4. **Backlog item 3, cheap variant.** LOW complexity but HIGH collinearity
+   risk, explicitly flagged (the same "a tree can already form this in one
+   split" argument as item 4's reasoned skip) — ranks below item 2's
+   clutch-split despite being cheaper, because its risk is more certain
+   (near-linear recombination of columns already live in the model) with
+   no comparable offsetting novelty.
+5. **Backlog item 7 — referee/officiating data.** Not recommended. This
+   isn't a complexity question yet — it's blocked at the data-feasibility
+   gate, with no accessible source identified and no existing
+   infrastructure to extend. Lowest priority by a clear margin.
+
+Net: if one candidate is picked up next, it's the rest/back-to-back
+differential (not part of this session's own scoped items, but the
+single best-evidenced option available across both docs). Of this
+session's own scoped backlog items, item 2's clutch-split half and item 6
+are next; item 3's cheap variant and item 7 are not recommended as
+currently scoped.
 
 ---
 
