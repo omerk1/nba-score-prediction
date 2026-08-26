@@ -1,6 +1,8 @@
 # EXPLORATION.md
 
-Read-only research memo, revised pass. No model code changed, no training run. Every claim below that could be measured, was — against `data/raw/nba_api.sqlite`'s `game` table (11,969 regular-season games, 2016-10-25 → 2026-04-12) and `data/features/train_features.csv`, using throwaway scripts outside the repo, not against opinion or general ML practice. Where a claim is code-reading-only (no measurement needed to settle it), that's stated explicitly. Current champion: `target_lambda_weight_0.75`, val_score_mean 1.3821 (naive floor 1.5).
+Read-only research memo, revised pass. No model code changed, no training run. Every claim below that could be measured, was — against `data/raw/nba_api.sqlite`'s `game` table (11,969 regular-season games, 2016-10-25 → 2026-04-12) and `data/features/train_features.csv`, using throwaway scripts outside the repo, not against opinion or general ML practice. Where a claim is code-reading-only (no measurement needed to settle it), that's stated explicitly. Current champion at the time this memo was written: `target_lambda_weight_0.75`, val_score_mean 1.3821 (naive floor 1.5).
+
+**Status (2026-08-24): all 3 "Decisive shortlist" items below have since been implemented and tested under full CV — all rejected.** Item 1 (rest/back-to-back differential) → `docs/EXPERIMENTS.md`'s `b2b_rest_diff` (favorable mean, failed the per-fold guardrail). Item 2 (style/opponent-quality rolling-window trim) → `a4_vif_trim_overall_form` (near-flat, failed the per-fold guardrail). Item 3 (decay-weighting swap) → `b1_style_features_decay_weighted`/`b1_style_and_rolling_decay_weighted` (null, then a real regression). The measurements and reasoning below are unchanged and still the reference for *why* each was worth testing; only the "awaiting greenlight" framing at the very end is stale — see that entry for the update.
 
 ---
 
@@ -93,4 +95,4 @@ Hierarchical/player-level modeling and raw-sequence neural nets: **no new eviden
 - **Team ID as `cat_features`** — legitimate and cheap, but genuinely unmeasured this round (an argued gap, not an evidenced one, unlike item 1). Worth a low-cost isolated test at some point, but doesn't clear the bar to be in the top 3 given items with real measurement behind them exist.
 - **Distributional objective / ensembling** — both feasible but explicitly gated on decisions above this analysis's pay grade (a metric-definition call, and a scope/effort call respectively). Flagged for your judgment, not queued as experiments.
 
-Nothing above has been executed. Awaiting greenlight.
+**Update (2026-08-24): all 3 items were subsequently tested — see the status note at the top. None was adopted.**

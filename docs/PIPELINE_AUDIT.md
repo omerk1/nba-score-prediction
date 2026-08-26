@@ -42,6 +42,8 @@ Family call order (`create_all_features`) matches the documented order exactly (
 | 5 | Exclude-list is opt-out, not opt-in | Structural risk | Neither currently | Harmless today, worth knowing |
 | 6 | Train/val date-boundary logic split across two files (loader + `cv_harness.py`) | Fragility | Neither currently | Harmless today, worth knowing |
 
+**Resolution status (as of 2026-08-24; table above left as originally written):** #1 — implemented and adopted, venue-blind overall form (`docs/NEXT_PHASE_SESSIONS.md` Track A item 2, `docs/EXPERIMENTS.md`'s `a2_venue_blind_overall_form`). #2/#3 — both fixed as safeguards (Track A item 1, `a1_fingerprint_freshness_box_score_parity`). #4/#5/#6 — still open, no fix attempted (#4 is also flagged, independently, in `docs/EXPLORATION.md` Area 3).
+
 ---
 
 ## Addendum — representation-granularity investigation (rest, travel, recent form, workload)
@@ -60,4 +62,4 @@ Separate from the categorical/target-encoding question above: for families that 
 
 ---
 
-Nothing above has been executed. Awaiting triage.
+**Update (2026-08-24):** `second_of_b2b` was tested (Track A item 3) and confirmed a pure duplicate of the already-venue-blind-fixed `back_to_back` — not added. The home/away rest differential proposal (distinct from `second_of_b2b`) was later built and tested as `b2b_diff`/`rest_diff` (`docs/EXPERIMENTS.md`'s `b2b_rest_diff`) — favorable mean val_score but failed the per-fold guardrail, rejected. Density windows, days-since-last-break, travel trip-length/tz-recency, and streak length remain untested. Everything else above (loading/processing/wiring/representation findings, the ranked-triage table) is unchanged.

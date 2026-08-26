@@ -1,5 +1,11 @@
 # New Data Feasibility (Track C)
 
+**Status (2026-08-23): the pace/possession candidate (§2) was subsequently built
+and tested as recommended — `docs/EXPERIMENTS.md`'s `official_pace_poss_new_columns`
+entry — and rejected (the two new columns were near-duplicates of each other,
+CV regressed on 4/5 folds). Player availability (§1) and shot-quality (§3)
+remain as assessed below: closed/no-gap and deferred/untested, respectively.**
+
 Read-only feasibility assessment, not modeling. Written for a human decision on
 whether/which of these are worth a scoped session — nothing here is a recommendation
 to proceed autonomously, and nothing has been integrated. Evaluated against the

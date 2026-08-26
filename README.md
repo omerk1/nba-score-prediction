@@ -16,7 +16,7 @@ Predict exact scores of NBA games, prioritizing accurate point differential over
 
 1. **Statistical features** — team performance, rolling averages, rest days, head-to-head matchups
 2. **Injury features** — per-game impact scores derived from official NBA injury reports (formula-based or LLM-based)
-3. **Model** — CatBoost/LightGBM predicting point differential, converted to final scores
+3. **Model** — CatBoost predicting point differential, converted to final scores
 
 ## Quick Start
 
@@ -39,7 +39,7 @@ pip install -r requirements.txt
 ### Fetch data
 
 ```bash
-python src/data_processing/fetch_data.py
+venv/bin/python3 src/data_processing/fetch_data.py
 ```
 
 Data is pulled from the [nba_api](https://github.com/swar/nba_api) and stored in `data/raw/nba_api.sqlite`. Subsequent runs are incremental — existing rows are skipped via `INSERT OR IGNORE`.
@@ -47,7 +47,7 @@ Data is pulled from the [nba_api](https://github.com/swar/nba_api) and stored in
 If `style_matchup.raw_features_enabled` is on in `configs/config.yaml`, also periodically re-run the style-fingerprint precompute so live prediction has a reasonably recent per-team fingerprint available:
 
 ```bash
-python src/matchups/precompute_scores.py
+venv/bin/python3 src/matchups/precompute_scores.py
 ```
 
 This rebuilds `outputs/a7_matchups_cache.sqlite`'s `matchup_fingerprints` cache (and the KNN `style_matchup_scores` table). It's a periodic offline maintenance job, like `fetch_data.py` — not something `predict_game.py` triggers itself, since it rescans the entire game history each run. `predict_game.py` looks up each team's most recent cached fingerprint at or before the prediction date, so it stays correct even if the cache is a bit stale — a team with no cached fingerprint at all just yields NaN for those features, same as any other feature with insufficient history.
@@ -55,17 +55,23 @@ This rebuilds `outputs/a7_matchups_cache.sqlite`'s `matchup_fingerprints` cache 
 ### Train
 
 ```bash
-python train_model.py --run-name baseline_stats_only
-python train_model.py --run-name injury_v1 --notes "with injury features enabled"
+venv/bin/python3 train_model.py --run-name baseline_stats_only
+venv/bin/python3 train_model.py --run-name injury_v1 --notes "with injury features enabled" --protocol cv
 ```
 
-Every run appends a row to `outputs/experiments.csv` for ablation comparison.
+`--protocol single_split` (default) trains on one fixed train/val/test split; `--protocol cv` runs the 5-fold expanding-window CV harness instead (`cv.folds` in `configs/config.yaml`). Every run appends a row to `outputs/experiments_v2.csv`. See `docs/EXPERIMENTS.md` for the ablation-gated experiment workflow and decision log.
+
+### Test
+
+```bash
+venv/bin/python3 -m pytest tests/ -q
+```
 
 ### Predict
 
 ```bash
-python predict_game.py --home 1610612747 --away 1610612744
-python predict_game.py --home 1610612747 --away 1610612744 --date 2026-03-15
+venv/bin/python3 predict_game.py --home 1610612747 --away 1610612744
+venv/bin/python3 predict_game.py --home 1610612747 --away 1610612744 --date 2026-03-15
 ```
 
 `--home` and `--away` take numeric NBA team IDs. `--date` defaults to today.
@@ -121,25 +127,25 @@ Steps must run in order. All steps are resumable — use `INSERT OR REPLACE`, so
 
 ```bash
 # Step 1: Build player importance scores from nba_api (~10 min, no LLM)
-python scripts/build_injury_features.py --run build_player_importance
+venv/bin/python3 scripts/build_injury_features.py --run build_player_importance
 
 # Step 2: Backfill historical injury features
-python scripts/build_injury_features.py --run backfill_historical_injuries
+venv/bin/python3 scripts/build_injury_features.py --run backfill_historical_injuries
 
 # Step 3 (daily): Fetch today's injuries before game time
-python scripts/build_injury_features.py --run nightly_update
+venv/bin/python3 scripts/build_injury_features.py --run nightly_update
 ```
 
 Test on a small range before committing to the full backfill:
 
 ```bash
-python scripts/build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
+venv/bin/python3 scripts/build_injury_features.py --run backfill_historical_injuries --start 2023-01-01 --end 2023-01-14
 ```
 
 To resume after an interruption, advance `--start`:
 
 ```bash
-python scripts/build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
+venv/bin/python3 scripts/build_injury_features.py --run backfill_historical_injuries --start 2021-03-01
 ```
 
 NBA official injury PDFs are available from the 2021-22 season onward (`pdf_era_start` in config). Earlier seasons fall back to ESPN scraping.

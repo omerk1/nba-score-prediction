@@ -306,6 +306,11 @@ specifically, not the separate `b2b_diff`/`rest_diff` differential idea).
 
 ## Track B rollup — pre-Track-B baseline vs. fully-settled state
 
+(This rollup covers Track B only, as of 2026-08-22. The phase continued past
+this point — A4, Track C, and the creative-feature-engineering backlog all ran
+afterward. See `docs/NEXT_PHASE_SESSIONS.md`'s Phase rollup section,
+2026-08-24, for the complete final picture.)
+
 All three B0-priority families have now had their enrichment session (`docs/EXPERIMENTS.md`'s
 `b1_style_features_decay_weighted` / `b1_style_and_rolling_decay_weighted` /
 `b2_elo_momentum` / `b2_elo_momentum_and_volatility` entries). This section is a rollup
