@@ -62,6 +62,22 @@ check. Applies an explicit vig bar (a bucket's model win-rate must exceed
 transaction costs) and flags single-season findings as unconfirmed pending
 a held-out check on a different season.
 
+Q7: model's own confidence -- does the model's own conviction (not the
+market's disagreement with us, Q3, or the market's own liquidity, Q6 --
+both already tested and both market-EXTERNAL signals) predict where it's
+more trustworthy? Buckets games by |model_diff_pred| (point predictions
+only, same convention as Q6 -- stays off model_p_home) into quartiles, same
+win-rate/vig-bar/correlation reporting shape as Q6. Motivated by wanting to
+use src/evaluation/conformal.py's prediction-interval work for this
+question directly, but that isn't possible as-is: split conformal produces
+one constant interval width per fold, not a per-game-varying one, so there
+is no within-fold variation to bucket games by -- |model_diff_pred| is the
+closest already-available model-internal confidence signal, reusing
+existing predictions with zero new modeling. A genuinely adaptive per-game
+interval (normalized/locally-weighted conformal, or full CQR) would be the
+literal way to use the CI machinery for this question if Q7 shows this
+proxy signal is worth chasing further.
+
 Usage: venv/bin/python3 scripts/market_benchmark.py --tag <label>
 
 Outputs:
@@ -69,12 +85,15 @@ Outputs:
   outputs/market_benchmark_calibration_<tag>.csv   -- reliability curve + concentration
                                                        (raw and recalibrated), overwritten per run
   outputs/market_benchmark_liquidity_<tag>.csv     -- liquidity buckets + correlation, overwritten per run
+  outputs/market_benchmark_confidence_<tag>.csv    -- Q7 confidence buckets + correlation, overwritten per run
   outputs/market_benchmark_summary.csv             -- one row appended per run (Q1-Q3 headline
                                                        numbers, cross-run history, never truncated)
   outputs/market_benchmark_calibration_summary.csv -- one row appended per run (Q4/Q5 ECE +
                                                        recalibrated-metric headline numbers,
                                                        cross-run history, never truncated)
   outputs/market_benchmark_liquidity_summary.csv   -- one row appended per run (Q6 bucket win-rates
+                                                       + correlation, cross-run history, never truncated)
+  outputs/market_benchmark_confidence_summary.csv  -- one row appended per run (Q7 bucket win-rates
                                                        + correlation, cross-run history, never truncated)
 """
 
@@ -755,6 +774,72 @@ def compute_liquidity_correlation(diff_sub: pd.DataFrame, volume_col: str) -> di
     return {"n": len(sub), "corr_log_volume_vs_model_advantage": r}
 
 
+def compute_confidence_buckets(diff_sub: pd.DataFrame, min_bucket_n: int) -> pd.DataFrame:
+    """Does model-vs-market edge correlate with the model's OWN confidence,
+    as opposed to market disagreement (Q3) or market liquidity (Q6) -- both
+    already tested, both market-external signals? Buckets games by
+    |model_diff_pred| into quartiles -- boundaries computed fresh from this
+    run's own has_spread sample, same convention as Q3/Q6's quartiles (a
+    fixed RULE, not a fixed number). Reuses diff_sub's existing
+    'diff_winner' column (Q2's point-prediction, magnitude-closeness
+    definition -- model_diff_pred vs actual, NOT probability-based, same
+    choice Q6 made to stay off model_p_home)."""
+    sub = diff_sub.copy()
+    sub["model_confidence"] = sub["model_diff_pred"].abs()
+    sub["confidence_quartile"] = pd.qcut(
+        sub["model_confidence"],
+        4,
+        labels=["Q1_least_confident", "Q2", "Q3", "Q4_most_confident"],
+        duplicates="drop",
+    )
+    rows = []
+    for label in sub["confidence_quartile"].cat.categories:
+        bucket = sub[sub["confidence_quartile"] == label]
+        n = len(bucket)
+        model_win_rate = (bucket["diff_winner"] == "model").mean() if n else np.nan
+        rows.append(
+            {
+                "bucket_label": str(label),
+                "n": n,
+                "confidence_min": bucket["model_confidence"].min() if n else np.nan,
+                "confidence_max": bucket["model_confidence"].max() if n else np.nan,
+                "model_win_rate": model_win_rate,
+                "market_win_rate": (bucket["diff_winner"] == "market").mean() if n else np.nan,
+                "tie_rate": (bucket["diff_winner"] == "tie").mean() if n else np.nan,
+                "beats_market_on_paper": bool(model_win_rate > 0.5) if n else False,
+                "clears_vig_bar": bool(model_win_rate > 0.5 + VIG_BAR) if n else False,
+                "low_n_flag": n < min_bucket_n,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def compute_confidence_correlation(diff_sub: pd.DataFrame) -> dict:
+    """Continuous companion to the bucket table: correlation between the
+    model's own confidence (|model_diff_pred|) and per-game model advantage
+    (market_diff_err - model_diff_err, positive = model was closer that
+    game). Positive correlation = the model does relatively better on its
+    own most-confident calls (the hoped-for direction, the whole premise of
+    using stated confidence to size/filter bets); near-zero/negative = the
+    model's own confidence isn't informative about its reliability vs. the
+    market."""
+    sub = diff_sub.copy()
+    sub["model_confidence"] = sub["model_diff_pred"].abs()
+    sub["model_advantage"] = sub["market_diff_err"] - sub["model_diff_err"]
+    r = float(np.corrcoef(sub["model_confidence"], sub["model_advantage"])[0, 1])
+    return {"n": len(sub), "corr_model_confidence_vs_model_advantage": r}
+
+
+def write_confidence_csv(buckets: pd.DataFrame, correlation: dict, tag: str) -> Path:
+    out_path = REPO / "outputs" / f"market_benchmark_confidence_{tag}.csv"
+    with open(out_path, "w") as f:
+        f.write("# confidence_buckets\n")
+        buckets.to_csv(f, index=False)
+        f.write("\n# correlation\n")
+        pd.DataFrame([correlation]).to_csv(f, index=False)
+    return out_path
+
+
 def print_banner(cfg, fold, diagnostics: dict, sanity: dict) -> None:
     print("=" * 78)
     print(f"MARKET BENCHMARK -- fold={fold.name}")
@@ -855,6 +940,7 @@ def main():
         help="games.csv volume column to bucket by for the microstructure/liquidity check (default: spread_volume)",
     )
     parser.add_argument("--liquidity-summary-csv", default="outputs/market_benchmark_liquidity_summary.csv")
+    parser.add_argument("--confidence-summary-csv", default="outputs/market_benchmark_confidence_summary.csv")
     parser.add_argument("--config", default=None)
     args = parser.parse_args()
 
@@ -1029,6 +1115,48 @@ def main():
     else:
         print("  No bucket clears the vig bar, even before any held-out check.")
 
+    print(
+        "\n=== Q7: model's own confidence -- does OUR conviction (not market disagreement/volume) "
+        "predict where we're trustworthy? ==="
+    )
+    print(
+        "  Point predictions only (|model_diff_pred|, Q2's existing diff_winner definition), same "
+        "convention as Q6. Distinct from Q3's disagreement-magnitude buckets (market-relative) and Q6's "
+        "liquidity buckets (market-external) -- this is a purely model-internal signal. Motivated by "
+        "src/evaluation/conformal.py's prediction intervals, which can't be used directly here: split "
+        "conformal gives one constant width per fold, not a per-game-varying one, so |model_diff_pred| "
+        "is the closest already-available per-game confidence proxy."
+    )
+    confidence_buckets = compute_confidence_buckets(diff_sub, args.min_bucket_n)
+    print(
+        confidence_buckets.to_string(
+            index=False,
+            formatters={
+                "confidence_min": lambda v: f"{v:.2f}",
+                "confidence_max": lambda v: f"{v:.2f}",
+                "model_win_rate": lambda v: f"{v:.3f}",
+                "market_win_rate": lambda v: f"{v:.3f}",
+                "tie_rate": lambda v: f"{v:.3f}",
+            },
+        )
+    )
+    confidence_corr = compute_confidence_correlation(diff_sub)
+    print(
+        f"\n  corr(|model_diff_pred|, model_advantage) = "
+        f"{confidence_corr['corr_model_confidence_vs_model_advantage']:+.4f} (n={confidence_corr['n']}) -- "
+        f"positive would mean the model does relatively better on its own most-confident calls; "
+        f"near-zero/negative means its stated confidence isn't informative about its reliability."
+    )
+    print(f"  Vig bar: same {0.5 + VIG_BAR:.1%} bar as Q6.")
+    clearing7 = confidence_buckets[confidence_buckets["clears_vig_bar"]]
+    if len(clearing7):
+        print(
+            f"  {len(clearing7)} bucket(s) clear the vig bar on THIS FOLD ALONE: "
+            f"{clearing7['bucket_label'].tolist()} -- single-season, unconfirmed, same caveat as Q6."
+        )
+    else:
+        print("  No bucket clears the vig bar, even before any held-out check.")
+
     games_csv_path = write_per_game_csv(joined, args.tag)
     print(f"\nWrote per-game join to {games_csv_path}")
 
@@ -1038,6 +1166,9 @@ def main():
 
     liquidity_csv_path = write_liquidity_csv(liquidity_buckets, liquidity_corr, args.tag)
     print(f"Wrote liquidity buckets + correlation to {liquidity_csv_path}")
+
+    confidence_csv_path = write_confidence_csv(confidence_buckets, confidence_corr, args.tag)
+    print(f"Wrote confidence buckets + correlation to {confidence_csv_path}")
 
     summary_row = {
         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -1097,6 +1228,26 @@ def main():
     liquidity_summary_csv_path = REPO / args.liquidity_summary_csv
     append_summary_row(liquidity_summary_row, liquidity_summary_csv_path)
     print(f"Appended liquidity summary row to {liquidity_summary_csv_path}")
+
+    confidence_summary_row = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "tag": args.tag,
+        "fold_name": fold.name,
+        "vig_bar": VIG_BAR,
+        "corr_model_confidence_vs_model_advantage": confidence_corr[
+            "corr_model_confidence_vs_model_advantage"
+        ],
+        "n_correlation_sample": confidence_corr["n"],
+        "any_bucket_clears_vig_bar": bool(confidence_buckets["clears_vig_bar"].any()),
+    }
+    for _, row in confidence_buckets.iterrows():
+        prefix = row["bucket_label"]
+        confidence_summary_row[f"{prefix}_n"] = row["n"]
+        confidence_summary_row[f"{prefix}_model_win_rate"] = row["model_win_rate"]
+        confidence_summary_row[f"{prefix}_clears_vig_bar"] = row["clears_vig_bar"]
+    confidence_summary_csv_path = REPO / args.confidence_summary_csv
+    append_summary_row(confidence_summary_row, confidence_summary_csv_path)
+    print(f"Appended confidence summary row to {confidence_summary_csv_path}")
 
 
 if __name__ == "__main__":

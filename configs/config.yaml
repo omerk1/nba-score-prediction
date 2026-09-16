@@ -396,3 +396,16 @@ season_motivation:
   # the seeding endgame carries this incentive. All of 15/20/25 passed; 20
   # chosen as the middle value, no CV tiebreaker favored 15 or 25.
   preferred_opponent_delta_window_games: 20
+
+prediction_intervals:
+  # Post-hoc split-conformal prediction intervals around the existing
+  # diff/total point predictions (src/evaluation/conformal.py). Purely
+  # additive/diagnostic -- does not change training or point predictions, and
+  # is judged on coverage/width, not val_score_mean, so it's not part of the
+  # ablation-gated feature workflow. Validated (coverage close to nominal
+  # across all 5 CV folds), see the prediction_interval_conformal_v1
+  # decision-log entry in docs/EXPERIMENTS.md. Ships disabled by default --
+  # nothing downstream consumes the intervals yet.
+  enabled: false
+  # Miscoverage rate -> nominal (1-alpha) coverage. 0.1 = 90% intervals.
+  alpha: 0.1

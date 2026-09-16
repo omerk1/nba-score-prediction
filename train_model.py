@@ -112,6 +112,48 @@ def _save_experiment(
     logger.info(f"Experiment saved → {out}  (run: {run_name})")
 
 
+def _save_interval_metrics(
+    run_name: str,
+    notes: str,
+    protocol: str,
+    interval_metrics: dict,
+    per_fold: list = None,
+    interval_csv: str = "outputs/interval_calibration.csv",
+) -> None:
+    """Append one row to `interval_csv` (default outputs/interval_calibration.csv)
+    reporting conformal-interval coverage/width for this run. Separate file
+    from experiments_v2.csv on purpose -- this is a diagnostic axis
+    (coverage/width), not part of the val_score_mean leaderboard, so it gets
+    its own schema rather than adding unused columns to the shared one."""
+    out = Path(interval_csv)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    row = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "run_name": run_name,
+        "protocol": protocol,
+        "alpha": interval_metrics["alpha"],
+        "diff_coverage": round(interval_metrics["diff_coverage"], 4),
+        "diff_coverage_per_fold": ",".join(f"{m['diff_coverage']:.4f}" for m in per_fold) if per_fold else "",
+        "diff_mean_width": round(interval_metrics["diff_mean_width"], 3),
+        "total_coverage": round(interval_metrics["total_coverage"], 4),
+        "total_coverage_per_fold": (
+            ",".join(f"{m['total_coverage']:.4f}" for m in per_fold) if per_fold else ""
+        ),
+        "total_mean_width": round(interval_metrics["total_mean_width"], 3),
+        "notes": notes,
+    }
+
+    write_header = not out.exists()
+    with open(out, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=row.keys())
+        if write_header:
+            writer.writeheader()
+        writer.writerow(row)
+
+    logger.info(f"Interval calibration saved → {out}  (run: {run_name})")
+
+
 def _run_single_split(config, args) -> None:
     """Today's default protocol: one fixed split from configs/config.yaml's
     datasets_loading dates. Preserves every side effect the pipeline has
@@ -255,6 +297,8 @@ def _run_single_split(config, args) -> None:
             test_score_mean=result.test_score,
             experiments_csv=args.experiments_csv,
         )
+        if result.interval_metrics is not None:
+            _save_interval_metrics(args.run_name, args.notes, "single_split", result.interval_metrics)
     logger.info(
         f"Test — diff_mae: {result.test_metrics['diff_mae']:.2f} | "
         f"win_acc: {result.test_metrics['win_accuracy']:.1%} | "
@@ -324,6 +368,14 @@ def _run_cv(config, args) -> None:
         test_score_mean=cv_result.test_score_mean,
         experiments_csv=args.experiments_csv,
     )
+    if cv_result.interval_metrics_mean is not None:
+        _save_interval_metrics(
+            args.run_name,
+            args.notes,
+            "cv",
+            cv_result.interval_metrics_mean,
+            per_fold=cv_result.interval_metrics_per_fold,
+        )
 
 
 def main():

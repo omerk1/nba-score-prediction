@@ -244,6 +244,20 @@ class SeasonMotivationConfig(BaseModel):
     preferred_opponent_delta_window_games: int = 20
 
 
+class PredictionIntervalsConfig(BaseModel):
+    """Post-hoc split-conformal prediction intervals around ScorePredictor's
+    existing diff/total point predictions (src/evaluation/conformal.py).
+    Purely additive/diagnostic: does not change training or point
+    predictions, and is judged on coverage/width, never val_score_mean --
+    not part of the ablation-gated feature workflow. `enabled` gates the
+    interval computation in src/evaluation/cv_harness.run_split. See
+    docs/EXPERIMENTS.md section 3.3."""
+
+    enabled: bool = False
+    # Miscoverage rate -> nominal (1-alpha) coverage. 0.1 = 90% intervals.
+    alpha: float = 0.1
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -261,6 +275,7 @@ class Config(BaseModel):
     style_matchup: Optional[StyleMatchupConfig] = None
     on_off_splits: Optional[OnOffSplitsConfig] = None
     season_motivation: Optional[SeasonMotivationConfig] = None
+    prediction_intervals: Optional[PredictionIntervalsConfig] = None
     cv: Optional[CVConfig] = None
 
 

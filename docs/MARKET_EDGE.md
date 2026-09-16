@@ -133,6 +133,29 @@ Disagreement analysis: on games where the model and market disagree, the market 
 
 ---
 
+## 2026-09-15 — Model's own confidence: does OUR conviction (not market disagreement/volume) predict where we're trustworthy?
+
+**Question**: prompted by building post-hoc conformal prediction intervals (`src/evaluation/conformal.py`) — does the model's own stated confidence identify a subset of games where it's actually competitive with the market? A genuinely new angle relative to every prior entry above: Q3's disagreement-magnitude buckets and Q6's liquidity buckets are both market-*external* signals (how much we disagree with the market, how thin the market is); nothing so far conditions on the model's own uncertainty about itself.
+
+**Method**: extended `scripts/market_benchmark.py` with Q7, same fold5 held-out sample as every entry above. **The literal plan (bucket games by their own conformal prediction-interval width) turned out not to be executable**: split conformal (as built) produces one constant interval width per fold, not a per-game-varying one — there is no within-fold variation to bucket held-out games by. Substituted the closest already-available per-game confidence proxy, `|model_diff_pred|` (point predictions only, same convention as Q6 — stays off `model_p_home`), bucketed into quartiles with the same 54.5% pre-registered vig bar and a continuous correlation check as Q6.
+
+**Finding — another clean negative, same shape as every other mechanism tested**:
+
+| Bucket (\|model_diff_pred\|) | n | Model win-rate | Market win-rate |
+|---|---:|---:|---:|
+| Q1 least confident (0.01–2.31) | 305 | 44.3% | 55.7% |
+| Q2 (2.31–4.82) | 304 | 41.8% | 58.2% |
+| Q3 (4.83–7.99) | 304 | 45.4% | 54.6% |
+| Q4 most confident (8.02–19.26) | 304 | 42.4% | 57.6% |
+
+- **No bucket clears 50%, let alone the 54.5% vig bar** — same as Q6's liquidity buckets, and the same band (42–45%) Q6 found across liquidity quartiles.
+- **`corr(|model_diff_pred|, model_advantage) = -0.0013`** (n=1,217) — indistinguishable from zero. The model's own stated confidence carries no information about its reliability vs. the market: the most-confident quartile (Q4) is not more competitive than the least-confident quartile (Q1); if anything Q2 (not the extremes) is worst.
+- Consistent with the already-closed calibration entries above: the model's probabilities are worse-calibrated than the market's, and this shows the same failure from a different angle — its own conviction isn't a signal, not just its stated probability numbers being off.
+
+**Implication**: this closes the "does our own uncertainty carve out a competitive subset" question, negatively — the sixth plausible edge-mechanism tested (after accuracy/disagreement, informational timing, calibration, recalibration, liquidity), and the sixth to come back empty. It also has a concrete methodological upshot for the conformal-interval work itself: **a genuinely adaptive per-game interval (normalized/locally-weighted conformal, or full conformalized quantile regression) is not worth building for this purpose** — the cheap, already-available proxy for "the model's own confidence" showed zero signal, so there's no evidence a more expensive, genuinely-adaptive version of the same underlying idea (magnitude of predicted margin ⟹ reliability) would find one either. `src/evaluation/conformal.py`'s constant-width bands stay as they are (see `prediction_interval_conformal_v1` in `docs/EXPERIMENTS.md`) — validated for what they report (coverage close to nominal), not extended further on this evidence. Nothing proposed or executed beyond this analysis.
+
+---
+
 ## Pending
 
-- None currently open. The venue-thinness/pick'em-competitiveness item (flagged pending as of the 2026-08-17 entry) is now resolved — see the 2026-08-26 recheck above: it did not replicate on a same-population comparison against the current model.
+- None currently open. The venue-thinness/pick'em-competitiveness item (flagged pending as of the 2026-08-17 entry) is now resolved — see the 2026-08-26 recheck above: it did not replicate on a same-population comparison against the current model. The model's-own-confidence item (2026-09-15) is also resolved, negatively, on first pass.
