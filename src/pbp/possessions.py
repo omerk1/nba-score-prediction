@@ -28,9 +28,11 @@ box-score starters) if it turns out to matter.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
 import pandas as pd
+from nba_api.stats.static import players as static_players
 
 REG_PERIOD_SECS = 720.0
 OT_PERIOD_SECS = 300.0
@@ -39,6 +41,35 @@ _CLOCK_RE = re.compile(r"PT(\d+)M([\d.]+)S")
 _SUB_RE = re.compile(r"SUB:\s*(.+?)\s+FOR\s+(.+)$")
 _FT_TRIP_RE = re.compile(r"(\d) of (\d)")
 _SUFFIX_RE = re.compile(r"\s+(jr\.?|sr\.?|ii|iii|iv)$")
+_PREFIX_RE = re.compile(r"^([a-z]+)\.\s+(.+)$")
+
+
+_STATIC_FIRST_NAMES: dict[int, str] | None = None
+
+
+def _static_first_names() -> dict[int, str]:
+    """player id -> normalised first name, built once from the bundled list
+    (find_player_by_id is a linear scan; per-player calls made parsing ~10x slower)."""
+    global _STATIC_FIRST_NAMES
+    if _STATIC_FIRST_NAMES is None:
+        _STATIC_FIRST_NAMES = {int(p["id"]): _norm_name(p["first_name"]) for p in static_players.get_players()}
+    return _STATIC_FIRST_NAMES
+
+
+def _norm_name(name: str) -> str:
+    """Lower-case ASCII form: 'Schröder' -> 'schroder', matching substitution text."""
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKD", name) if not unicodedata.combining(ch)
+    ).strip().lower()
+
+
+_UMLAUT_MAP = str.maketrans({"ö": "oe", "ü": "ue", "ä": "ae", "Ö": "oe", "Ü": "ue", "Ä": "ae"})
+
+
+def _name_variants(name: str) -> set[str]:
+    """Both ASCII conventions the feed mixes: 'Pöltl' appears as 'Poltl' in one
+    column and 'Poeltl' in another."""
+    return {_norm_name(name), _norm_name(name.translate(_UMLAUT_MAP))}
 
 
 def parse_clock(clock: str) -> float:
@@ -103,17 +134,27 @@ class _LineupTracker:
 
     def __init__(self, events: pd.DataFrame, team_ids: list[int]):
         self.team_ids = team_ids
-        # team -> player id -> set of name forms the substitution text may use
-        # ('James' when unique on the roster, 'L. James' when a surname is shared).
-        self.roster: dict[int, dict[int, set[str]]] = {t: {} for t in team_ids}
+        # team -> player id -> (exact name forms, suffix-stripped forms). The
+        # substitution text uses 'James' when unique on the roster, 'L. James'
+        # when a surname is shared, ASCII where the name column keeps accents
+        # ('Schroder' vs 'Schröder'), and drops generational suffixes ('Butler'
+        # for 'Butler III'). Exact forms are matched first so 'Jackson' does
+        # not collide with a teammate stored as 'Jackson Jr.'.
+        self.roster: dict[int, dict[int, tuple[set[str], set[str]]]] = {t: {} for t in team_ids}
+        # First names from nba_api's bundled static player list (no API call):
+        # with three teammates named Williams the text uses 'Jay. Williams' /
+        # 'Jal. Williams', which only a first-name prefix can separate.
+        self.first_name: dict[int, str] = {}
         played = events[(events.person_id > 0) & (events.team_id.isin(team_ids))]
         for t, pid, name, name_i in played[["team_id", "person_id", "player_name", "player_name_i"]].drop_duplicates().itertuples(index=False):
-            forms = self.roster[int(t)].setdefault(int(pid), set())
+            exact, stripped = self.roster[int(t)].setdefault(int(pid), (set(), set()))
             for n in (name, name_i):
                 if isinstance(n, str) and n.strip():
-                    n = n.strip().lower()
-                    forms.add(n)
-                    forms.add(_SUFFIX_RE.sub("", n))  # 'butler iii' is 'Butler' in substitution text
+                    for v in _name_variants(n):
+                        exact.add(v)
+                        stripped.add(_SUFFIX_RE.sub("", v))
+            if int(pid) not in self.first_name:
+                self.first_name[int(pid)] = _static_first_names().get(int(pid), "")
         self.starters = self._infer_starters(events)
         self.on_floor: dict[int, set[int]] = {t: set() for t in team_ids}
         self.complete: dict[int, bool] = {t: False for t in team_ids}
@@ -146,11 +187,24 @@ class _LineupTracker:
         m = _SUB_RE.match(description or "")
         if not m:
             return None
-        name = m.group(1).strip().lower()
-        cands = [pid for pid, forms in self.roster[team].items() if name in forms and pid not in exclude]
-        if len(cands) != 1:
-            return None
-        return cands[0]
+        names = _name_variants(m.group(1))
+        roster = self.roster[team]
+        # 1) exact forms ('james', 'l. james'); 2) first-name prefix + surname
+        # ('jay. williams'); 3) suffix-stripped surname ('butler' for 'Butler III').
+        cands = [pid for pid, forms in roster.items() if names & forms[0] and pid not in exclude]
+        if not cands:
+            pm = _PREFIX_RE.match(next(iter(names)))
+            if pm:
+                prefix = pm.group(1)
+                surnames = {n.split(". ", 1)[1] for n in names if ". " in n}
+                cands = [
+                    pid for pid, forms in roster.items()
+                    if pid not in exclude and (surnames & forms[0] or surnames & forms[1])
+                    and self.first_name.get(pid, "").startswith(prefix)
+                ]
+        if not cands:
+            cands = [pid for pid, forms in roster.items() if names & forms[1] and pid not in exclude]
+        return cands[0] if len(cands) == 1 else None
 
     def start_period(self, period: int) -> None:
         for t in self.team_ids:
@@ -265,24 +319,30 @@ def build_possessions(
             lineups.substitute(r.team_id, r.person_id, r.description)
             continue
 
-        # Score tracking: scoring rows carry the running score. The update is
-        # applied only after a possession opens, so margin_start is pre-event.
-        pts = 0
+        # Score tracking. Only scoring rows (made shots, free throws) update the
+        # running score: Instant Replay rows also carry a score but it can be
+        # stale or reflect a reversed basket, and trusting it broke
+        # reconciliation on ~1.4% of games. Possession points are the nominal
+        # value of the scoring event; the difference between the official
+        # running score and the nominal tally (overturned baskets) is reported
+        # per team as a correction so game totals still reconcile.
         new_score = None
-        if r.score_home != "" and r.score_away != "":
-            new_score = (int(r.score_home), int(r.score_away))
-            pts = sum(new_score) - (score[home] + score[away])
+        nominal = 0
+        if atype in ("Made Shot", "Free Throw"):
+            if r.score_home != "" and r.score_away != "":
+                new_score = (int(r.score_home), int(r.score_away))
+            nominal = int(r.shot_value) if atype == "Made Shot" else int(not r.description.startswith("MISS"))
+        # The update is applied only after a possession opens, so margin_start is pre-event.
 
         if atype == "Free Throw" and "Technical" in r.sub_type:
             if r.team_id in tech_pts:
-                tech_pts[r.team_id] += pts
+                tech_pts[r.team_id] += nominal
             if new_score:
                 score[home], score[away] = new_score
             continue
         if atype not in CORE_TYPES or r.team_id not in other:
-            if new_score:
-                score[home], score[away] = new_score
             continue
+        pts = nominal
 
         team = r.team_id
         if cur is None or cur.off_team != team:
@@ -346,13 +406,18 @@ def build_possessions(
     df = pd.DataFrame(rows)
     # margin_end must reflect opponent tech FTs too, but those are rare and
     # game-level; possession-level margin uses only possession points.
+    pts_home_poss = int(df.loc[df.off_team_id == home, "points"].sum()) if len(df) else 0
+    pts_away_poss = int(df.loc[df.off_team_id == away, "points"].sum()) if len(df) else 0
     summary = {
         "game_id": game_id, "home_team_id": home, "away_team_id": away,
         "n_poss_home": int((df.off_team_id == home).sum()) if len(df) else 0,
         "n_poss_away": int((df.off_team_id == away).sum()) if len(df) else 0,
-        "pts_home_poss": int(df.loc[df.off_team_id == home, "points"].sum()) if len(df) else 0,
-        "pts_away_poss": int(df.loc[df.off_team_id == away, "points"].sum()) if len(df) else 0,
+        "pts_home_poss": pts_home_poss, "pts_away_poss": pts_away_poss,
         "tech_ft_pts_home": tech_pts[home], "tech_ft_pts_away": tech_pts[away],
+        # Official running score minus nominal tally: nonzero only when a
+        # basket was overturned on review (or the feed dropped a scoring row).
+        "score_correction_home": score[home] - pts_home_poss - tech_pts[home],
+        "score_correction_away": score[away] - pts_away_poss - tech_pts[away],
         "final_score_home": score[home], "final_score_away": score[away],
         "lineup_complete_rate": float((df.lineup_off_complete & df.lineup_def_complete).mean()) if len(df) else 0.0,
         "n_events": int(len(ev)),

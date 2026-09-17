@@ -82,7 +82,7 @@ def _synthetic_game():
         _ev(6, 1, "PT11M20.00S", A, "Missed Shot", "Jump Shot", sv=2, loc="v"),
         _ev(7, 1, "PT11M18.00S", A, "Rebound", loc="v"),                      # live oreb -> counts
         _ev(8, 1, "PT11M10.00S", H, "Foul", "Shooting", loc="h"),
-        _ev(9, 1, "PT11M10.00S", A, "Free Throw", "Free Throw 1 of 2", loc="v"),   # missed
+        _ev(9, 1, "PT11M10.00S", A, "Free Throw", "Free Throw 1 of 2", desc="MISS X Free Throw 1 of 2", loc="v"),
         _ev(10, 1, "PT11M10.00S", A, "Rebound", loc="v"),                     # dead-ball, not oreb
         _ev(11, 1, "PT11M10.00S", A, "Free Throw", "Free Throw 2 of 2", sh="3", sa="1", loc="v"),
         # Home miss, away defensive rebound ends it.
