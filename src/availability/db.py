@@ -21,6 +21,15 @@ CREATE TABLE IF NOT EXISTS player_game_log (
 CREATE INDEX IF NOT EXISTS idx_pgl_team_date ON player_game_log(team_id, game_date);
 CREATE INDEX IF NOT EXISTS idx_pgl_player_date ON player_game_log(player_id, game_date);
 
+CREATE TABLE IF NOT EXISTS llm_cache (
+    prompt_hash   TEXT PRIMARY KEY,
+    model         TEXT NOT NULL,
+    variant       TEXT NOT NULL,
+    prompt        TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS backfill_log (
     season       TEXT NOT NULL,
     season_type  TEXT NOT NULL,
@@ -33,6 +42,8 @@ CREATE TABLE IF NOT EXISTS backfill_log (
 
 def get_conn(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    # check_same_thread=False: the LLM estimator writes cache rows from worker
+    # threads, serialized by its own lock.
+    conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.executescript(_SCHEMA)
     return conn

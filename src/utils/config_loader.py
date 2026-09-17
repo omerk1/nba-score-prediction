@@ -290,6 +290,9 @@ class AvailabilityAgentConfig(BaseModel):
     # Rows dated on/after this are the only slice where an LLM's score is
     # trusted against training-data memorization (default LLM's cutoff).
     llm_cutoff_date: str = "2025-06-01"
+    llm_model: str = "gemini-2.5-flash"
+    api_calls_per_minute: int = 600
+    parallel_workers: int = 10
 
 
 class Config(BaseModel):
