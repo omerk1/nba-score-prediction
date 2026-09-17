@@ -1,8 +1,10 @@
 # Availability Agent — Scope
 
-Status: scoped 2026-09-17, not started. Ships disabled by default and goes through
-the ablation-gated workflow in CLAUDE.md before any flag flips. Companion:
-`docs/LLM_COMPONENT_OPTIONS.md` (why this option).
+Status: scoped 2026-09-17; phase 0 (labels, retrieval, baselines) complete the
+same day, results at the end of this file. Phase 1 (LLM estimator) not started.
+Ships disabled by default and goes through the ablation-gated workflow in
+CLAUDE.md before any flag flips. Companion: `docs/LLM_COMPONENT_OPTIONS.md`
+(why this option).
 
 ## 1. Hypothesis
 
@@ -139,3 +141,46 @@ tests/test_availability_prompt.py      # anonymized prompt contains no names/dat
 - All retrieval is bounded by `game_date < D`; as-of tables use D-1.
 - CV folds, harness, and metric are untouched; the extrinsic test uses them as is.
 - Failed twice at the phase 1 gate: log as failed, move on.
+
+---
+
+## Phase 0 results (2026-09-17)
+
+Branch `feature/availability-agent`. Built: `scripts/backfill_player_game_logs.py`
+(140k player-game rows, 2021-22 to 2025-26, 10 API calls), `src/availability/`
+(`labels`, `names`, `retrieval`, `baselines`, `db`), `scripts/run_availability_eval.py`
+(writes `outputs/availability_eval.csv`), `tests/test_availability.py`, and the
+`availability_agent` config section (disabled).
+
+**Finding that changed the design**: `player_injuries.game_date` is the PDF
+report date, and 99% of uncertain listings describe the team's game on the next
+day (details and the effect on the live injury feature: `docs/PIPELINE_AUDIT.md`,
+2026-09-17 addendum). Labels therefore use report date D -> game on D+1. Every
+retrieval fact is bounded to `game_date < D`.
+
+**Gate 1 (labels)**: 7,304 uncertain listings; 829 G League rows and 50 rows
+with no team game on D+1 dropped; 99 unresolved names (1.5%). 6,326 labeled rows,
+resolved share 98.5% (gate: 95%). Play rate: Questionable 53%, Doubtful 6%. The
+current fixed weights (Questionable = plays, Doubtful = 80% absent) are wrong on
+half of all Questionable rows.
+
+**Gate 2 (baselines)**, expanding by season, 4 evaluated seasons, n = 4,766:
+
+| estimator | Brier pooled | Brier post-cutoff | AUC | ECE |
+|---|---:|---:|---:|---:|
+| status prior | 0.2249 | 0.2250 | 0.607 | 0.021 |
+| status x severity prior | 0.2251 | 0.2250 | 0.604 | 0.024 |
+| logistic (context) | 0.2225 | 0.2223 | 0.665 | 0.038 |
+| catboost (context) | 0.2204 | 0.2150 | 0.680 | 0.045 |
+
+The tabular models beat the priors on every slice; the gain is modest because
+Questionable is close to a coin flip. Strongest single facts by correlation with
+the label: the player's own play rate under the same reason text (0.18), minutes
+in their last game (0.14), recent minutes and importance (0.12), own overall play
+rate on prior uncertain listings (0.13). The bar for the LLM (phase 1) is the
+catboost row on the post-cutoff slice: Brier 0.2150.
+
+**Coverage caveat**: back-to-back second nights are almost absent from the
+uncertain pool (0.3% vs. 16% of team-games), because the 11PM report on D rarely
+carries next-day entries for teams that played on D. Any downstream feature
+inherits this gap; it is a data-collection limit, not a modeling choice.

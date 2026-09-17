@@ -63,3 +63,11 @@ Separate from the categorical/target-encoding question above: for families that 
 ---
 
 **Update (2026-08-24):** `second_of_b2b` was tested (Track A item 3) and confirmed a pure duplicate of the already-venue-blind-fixed `back_to_back` — not added. The home/away rest differential proposal (distinct from `second_of_b2b`) was later built and tested as `b2b_diff`/`rest_diff` (`docs/EXPERIMENTS.md`'s `b2b_rest_diff`) — favorable mean val_score but failed the per-fold guardrail, rejected. Density windows, days-since-last-break, travel trip-length/tz-recency, and streak length remain untested. Everything else above (loading/processing/wiring/representation findings, the ranked-triage table) is unchanged.
+
+---
+
+## Addendum (2026-09-17) — injury listings are keyed by report date, not game date
+
+Found while building labels for the availability work (`src/availability/labels.py`). `player_injuries.game_date` is the date of the PDF the scraper downloaded, and the scraper keeps the latest report of each day (11PM ET; `scrape_log.report_time` is `11PM`/`11_45PM` for all 814 dates). The parser never reads the PDF's own "Game Date" column, so a report stored under date D mixes rows for games on D (already tipped off) and games on D+1.
+
+Measured against per-game player logs (`data/raw/availability.sqlite`): **99% of Questionable/Doubtful listings refer to the team's game on D+1**, and only 0.8% match a team game on D. Out listings are a 62/38 mix of same-day and next-day. `_add_injury_features` joins `injury_features` to games on **equal** dates, so a game on date G currently receives the counts from the 11PM report of G: `n_questionable` describes the next day's game, and `n_out` is a blend of G's stale entries and G+1's. This is not outcome leakage (roster status only), but the report is published after G's tip-offs and mostly describes the wrong game. Fix belongs in the scraper (store the per-row Game Date column, then re-scrape or re-parse the ~814 PDFs) followed by an injury-feature ablation; not applied here.

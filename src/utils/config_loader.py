@@ -271,6 +271,27 @@ class PredictionIntervalsConfig(BaseModel):
     alpha: float = 0.1
 
 
+class AvailabilitySource(str, Enum):
+    tabular = "tabular"
+    llm = "llm"
+
+
+class AvailabilityAgentConfig(BaseModel):
+    """Per-listing P(plays) estimates for Questionable/Doubtful players
+    (src/availability/, docs/features/availability_agent_scope.md). When
+    `enabled`, the injury feature's absence weight for uncertain players is
+    `1 - p_play` instead of the fixed 0 (Questionable) / `doubtful_weight`
+    (Doubtful). Ships disabled until the estimator beats its baselines
+    intrinsically and the feature clears the CV ablation."""
+
+    enabled: bool = False
+    db_path: str = "data/raw/availability.sqlite"
+    source: AvailabilitySource = AvailabilitySource.tabular
+    # Rows dated on/after this are the only slice where an LLM's score is
+    # trusted against training-data memorization (default LLM's cutoff).
+    llm_cutoff_date: str = "2025-06-01"
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -288,6 +309,7 @@ class Config(BaseModel):
     style_matchup: Optional[StyleMatchupConfig] = None
     on_off_splits: Optional[OnOffSplitsConfig] = None
     season_motivation: Optional[SeasonMotivationConfig] = None
+    availability_agent: Optional[AvailabilityAgentConfig] = None
     prediction_intervals: Optional[PredictionIntervalsConfig] = None
     cv: Optional[CVConfig] = None
 

@@ -423,6 +423,20 @@ season_motivation:
   # chosen as the middle value, no CV tiebreaker favored 15 or 25.
   preferred_opponent_delta_window_games: 20
 
+availability_agent:
+  # Per-listing P(plays) for Questionable/Doubtful players (src/availability/,
+  # docs/features/availability_agent_scope.md). Replaces the fixed absence
+  # weights in injury_features (Questionable = 0, Doubtful = doubtful_weight)
+  # with a per-case estimate once it clears the intrinsic eval and the CV
+  # ablation. Labels come from per-game box-score minutes
+  # (scripts/backfill_player_game_logs.py -> db_path). Ships disabled.
+  enabled: false
+  db_path: "data/raw/availability.sqlite"
+  source: tabular            # tabular (baseline model, no API) or llm
+  # Rows dated on/after this are the only slice where an LLM's score is
+  # trusted against training-data memorization (gemini-2.5-flash cutoff).
+  llm_cutoff_date: "2025-06-01"
+
 prediction_intervals:
   # Post-hoc split-conformal prediction intervals around the existing
   # diff/total point predictions (src/evaluation/conformal.py). Purely
