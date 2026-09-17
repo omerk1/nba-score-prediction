@@ -117,6 +117,32 @@ model:
   random_state: 42
   iterations: 750              # Max boosting rounds; early stopping will use fewer
   early_stopping_rounds: 50    # Stop if val loss doesn't improve for this many rounds
+  # CatBoost hyperparameters -- previously hardcoded literals in
+  # cv_harness.run_split's ScorePredictor(...) construction, never tuned
+  # under the CV protocol (depth=6, learning_rate=0.1, subsample=0.8,
+  # colsample_bylevel=0.8; l2_leaf_reg/min_data_in_leaf weren't passed at
+  # all -- ScorePredictor._create_model silently dropped them, a real bug
+  # fixed alongside this tuning pass). scripts/tune_model_cv.py's
+  # CV-integrated sweep (session 20260916_1235_hp-tuning-cv-v2, trial13)
+  # found these values beat that untouched baseline on val_score_mean in
+  # ALL 5 folds individually (1.3746 vs. 1.3803 mean) -- ADOPTED as the new
+  # committed default. See the hp_tuning_cv decision-log entry
+  # (docs/EXPERIMENTS.md).
+  depth: 2
+  learning_rate: 0.0907
+  subsample: 0.50
+  colsample_bylevel: 0.82
+  l2_leaf_reg: 2.84
+  min_data_in_leaf: 37
+  # Search bounds only -- never applied automatically, read by
+  # scripts/tune_model_cv.py. The inline comments below (depth "5-8",
+  # learning_rate "<0.08") are leftover from whatever produced this
+  # section originally -- pre-CV-harness, never logged as a decision
+  # anywhere, and contradicted by trial13's own winning values (depth=2,
+  # learning_rate=0.09) above. Left as-is (not corrected/deleted) since
+  # they're not load-bearing -- the bounds themselves (not the comments)
+  # are what the sweep actually uses, and they were wide enough to find
+  # trial13 despite the comments' claims.
   tuning:
     n_trials: 40
     depth:             [2, 8]       # Best consistently 5-8; [2,10] tried, didn't help (team_deficit_v2)

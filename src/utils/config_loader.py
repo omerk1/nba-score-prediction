@@ -89,6 +89,19 @@ class ModelConfig(BaseModel):
     # StyleMatchupConfig.raw_features_enabled's schema-vs-yaml split.
     target_formulation: TargetFormulation = TargetFormulation.home_away
     target_lambda_weight: float = 0.5
+    # CatBoost hyperparameters -- previously hardcoded literals in
+    # cv_harness.run_split's ScorePredictor(...) construction (depth=6,
+    # learning_rate=0.1, subsample=0.8, colsample_bylevel=0.8; l2_leaf_reg/
+    # min_data_in_leaf weren't passed at all). Defaults here match those
+    # exact prior literals / CatBoost's own native defaults, so leaving these
+    # unset is byte-identical to pre-tuning behavior. See
+    # scripts/tune_model_cv.py and the hp_tuning_cv decision-log entry.
+    depth: int = 6
+    learning_rate: float = 0.1
+    subsample: float = 0.8
+    colsample_bylevel: float = 0.8
+    l2_leaf_reg: float = 3.0
+    min_data_in_leaf: int = 1
 
 
 class EloTuningConfig(BaseModel):
