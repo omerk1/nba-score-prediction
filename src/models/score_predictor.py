@@ -75,6 +75,8 @@ class ScorePredictor:
             bootstrap_type="Bernoulli",
             subsample=self.model_params.get("subsample", 0.8),
             colsample_bylevel=self.model_params.get("colsample_bylevel", 0.8),
+            l2_leaf_reg=self.model_params.get("l2_leaf_reg", 3.0),
+            min_data_in_leaf=self.model_params.get("min_data_in_leaf", 1),
             verbose=self.model_params.get("verbose", False),
             loss_function="MultiRMSE",
         )
