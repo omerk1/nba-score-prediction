@@ -27,6 +27,11 @@ data/processed/*
 # overwritten per run, not a permanent ledger, so it stays gitignored.
 !outputs/market_benchmark_summary.csv
 
+# Play-by-play possession-aggregate persistence screen: one small row per
+# candidate stat per block size, the durable evidence behind which aggregates
+# went on to a CV ablation, same rationale as !outputs/experiments.csv above.
+!outputs/pbp_persistence_screen.csv
+
 # Same rationale, calibration (Q4) cross-run history -- the per-run
 # reliability-curve/concentration dump (market_benchmark_calibration_<tag>.csv)
 # stays gitignored, same as market_benchmark_games_<tag>.csv above.

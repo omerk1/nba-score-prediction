@@ -118,6 +118,9 @@ class _Poss:
     n_fta: int = 0
     n_oreb: int = 0
     n_tov: int = 0
+    n_fgm: int = 0
+    n_fg3m: int = 0
+    n_ftm: int = 0
     last_shot_value: int | None = None
     last_shot_distance: int | None = None
     last_shot_x: int | None = None
@@ -362,6 +365,8 @@ def build_possessions(
         if atype == "Made Shot":
             cur.n_fga += 1
             cur.n_fg3a += int(r.shot_value == 3)
+            cur.n_fgm += 1
+            cur.n_fg3m += int(r.shot_value == 3)
             cur.points += pts
             cur.outcome = "made_fg"
             _record_shot(cur, r)
@@ -372,6 +377,7 @@ def build_possessions(
             _record_shot(cur, r)
         elif atype == "Free Throw":
             cur.n_fta += 1
+            cur.n_ftm += pts
             cur.points += pts
             cur.outcome = "ft" if pts > 0 else "miss"
         elif atype == "Turnover":
@@ -398,6 +404,7 @@ def build_possessions(
             "margin_end": p.margin_start + p.points,
             "points": p.points, "outcome": p.outcome,
             "n_fga": p.n_fga, "n_fg3a": p.n_fg3a, "n_fta": p.n_fta, "n_oreb": p.n_oreb, "n_tov": p.n_tov,
+            "n_fgm": p.n_fgm, "n_fg3m": p.n_fg3m, "n_ftm": p.n_ftm,
             "last_shot_value": p.last_shot_value, "last_shot_distance": p.last_shot_distance,
             "last_shot_x": p.last_shot_x, "last_shot_y": p.last_shot_y, "last_shot_subtype": p.last_shot_subtype,
             "lineup_off": ",".join(map(str, p.lineup_off)), "lineup_def": ",".join(map(str, p.lineup_def)),

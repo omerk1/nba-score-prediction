@@ -72,6 +72,9 @@ SCHEMAS = {
             n_fta               INTEGER,
             n_oreb              INTEGER,
             n_tov               INTEGER,
+            n_fgm               INTEGER,
+            n_fg3m              INTEGER,
+            n_ftm               INTEGER,
             last_shot_value     INTEGER,
             last_shot_distance  INTEGER,
             last_shot_x         INTEGER,
@@ -115,5 +118,17 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     for ddl in SCHEMAS.values():
         conn.execute(ddl)
+    _add_missing_columns(conn, "possessions", SCHEMAS["possessions"])
     conn.commit()
     return conn
+
+
+def _add_missing_columns(conn: sqlite3.Connection, table: str, ddl: str) -> None:
+    """Additive migration: columns present in the DDL but not in an existing
+    table are appended (NULL for old rows; a --force re-parse fills them)."""
+    existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+    body = ddl.split("(", 1)[1].rsplit(")", 1)[0]
+    for line in body.splitlines():
+        parts = line.strip().rstrip(",").split()
+        if len(parts) >= 2 and parts[0] not in existing and parts[0].upper() != "PRIMARY":
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {parts[0]} {parts[1]}")

@@ -35,6 +35,12 @@ def test_fixture_reconciles_with_box_score(fixture_events):
     assert s["pts_away_poss"] + s["tech_ft_pts_away"] == 106
     assert poss.n_fga.sum() == 92 + 89          # box-score FGA
     assert poss.n_fta.sum() == 42 - 2           # box-score FTA minus the two technical FTs
+    ev = fixture_events
+    assert poss.n_fgm.sum() == (ev.action_type == "Made Shot").sum()
+    assert poss.n_fg3m.sum() == ((ev.action_type == "Made Shot") & (ev.shot_value == 3)).sum()
+    ft = ev[(ev.action_type == "Free Throw") & ~ev.sub_type.str.contains("Technical")]
+    assert poss.n_ftm.sum() == (~ft.description.str.startswith("MISS")).sum()
+    assert (poss.points == 2 * (poss.n_fgm - poss.n_fg3m) + 3 * poss.n_fg3m + poss.n_ftm).all()
     assert 85 <= s["n_poss_home"] <= 110 and 85 <= s["n_poss_away"] <= 110
 
 
