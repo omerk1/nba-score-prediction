@@ -18,6 +18,7 @@ import pandas as pd
 from scipy.stats import norm
 
 from src.data_processing.data_loader import load_training_data
+from src.evaluation.conformal import compute_interval_metrics
 from src.feature_engineering.feature_builder import FeatureBuilder
 from src.models.score_predictor import ScorePredictor
 from src.utils.config_loader import CVFoldConfig
@@ -155,6 +156,11 @@ class SplitResult:
     n_val: int
     n_test: int
     feature_cols: list = field(default_factory=list)
+    # Only populated when config.prediction_intervals.enabled (see
+    # compute_interval_metrics) -- coverage/width of post-hoc conformal
+    # intervals around the diff/total point predictions above. Diagnostic
+    # only: never influences val_score/test_score.
+    interval_metrics: dict = None
     # Only populated when keep_artifacts=True (single_split's own side-effect
     # artifacts -- feature CSVs, saved model, predictions preview -- need
     # these; CV mode leaves them None for all 5 folds rather than carrying 5
@@ -245,6 +251,31 @@ def run_split(
     train_metrics, val_metrics = predictor.train(X_train, y_train, X_val, y_val)
     test_metrics = predictor.evaluate(X_test, y_test, dataset_name="Test")
 
+    interval_metrics = None
+    if config.prediction_intervals and config.prediction_intervals.enabled:
+        # Inference only (predictor.predict) -- no retraining, no new data
+        # access, so no new leakage surface. target_cols is always
+        # [PTS_home, PTS_away] (config.features.targets); diff/total are
+        # derived the same way ScorePredictor.evaluate derives them.
+        val_pred = predictor.predict(X_val)
+        test_pred = predictor.predict(X_test)
+        home_col, away_col = target_cols[0], target_cols[1]
+        diff_val_true = (y_val[home_col] - y_val[away_col]).to_numpy()
+        total_val_true = (y_val[home_col] + y_val[away_col]).to_numpy()
+        diff_test_true = (y_test[home_col] - y_test[away_col]).to_numpy()
+        total_test_true = (y_test[home_col] + y_test[away_col]).to_numpy()
+        interval_metrics = compute_interval_metrics(
+            diff_val_true,
+            val_pred[:, 0] - val_pred[:, 1],
+            diff_test_true,
+            test_pred[:, 0] - test_pred[:, 1],
+            total_val_true,
+            val_pred[:, 0] + val_pred[:, 1],
+            total_test_true,
+            test_pred[:, 0] + test_pred[:, 1],
+            config.prediction_intervals.alpha,
+        )
+
     naive_window = config.features.naive_rolling_baseline
     naive_val_metrics = naive_baseline_metrics(val_features, y_val, naive_window)
     naive_test_metrics = naive_baseline_metrics(test_features, y_test, naive_window)
@@ -277,6 +308,7 @@ def run_split(
         n_val=len(X_val),
         n_test=len(X_test),
         feature_cols=feature_cols,
+        interval_metrics=interval_metrics,
         predictor=predictor if keep_artifacts else None,
         train_features=train_features if keep_artifacts else None,
         val_features=val_features if keep_artifacts else None,
@@ -290,6 +322,11 @@ class CVResult:
     fold_results: list
     val_score_mean: float
     test_score_mean: float
+    # Only populated when config.prediction_intervals.enabled -- mean and
+    # per-fold list of each fold's interval_metrics dict. Diagnostic only,
+    # never part of val_score_mean/test_score_mean.
+    interval_metrics_mean: dict = None
+    interval_metrics_per_fold: list = None
 
 
 def run_expanding_window_cv(config, lambda_weight: float = 0.5) -> CVResult:
@@ -314,9 +351,23 @@ def run_expanding_window_cv(config, lambda_weight: float = 0.5) -> CVResult:
 
     val_scores = [r.val_score for r in fold_results]
     test_scores = [r.test_score for r in fold_results]
+
+    interval_metrics_mean = None
+    interval_metrics_per_fold = None
+    if all(r.interval_metrics is not None for r in fold_results):
+        interval_metrics_per_fold = [r.interval_metrics for r in fold_results]
+        interval_keys = ("diff_coverage", "diff_mean_width", "total_coverage", "total_mean_width")
+        interval_metrics_mean = {
+            key: sum(m[key] for m in interval_metrics_per_fold) / len(interval_metrics_per_fold)
+            for key in interval_keys
+        }
+        interval_metrics_mean["alpha"] = interval_metrics_per_fold[0]["alpha"]
+
     return CVResult(
         fold_names=[f.name for f in folds],
         fold_results=fold_results,
         val_score_mean=sum(val_scores) / len(val_scores),
         test_score_mean=sum(test_scores) / len(test_scores),
+        interval_metrics_mean=interval_metrics_mean,
+        interval_metrics_per_fold=interval_metrics_per_fold,
     )
