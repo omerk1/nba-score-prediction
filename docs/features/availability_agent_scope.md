@@ -1,10 +1,12 @@
 # Availability Agent — Scope
 
-Status: scoped 2026-09-17; phase 0 (labels, retrieval, baselines) complete the
-same day, results at the end of this file. Phase 1 (LLM estimator) not started.
-Ships disabled by default and goes through the ablation-gated workflow in
-CLAUDE.md before any flag flips. Companion: `docs/LLM_COMPONENT_OPTIONS.md`
-(why this option).
+Status: scoped 2026-09-17. Phase 0 (labels, retrieval, baselines) complete the
+same day. Phase 1 complete 2026-09-18: **the LLM estimator was rejected** — it
+lost to every baseline including the status prior, and added nothing on top of
+the tabular model. The tabular estimator survives and carries into phase 2. Both
+result sections are at the end of this file. Ships disabled by default and goes
+through the ablation-gated workflow in CLAUDE.md before any flag flips.
+Companion: `docs/LLM_COMPONENT_OPTIONS.md` (why this option).
 
 ## 1. Hypothesis
 
@@ -184,3 +186,62 @@ catboost row on the post-cutoff slice: Brier 0.2150.
 uncertain pool (0.3% vs. 16% of team-games), because the 11PM report on D rarely
 carries next-day entries for teams that played on D. Any downstream feature
 inherits this gap; it is a data-collection limit, not a modeling choice.
+
+---
+
+## Phase 1 results (2026-09-18) — LLM estimator rejected, tabular estimator kept
+
+Built: `src/availability/prompt.py` (anonymized and named prompt variants),
+`src/availability/llm_estimator.py` (Gemini, JSON output, temperature 0,
+responses cached in `availability.sqlite`), `src/availability/llm_derived.py`
+(isotonic calibration and a stacked model), `scripts/attach_llm_predictions.py`,
+`scripts/compare_availability_estimators.py`, `tests/test_availability_llm.py`.
+9,532 calls, zero failures, all cached; the whole eval re-runs offline.
+
+**Result: the LLM loses to every baseline, including the status prior.** Brier
+on the evaluated rows (n = 4,766 pooled, 980 post-cutoff):
+
+| estimator | pooled | post-cutoff | AUC | ECE |
+|---|---:|---:|---:|---:|
+| catboost (facts only) | 0.2204 | 0.2150 | 0.680 | 0.045 |
+| logistic (facts only) | 0.2225 | 0.2223 | 0.665 | 0.038 |
+| status prior | 0.2249 | 0.2250 | 0.607 | 0.021 |
+| llm, calibrated | 0.2280 | 0.2310 | 0.633 | 0.034 |
+| llm, raw | 0.2407 | 0.2472 | 0.630 | 0.097 |
+
+Paired bootstrap over the same rows, 10,000 resamples, post-cutoff slice: the
+raw LLM is worse than the status prior by 0.0222 (95% CI 0.0133 to 0.0316) and
+worse than catboost by 0.0322 (0.0217 to 0.0428). Calibrated it is still worse
+than the status prior by 0.0060 (0.0016 to 0.0105). Every gap is significant.
+
+**Why it loses**: not ranking, calibration. The raw LLM's AUC (0.630) beats the
+status prior's (0.607), so it does order rows by risk. But it states low
+probabilities far more strongly than reality supports: rows where it said 0.05
+played 14% of the time, and rows where it said 0.21 played 47%. Isotonic
+calibration cut the calibration error from 0.097 to 0.034 and recovered most of
+the Brier gap, but ranking alone was never enough to pass the prior.
+
+**Does it add anything the facts miss? No.** Adding the LLM's probability as a
+feature to catboost changed nothing measurable: 0.2216 vs. 0.2204 pooled,
+difference 0.0012 (CI -0.0001 to 0.0027), not significant, and the same at
+post-cutoff. Its probabilities correlate 0.63 with catboost's, so it is mostly
+re-deriving the same signal less precisely.
+
+**Memorization check: negative, and worth stating plainly.** The named prompt
+(player, team, and date restored) scored *worse* than the anonymized one on the
+pre-cutoff seasons, 0.2408 vs 0.2390. Identity gives the model no recall
+advantage on these games, so the anonymized numbers are trustworthy and the
+anonymization costs nothing.
+
+**Decision**: the LLM path is rejected per the phase 1 gate (two attempts: raw,
+then calibrated and stacked). `availability_agent.source` stays `tabular`.
+Phase 2's CV ablation proceeds with the catboost estimator, which does beat the
+status prior significantly (post-cutoff 0.0100 better, CI 0.0027 to 0.0171).
+The LLM code stays in the tree, disabled, because it is what makes the negative
+result reproducible.
+
+**Honest read on the wider question**: on a task with ~4,000 labeled training
+rows and a fact set that is already numeric, a gradient-boosted model on those
+facts beats a frontier LLM reading the same facts as prose. The LLM's one
+potential edge here was the free-text injury reason, and the same-reason play
+rate the retrieval layer computes from history already captures it.

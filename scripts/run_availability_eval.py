@@ -86,6 +86,14 @@ def build_estimators(names: list[str]) -> list:
             from src.availability.llm_estimator import LLMEstimator
 
             ests.append(LLMEstimator(variant="anonymized" if n == "llm" else "named"))
+        elif n == "llm_calibrated":
+            from src.availability.llm_derived import CalibratedLLM
+
+            ests.append(CalibratedLLM())
+        elif n == "catboost_plus_llm":
+            from src.availability.llm_derived import CatBoostPlusLLM
+
+            ests.append(CatBoostPlusLLM())
         else:
             raise SystemExit(f"unknown estimator {n}")
     return ests
