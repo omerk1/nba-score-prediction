@@ -45,6 +45,23 @@ logger = logging.getLogger(__name__)
 
 OUT_CSV = Path("outputs/availability_eval.csv")
 
+# Fixed column order for the append-only log. New fields go at the END and get a
+# default, so old rows stay readable and pandas never sees a ragged file.
+EVAL_COLUMNS = [
+    "tag",
+    "run_at",
+    "sample",
+    "estimator",
+    "slice",
+    "n",
+    "play_rate",
+    "brier",
+    "log_loss",
+    "auc",
+    "ece",
+    "n_failed",
+]
+
 
 def metrics(y: np.ndarray, p: np.ndarray) -> dict:
     if len(y) == 0:
@@ -202,10 +219,15 @@ def main() -> None:
                 }
             )
 
-    res = pd.DataFrame(rows)
-    res.insert(0, "tag", args.tag)
-    res.insert(1, "run_at", datetime.now(timezone.utc).isoformat(timespec="seconds"))
-    res.insert(2, "sample", args.sample)
+    res = (
+        pd.DataFrame(rows)
+        .assign(
+            tag=args.tag,
+            run_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            sample=args.sample,
+        )
+        .reindex(columns=EVAL_COLUMNS)
+    )
     OUT_CSV.parent.mkdir(parents=True, exist_ok=True)
     res.to_csv(OUT_CSV, mode="a", header=not OUT_CSV.exists(), index=False)
     logger.info(f"appended {len(res)} rows to {OUT_CSV}")
