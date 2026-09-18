@@ -24,6 +24,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from src.data_processing.fetch_data import _date_to_season
 from src.pbp.aggregates import assign_blocks, block_aggregates, persistence, sequence_stats_per_game, team_view
+from src.pbp.shots import load_shots, location_adjusted_net_rating, shot_quality_blocks
 from src.utils.config_loader import load_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
@@ -41,8 +42,12 @@ STATS = [
     "net_rtg_1h", "net_rtg_2h",
     # style / four factors / shot mix
     "tov_rate", "oreb_per100", "fta_rate", "three_rate", "rim_rate", "mid_rate", "efg",
-    # lineup continuity
+    # shot quality vs a league location baseline (offense and defense)
+    "xpps", "pps", "pps_vs_x", "opp_xpps", "opp_pps", "opp_pps_vs_x",
+    "net_rtg_xadj", "net_rtg_xadj_half",
+    # lineup continuity and lineup-conditioned efficiency
     "top_lineup_share", "top3_lineup_share", "lineups_per100",
+    "net_rtg_top1_lineup", "net_rtg_top5_lineups", "net_rtg_bench_lineups", "net_rtg_top5_minus_bench",
     # order-aware
     "largest_run_for", "largest_run_against", "lead_changes", "time_leading_share",
 ]
@@ -73,10 +78,19 @@ def main() -> None:
     logger.info(f"{len(poss):,} possessions, {poss.game_id.nunique():,} games, seasons {seasons}")
     seq = sequence_stats_per_game(poss)
 
+    with sqlite3.connect(f"file:{cfg.pbp.db_path}?mode=ro", uri=True) as c:
+        shots = load_shots(c, list(poss.game_id.unique()))
+    logger.info(f"{len(shots):,} field-goal attempts for the shot-quality baseline")
+
     results = []
     for season, sp in poss.groupby("season"):
         tv = assign_blocks(team_view(sp), args.block_games, args.min_block_games)
         blocks = block_aggregates(tv, seq)
+        block_map = tv[["team", "game_id", "block"]].drop_duplicates()
+        sq = shot_quality_blocks(shots[shots.game_id.isin(sp.game_id.unique())], block_map)
+        blocks = blocks.merge(sq.reset_index(), on=["team", "block"], how="left")
+        blocks["net_rtg_xadj"] = location_adjusted_net_rating(blocks)
+        blocks["net_rtg_xadj_half"] = location_adjusted_net_rating(blocks, own_weight=0.5)
         blocks["season"] = season
         blocks["team_season"] = blocks.team.astype(str) + "_" + season
         results.append(blocks)

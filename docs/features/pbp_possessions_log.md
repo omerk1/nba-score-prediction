@@ -122,3 +122,66 @@ garbage-filtered net rating, own-luck weight 0.5) as a rolling pre-game
 feature, screened on the last 3 folds first. The other 7 seasons only need
 backfilling if that clears — which is the point of screening before pulling
 ~3.5 h of data.
+
+## 2026-09-18 — Shot quality and lineup-conditioned efficiency (both fail)
+
+The two families the first screen left untested, flagged there as the gap in
+its own coverage. `src/pbp/shots.py` (shot quality, reads the event stream
+directly since the possession table keeps only each possession's last shot),
+plus lineup-conditioned ratings in `aggregates.py`. Same bar as before: beat
+`margin_pg` at `r_next_margin`. Cluster-bootstrap over teams, 1,000 resamples,
+Δ against `margin_pg`:
+
+| Candidate | r_next_margin (5/10/20) | r_self (10) | Δ vs margin at N=5 |
+|---|---|---|---|
+| net_rtg_luckadj_nogarbage (prior winner) | 0.511 / 0.592 / 0.602 | 0.588 | **+0.054** [−0.000, +0.113] |
+| net_rtg_xadj, own weight 0.25 | — | — | +0.014 [−0.028, +0.063] |
+| net_rtg_bench_lineups | 0.346 / 0.469 / 0.582 | 0.413 | −0.111 [−0.161, −0.046] |
+| net_rtg_top5_lineups | 0.303 / 0.344 / 0.437 | 0.221 | −0.154 [−0.222, −0.088] |
+| pps_vs_x (shot-making over expectation) | 0.256 / 0.344 / 0.433 | 0.562 | −0.200 [−0.297, −0.093] |
+| opp_xpps (shot quality allowed) | −0.123 / −0.205 / −0.247 | 0.602 | −0.580 [−0.748, −0.352] |
+| xpps (own shot selection) | 0.042 / −0.001 / −0.060 | 0.523 | — |
+| net_rtg_top5_minus_bench | 0.019 / 0.011 / 0.011 | −0.018 | — |
+
+**Shot quality: the skill/luck split is real, and neither half helps.**
+`opp_xpps`, the quality of shot a defence concedes, has the highest defensive
+persistence measured anywhere in this work (r_self 0.602, against 0.360 for
+raw `def_rtg`), while `opp_pps_vs_x`, whether opponents then miss more than
+their locations imply, sits at 0.170. That is the predicted skill-versus-luck
+contrast and it came out cleanly. But shot selection on both ends is
+orthogonal to *winning*: `xpps` predicts next-block margin at −0.001. Teams
+differ stably in shot quality and those differences do not move the scoreboard
+at this horizon.
+
+**Extending the winning adjustment to all shots makes it worse.** Valuing
+every field goal at its location expectation, rather than correcting only 3P
+and FT against one league rate, drops `r_next_margin` from 0.592 to 0.420 at
+full weight (Δ vs margin −0.105 at N=5, CI excludes zero). A weight sweep puts
+the best variant at 0.25 own-luck weight and only +0.014, inside noise. The
+reading: shooting above a location expectation is substantially skill, so
+removing it discards signal, whereas three-point and free-throw variance
+around a single league rate is mostly noise and removing it helps. The simpler
+adjustment wins and stays the only survivor.
+
+**Lineup-conditioned efficiency fails, including in an instructive direction.**
+Restricting net rating to a team's five most-used lineups *lowers* persistence
+(0.221 vs 0.549 overall) because the restriction cuts sample size and the
+top-five set itself turns over between blocks. Bench-lineup rating outperforms
+top-lineup rating (0.469 vs 0.344), the opposite of the intuition behind the
+candidate, and correlates 0.85 with plain net rating, so it is mostly a
+restatement. `net_rtg_top5_minus_bench`, the starter-versus-bench gap, has
+r_self −0.018: not a stable team property at all.
+
+**Pipeline cross-check (mechanical, not a finding)**: `pps` computed from raw
+shot rows and `2 × efg` computed from the possession table's own counts agree
+to 0.000000 across all 240 team-blocks. Two independent paths through the
+data, so the possession table's shot accounting matches the event stream
+exactly.
+
+**Standing conclusion after both screens**: 45 candidates tested, one beats
+raw points margin, by +0.054 with an interval that touches zero. Combined with
+the near-zero within-team persistence found in the first screen, the evidence
+is that this possession data carries little the existing feature set does not
+already hold. The single ablation on the survivor is still worth running; a
+learned encoder over the same possessions is not indicated by anything
+measured here.

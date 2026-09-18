@@ -51,10 +51,13 @@ def team_view(poss: pd.DataFrame) -> pd.DataFrame:
         "lineup_off": p.lineup_off, "lineup_complete": (p.lineup_off_complete & p.lineup_def_complete).astype(bool),
         "garbage": garbage, "clutch": clutch,
     })
+    # `own_lineup` is the team's own five on either side of the ball, which is
+    # what lineup-conditioned aggregates key on; `lineup_off` stays the
+    # offense's five regardless of perspective.
     off = base.assign(team=p.off_team_id.to_numpy(), opp=p.def_team_id.to_numpy(), side="off",
-                      team_margin=p.margin_start.to_numpy())
+                      team_margin=p.margin_start.to_numpy(), own_lineup=p.lineup_off.to_numpy())
     de = base.assign(team=p.def_team_id.to_numpy(), opp=p.off_team_id.to_numpy(), side="def",
-                     team_margin=-p.margin_start.to_numpy())
+                     team_margin=-p.margin_start.to_numpy(), own_lineup=p.lineup_def.to_numpy())
     return pd.concat([off, de], ignore_index=True)
 
 
@@ -192,6 +195,21 @@ def block_aggregates(tv: pd.DataFrame, seq: pd.DataFrame | None = None,
     out["top3_lineup_share"] = lg.lineup_off.agg(lambda s: s.value_counts(normalize=True).iloc[:3].sum() if len(s) else np.nan)
     out["lineups_per100"] = 100 * lg.lineup_off.nunique() / lg.size()
     out["lineup_coverage"] = lg.size() / out.poss_off
+
+    # Lineup-conditioned efficiency: how the team plays with its real rotation
+    # on the floor, as distinct from how stable that rotation is. Restricted to
+    # possessions where both fives are known.
+    known = tv[tv.lineup_complete & (tv.own_lineup != "")]
+    usage = known.groupby(["team", "block", "own_lineup"]).size().rename("poss")
+    rank = usage.groupby(["team", "block"]).rank(method="first", ascending=False).rename("rank")
+    ranked = known.merge(rank.reset_index(), on=["team", "block", "own_lineup"])
+    top1 = _net(ranked, ranked["rank"] == 1, MIN_CONTEXT_POSS)
+    top5 = _net(ranked, ranked["rank"] <= 5, MIN_CONTEXT_POSS)
+    rest = _net(ranked, ranked["rank"] > 5, MIN_CONTEXT_POSS)
+    out["net_rtg_top1_lineup"] = top1.net_rtg
+    out["net_rtg_top5_lineups"] = top5.net_rtg
+    out["net_rtg_bench_lineups"] = rest.net_rtg
+    out["net_rtg_top5_minus_bench"] = top5.net_rtg - rest.net_rtg
 
     if seq is not None:
         blk = tv[["team", "game_id", "block"]].drop_duplicates()
