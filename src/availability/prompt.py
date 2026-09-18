@@ -15,6 +15,7 @@ the LLM and the baselines are compared on identical information.
 
 import math
 
+import numpy as np
 import pandas as pd
 from nba_api.stats.static import teams as nba_teams
 
@@ -42,6 +43,30 @@ def _num(x, fmt="{:.0f}", unknown="unknown"):
 
 def _pct(x):
     return _num(x, "{:.0%}")
+
+
+def build_few_shot_block(train: pd.DataFrame, n_shots: int, variant: str, seed: int = 7) -> str:
+    """Worked examples with their real outcomes, drawn only from training rows.
+
+    Stratified by status so Doubtful is represented, and sorted so the block is
+    stable for a given (train set, n, seed) and therefore cache-friendly.
+    """
+    if not n_shots or train.empty:
+        return ""
+    rng = np.random.default_rng(seed)
+    n_doubtful = max(1, round(n_shots * float((train["status"] == "Doubtful").mean())))
+    picks = []
+    for status, k in (("Doubtful", n_doubtful), ("Questionable", n_shots - n_doubtful)):
+        pool = train.index[train["status"] == status]
+        if len(pool):
+            picks.extend(rng.choice(pool, size=min(k, len(pool)), replace=False))
+    parts = ["Worked examples from earlier seasons, with what actually happened:\n"]
+    for i, idx in enumerate(sorted(picks), 1):
+        row = train.loc[idx]
+        outcome = "PLAYED" if row["played"] == 1 else "DID NOT PLAY"
+        parts.append(f"Example {i}:\n{render_prompt(row, variant)}\nOutcome: {outcome}\n")
+    parts.append("Now estimate for this case:\n")
+    return "\n".join(parts)
 
 
 def render_prompt(row: pd.Series, variant: str = "anonymized") -> str:

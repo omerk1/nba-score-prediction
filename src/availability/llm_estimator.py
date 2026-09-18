@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from src.availability.db import get_conn
-from src.availability.prompt import SYSTEM_INSTRUCTIONS, render_prompt
+from src.availability.prompt import SYSTEM_INSTRUCTIONS, build_few_shot_block, render_prompt
 from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
@@ -68,13 +68,14 @@ def _parse(text: str) -> dict:
 class GeminiClient:
     """Thin wrapper so tests can substitute a fake with the same .complete(prompt) -> text."""
 
-    def __init__(self, model: str, calls_per_minute: int):
+    def __init__(self, model: str, calls_per_minute: int, thinking_budget: int = 0):
         from google import genai
         from google.genai import types
 
         self._types = types
         self._client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
         self.model = model
+        self.thinking_budget = thinking_budget
         self._limiter = _RateLimiter(calls_per_minute)
 
     def complete(self, prompt: str) -> str:
@@ -86,7 +87,7 @@ class GeminiClient:
                 system_instruction=SYSTEM_INSTRUCTIONS,
                 response_mime_type="application/json",
                 temperature=0.0,
-                thinking_config=self._types.ThinkingConfig(thinking_budget=0),
+                thinking_config=self._types.ThinkingConfig(thinking_budget=self.thinking_budget),
             ),
         )
         return response.text
@@ -102,18 +103,31 @@ class LLMEstimator:
         db_path: str | None = None,
         parallel_workers: int | None = None,
         model: str | None = None,
+        n_shots: int = 0,
+        thinking_budget: int = 0,
+        shot_seed: int = 7,
     ):
         cfg = load_config().availability_agent
         self.variant = variant
-        self.name = "llm" if variant == "anonymized" else "llm_named"
+        self.n_shots = n_shots
+        self.thinking_budget = thinking_budget
+        self.shot_seed = shot_seed
+        self.name = {"anonymized": "llm", "named": "llm_named"}[variant]
+        if n_shots or thinking_budget:
+            self.name = f"llm_shots{n_shots}_think{thinking_budget}"
         self.model = model or cfg.llm_model
         self.db_path = db_path or cfg.db_path
         self.workers = parallel_workers or cfg.parallel_workers
-        self._client = client or GeminiClient(self.model, cfg.api_calls_per_minute)
+        self._client = client or GeminiClient(self.model, cfg.api_calls_per_minute, thinking_budget)
+        self._shot_block = ""
         self.last_details: pd.DataFrame | None = None
         self.n_failed = 0
 
     def fit(self, df: pd.DataFrame):
+        """Draw few-shot examples from the training rows only (labels of rows being
+        predicted never appear). No parameters are learned."""
+        if self.n_shots:
+            self._shot_block = build_few_shot_block(df, self.n_shots, self.variant, self.shot_seed)
         return self
 
     # -- cache -------------------------------------------------------------
@@ -155,7 +169,7 @@ class LLMEstimator:
         return None
 
     def predict(self, df: pd.DataFrame) -> np.ndarray:
-        prompts = [render_prompt(row, self.variant) for _, row in df.iterrows()]
+        prompts = [self._shot_block + render_prompt(row, self.variant) for _, row in df.iterrows()]
         keys = [prompt_key(self.model, p) for p in prompts]
         conn = get_conn(self.db_path)
         results = self._cached(conn, keys)

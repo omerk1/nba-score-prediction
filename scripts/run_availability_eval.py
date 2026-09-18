@@ -86,6 +86,12 @@ def build_estimators(names: list[str]) -> list:
             from src.availability.llm_estimator import LLMEstimator
 
             ests.append(LLMEstimator(variant="anonymized" if n == "llm" else "named"))
+        elif n.startswith("llm_shots"):
+            # llm_shots<N>_think<B>: few-shot examples from training rows, reasoning budget B
+            from src.availability.llm_estimator import LLMEstimator
+
+            shots, think = n.replace("llm_shots", "").split("_think")
+            ests.append(LLMEstimator(n_shots=int(shots), thinking_budget=int(think)))
         elif n == "llm_calibrated":
             from src.availability.llm_derived import CalibratedLLM
 
@@ -128,12 +134,17 @@ def main() -> None:
         "all estimators are scored on the same rows",
     )
     ap.add_argument("--seed", type=int, default=42)
+    ap.add_argument(
+        "--eval-seasons",
+        default=None,
+        help="comma list of seasons to evaluate (default: every season but the first)",
+    )
     ap.add_argument("--context-cache", default=None, help="optional parquet path to cache the context frame")
     args = ap.parse_args()
 
     ctx = load_context(args)
     seasons = sorted(ctx["season"].unique())
-    eval_seasons = seasons[1:]
+    eval_seasons = args.eval_seasons.split(",") if args.eval_seasons else seasons[1:]
     logger.info(f"seasons {seasons}; evaluating {eval_seasons}")
 
     eval_mask = ctx["season"].isin(eval_seasons)
