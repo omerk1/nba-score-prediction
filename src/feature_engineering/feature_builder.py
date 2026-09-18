@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from src.matchups.config import CACHE_DB, NBA_API_DB
+from src.pbp.features import build_pbp_rolling_features
 from src.utils.config_loader import InjuryMissingValueStrategy, load_config
 
 logging.basicConfig(level=logging.INFO)
@@ -117,6 +118,7 @@ class FeatureBuilder:
         df = self._add_style_matchup_features(df)
         df = self._add_style_fingerprint_features(df)
         df = self._add_on_off_splits_features(df)
+        df = self._add_pbp_features(df)
         df = self._add_season_motivation_features(df, context_end_date)
 
         feature_cols = self._get_feature_columns(df)
@@ -1583,6 +1585,65 @@ class FeatureBuilder:
                     pod_merged["preferred_opponent_delta"].fillna(0.0).values
                 )
 
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_pbp_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Play-by-play possession feature: garbage-time-filtered net rating with
+        shooting variance partly removed (own three-point/free-throw
+        over-performance against the league rate removed at half weight,
+        opponents' in full). See `src/pbp/features.py` for the construction and
+        `docs/features/pbp_possessions_log.md` for why this is the only one of
+        45 screened possession aggregates that beat raw points margin at
+        predicting the next window's result.
+
+        Adds `{home,away}_team_pbp_net_rtg_luckadj` plus the
+        `pbp_net_rtg_luckadj_diff` differential, mirroring
+        `_add_matchup_features`'s differential pattern.
+
+        Leakage: values come from each team's PREVIOUS games only (`shift(1)`
+        before the rolling sum) and the league shooting baselines are expanding
+        means over strictly earlier dates, never a full-sample constant — both
+        enforced in `build_pbp_rolling_features`, not here.
+
+        NaN, not 0.0, for teams with fewer than `MIN_WINDOW_GAMES` prior games:
+        unlike "no one is injured", there is no meaningful zero for "this team
+        has not played enough games yet", and CatBoost handles NaN natively.
+
+        Soft-disabled (warn + skip) when the possession cache is missing,
+        matching `_add_on_off_splits_features`'s not-yet-adopted convention.
+        """
+        cfg = load_config()
+        if not cfg.pbp or not cfg.pbp.enabled:
+            return df
+
+        pbp_db = Path(cfg.pbp.db_path)
+        if not pbp_db.exists():
+            logger.warning(f"PBP possession cache {pbp_db} missing — skipping PBP features.")
+            return df
+
+        window = cfg.pbp.rolling_window
+        feats = build_pbp_rolling_features(str(pbp_db), cfg.data_paths.raw_db, window)
+        if feats.empty:
+            logger.warning("PBP possession table is empty — skipping PBP features.")
+            return df
+
+        # Join on (team, GAME_ID) rather than (team, date): a team plays at most
+        # one game per date today, but the game id is the unambiguous key and
+        # costs nothing here.
+        feats = feats.rename(columns={"game_id": "GAME_ID"})
+        new_cols = {}
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            lookup = pd.DataFrame({"team": df[team_col].values, "GAME_ID": df["GAME_ID"].values})
+            merged = lookup.merge(feats[["team", "GAME_ID", "pbp_net_rtg_luckadj"]],
+                                  on=["team", "GAME_ID"], how="left")
+            new_cols[f"{prefix}_pbp_net_rtg_luckadj"] = merged["pbp_net_rtg_luckadj"].values
+
+        new_cols["pbp_net_rtg_luckadj_diff"] = (
+            new_cols["home_team_pbp_net_rtg_luckadj"] - new_cols["away_team_pbp_net_rtg_luckadj"]
+        )
+        coverage = 1 - pd.isna(new_cols["pbp_net_rtg_luckadj_diff"]).mean()
+        logger.info(f"PBP features: L{window} window, {coverage:.1%} of games have both teams covered")
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _get_feature_columns(self, df: pd.DataFrame) -> list[str]:

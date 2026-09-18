@@ -446,3 +446,4 @@ pbp:
   # feature-builder hook and follows the usual ablation-gated flip.
   enabled: false
   db_path: "data/raw/pbp.sqlite"
+  rolling_window: 10

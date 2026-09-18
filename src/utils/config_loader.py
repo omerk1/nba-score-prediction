@@ -279,6 +279,9 @@ class PBPConfig(BaseModel):
 
     enabled: bool = False
     db_path: str = "data/raw/pbp.sqlite"
+    # Prior games pooled into each pre-game value. 10 matches
+    # features.naive_rolling_baseline and scored best in the persistence screen.
+    rolling_window: int = 10
 
 
 class Config(BaseModel):
