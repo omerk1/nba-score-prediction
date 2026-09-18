@@ -245,3 +245,29 @@ rows and a fact set that is already numeric, a gradient-boosted model on those
 facts beats a frontier LLM reading the same facts as prose. The LLM's one
 potential edge here was the free-text injury reason, and the same-reason play
 rate the retrieval layer computes from history already captures it.
+
+### Third attempt: few-shot examples and a reasoning budget (2026-09-18)
+
+The first two attempts used a bare prompt with reasoning disabled, so "the
+prompt was too constrained" was a fair objection. Tested directly: 16 worked
+examples drawn only from training seasons with their real outcomes, plus a
+2048-token reasoning budget, same anonymized facts, same 980 post-cutoff rows.
+
+| variant | brier | AUC | ECE |
+|---|---:|---:|---:|
+| catboost (facts only) | 0.2150 | 0.698 | 0.049 |
+| status prior | 0.2250 | 0.602 | 0.032 |
+| llm, bare prompt, no reasoning | 0.2472 | 0.630 | 0.097 |
+| llm, 16 examples + reasoning | **0.2942** | **0.584** | 0.219 |
+
+**It got worse, and ranking degraded too.** AUC fell from 0.630 to 0.584, below
+the status prior, so this is not a calibration problem that post-processing
+could repair. The reliability curve shows why: rows it scored 0.04 played 23% of
+the time and rows it scored 0.88 played 53%, wildly overconfident at both ends.
+The worked examples carry binary outcomes (PLAYED / DID NOT PLAY), and the model
+imitated that binary form instead of estimating a rate. On a task whose base
+rate is near a coin flip, confident imitation is the worst possible failure.
+
+**Conclusion after three attempts**: the ceiling is the information in the facts,
+not the prompt. The tabular model extracts more from the same facts than a
+frontier LLM does, and giving the LLM more freedom moved it further away.

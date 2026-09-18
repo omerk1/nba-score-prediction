@@ -69,3 +69,20 @@ returning, load management, coaching change, trade), feed as features.
 An LLM extractor with a strict schema, evaluated against the current parser on a
 labeled sample, fixes a known bug and gives an extraction-accuracy eval as a
 warm-up for option 1.
+
+---
+
+## Outcome (2026-09-18)
+
+Option 1 was built and its LLM component **rejected** after three attempts
+(bare prompt, isotonic-calibrated, and few-shot with a reasoning budget). Full
+numbers and reasoning: `docs/features/availability_agent_scope.md`. The
+non-LLM half of the work survives: box-score availability labels, a
+point-in-time retrieval layer, and a tabular estimator that does beat the
+status prior, which carries into the feature ablation.
+
+Transferable lesson for the remaining options: on a task with a few thousand
+labeled rows where the inputs are already numeric, the LLM has no room to win.
+Options 2 and 4 are the ones where an LLM reads something no tabular model can
+(free text, or its own tool results), so they remain the better candidates if
+this is picked up again.
