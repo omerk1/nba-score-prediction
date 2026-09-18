@@ -1,9 +1,11 @@
 # Availability Agent — Scope
 
 Status: scoped 2026-09-17. Phase 0 (labels, retrieval, baselines) complete the
-same day. Phase 1 complete 2026-09-18: **the LLM estimator was rejected** — it
-lost to every baseline including the status prior, and added nothing on top of
-the tabular model. The tabular estimator survives and carries into phase 2. Both
+same day. Phase 1 complete 2026-09-18: **the LLM estimator was rejected after
+three attempts** (bare prompt, isotonic-calibrated and stacked, then few-shot
+with a reasoning budget). It lost to every baseline including the status prior,
+added nothing on top of the tabular model, and got worse as the prompt was given
+more freedom. The tabular estimator survives and carries into phase 2. All
 result sections are at the end of this file. Ships disabled by default and goes
 through the ablation-gated workflow in CLAUDE.md before any flag flips.
 Companion: `docs/LLM_COMPONENT_OPTIONS.md` (why this option).
