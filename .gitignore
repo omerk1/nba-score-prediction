@@ -155,3 +155,8 @@ config.local.yaml
 tmp/
 temp/
 *.tmp
+
+# LLM score-adjustment diagnostic: one summary row per run, same rationale
+# as the market-benchmark summaries above. The per-game dump
+# (outputs/score_adjustment_games_<tag>.csv) stays ignored.
+!outputs/score_adjustment_test.csv

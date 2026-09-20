@@ -86,3 +86,45 @@ labeled rows where the inputs are already numeric, the LLM has no room to win.
 Options 2 and 4 are the ones where an LLM reads something no tabular model can
 (free text, or its own tool results), so they remain the better candidates if
 this is picked up again.
+
+---
+
+## Bounded score-adjustment test (2026-09-20)
+
+Direct test of "give the engineered features to a language model and let it
+reason about the score", on the real target rather than by analogy. Post-hoc and
+read-only (`scripts/run_score_adjustment_test.py`): it consumes `run_split`'s
+fold5 held-out predictions and never touches training, features, folds or the
+metric. Per game it sends the model's predicted differential plus 15 pre-game
+facts and asks for an adjustment in [-4, +4] points. Team names and dates are
+included, since fold5's test window is entirely after the model's training
+cutoff, which removes the recall path while giving it real basketball knowledge.
+1,225 games, zero failed calls.
+
+| quantity | value |
+|---|---:|
+| differential MAE, model alone | 11.4378 |
+| differential MAE, model plus adjustment | 11.4442 |
+| difference (95% CI, paired bootstrap) | +0.0064 (-0.036, +0.049) |
+| correlation of adjustment with the model's residual | 0.003 |
+| win accuracy, before and after | 0.680 / 0.680 |
+
+**Verdict: no significant effect. The adjustments are noise.** This is a cleaner
+negative than the availability result, and a different one: there the model was
+decisively worse, here it contributes exactly nothing. Correlation with the
+residual is 0.003, and correlation of adjustment size with error size is 0.04.
+
+**It followed instructions well, which makes the null more meaningful.** Told
+the prior on any adjustment was zero, it left 75% of games untouched and
+averaged 0.37 points of adjustment overall. This is not a model flailing.
+
+**Its theory was consistent, confident, and worthless.** Nearly every non-zero
+adjustment cited players ruled out, with mean stated confidence 0.72, on the
+argument that the model underweights injury counts. Worth exactly zero.
+
+**One caveat that matters, and it points at the other piece of work.** The
+injury counts it leaned on are attached to the wrong day (`docs/PIPELINE_AUDIT.md`,
+2026-09-17). The one signal it chose is the one currently corrupted, so this
+test cannot fully close the hypothesis until
+`docs/features/injury_pdf_extraction_scope.md`'s phase A lands. Re-running this
+afterwards is cheap: the harness exists and responses are cached.
