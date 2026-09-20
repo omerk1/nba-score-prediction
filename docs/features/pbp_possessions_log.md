@@ -185,3 +185,55 @@ is that this possession data carries little the existing feature set does not
 already hold. The single ablation on the survivor is still worth running; a
 learned encoder over the same possessions is not indicated by anything
 measured here.
+
+## 2026-09-19 — Full backfill, and a cost estimate that was wrong by 8x
+
+2017-18 through 2025-26 regular seasons, 10,739 games. Chosen to start at
+2017-18 so there is a full season of rolling context before
+`datasets_loading.train_start_date` (2018-10-16); 2016-17 would only feed
+context for rows that are never training samples.
+
+**Parser holds at full scale**, which is the result that matters here:
+
+| Check | One season (2024-25) | All nine seasons |
+|---|---|---|
+| Points reconciled vs. box score | 1,225 / 1,225 | **10,739 / 10,739** |
+| Possessions per team-game | 99.4 | 99.5 (p5 91, p95 109) |
+| Both lineups known | 98.3% | 96.6% |
+| Fetch errors | 0 | 0 |
+
+Nothing in the four name-resolution fixes was overfitted to the first season.
+
+**The rate-limit warning in `docs/NEW_DATA_FEASIBILITY.md` was correct and my
+estimate was not.** Projected 3.2 h at the 1.2 s/game measured on the first
+season; actual was ~24.5 h, a mean of 8.16 s/game. Throughput degraded
+progressively (1.18 s/game at 200 games, 1.44 s at 4,700, 8.16 s overall) as
+stats.nba.com throttled a sustained per-game crawl. The collector's
+exponential backoff absorbed it — zero failures across 9,514 fetches, no
+manual recovery — so the cost was wall-clock only. Anyone re-running a
+per-game pull on this endpoint should budget a day, not an afternoon, and the
+resumable fetch log means it can be stopped and continued freely.
+
+## 2026-09-19 — Ablation, cheap screen (folds 3-5)
+
+`scripts/run_pbp_ablation.py`, both arms through the same `run_split` path,
+differing only by `pbp.enabled`. Treatment adds 3 columns, 148 → 151.
+Validation decides; test is logged and not consulted.
+
+| Fold | val off | val on | delta |
+|---|---:|---:|---:|
+| fold3 | 1.3682 | 1.3717 | +0.0034 |
+| fold4 | 1.3383 | 1.3406 | +0.0024 |
+| fold5 | 1.3514 | 1.3442 | **−0.0072** |
+| mean | 1.3526 | 1.3522 | −0.0005 |
+
+**Ambiguous, leaning negative.** The mean improves by 0.0005, which is 0.04%
+of the score and an order of magnitude below the −0.0018 the entire previous
+phase moved. More to the point, the treatment wins on 1 of 3 folds, failing
+the majority-of-folds bar this project has used for every adoption decision.
+The single win is fold5, whose validation window is 2024-25 — the one season
+the feature was designed and screened on. That is the fold where a spurious
+win is most expected, not least.
+
+Full CV (all 5 folds) run next, since the screen is ambiguous rather than
+cleanly negative and the project's bar for a final call is the full harness.
