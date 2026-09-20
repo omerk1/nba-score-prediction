@@ -204,15 +204,35 @@ context for rows that are never training samples.
 
 Nothing in the four name-resolution fixes was overfitted to the first season.
 
-**The rate-limit warning in `docs/NEW_DATA_FEASIBILITY.md` was correct and my
-estimate was not.** Projected 3.2 h at the 1.2 s/game measured on the first
-season; actual was ~24.5 h, a mean of 8.16 s/game. Throughput degraded
-progressively (1.18 s/game at 200 games, 1.44 s at 4,700, 8.16 s overall) as
-stats.nba.com throttled a sustained per-game crawl. The collector's
-exponential backoff absorbed it — zero failures across 9,514 fetches, no
-manual recovery — so the cost was wall-clock only. Anyone re-running a
-per-game pull on this endpoint should budget a day, not an afternoon, and the
-resumable fetch log means it can be stopped and continued freely.
+**Cost: 3.2 h projected, 3.3 h of actual work, 23.9 h of wall clock.** The
+gap is host suspension, not the API. Checked directly against
+`pbp_fetch_log`'s per-request timings rather than inferred from elapsed wall
+time:
+
+| Measure | Value |
+|---|---|
+| Median request | 1.26 s |
+| 99th percentile request | 1.84 s |
+| Median by tenth of the run | 1.15 → 1.35 s, flat |
+| Fetches at normal speed | 9,498 of 9,514 |
+| Stall events (gap or request > 2 min) | 16 |
+| Implied uninterrupted duration | 3.3 h |
+
+Per-request latency is flat from the first tenth to the last, which rules out
+progressive throttling: a throttled crawl slows down and stays slow. Instead
+16 isolated stalls absorb the wall clock, several appearing as a single
+"request" lasting hours — the signature of the machine sleeping mid-call,
+since the clock keeps running while the process does not.
+
+**The earlier claim in this log that stats.nba.com throttled the crawl was
+wrong.** It came from reading a mean of 8.16 s/game off the progress log
+without checking the distribution; that mean is produced by a handful of
+multi-hour outliers against a median of 1.26 s. The feasibility doc's
+rate-limit warning remains untested by this run rather than confirmed by it.
+Budget ~3.5 h of *awake* machine time for a nine-season pull, and either keep
+the host awake (`caffeinate -i`) or rely on the resumable fetch log, which
+made the interruptions free here: zero failures across 9,514 fetches, no
+manual recovery.
 
 ## 2026-09-19 — Ablation, cheap screen (folds 3-5)
 
