@@ -46,10 +46,13 @@ def _team_abbreviation(team_id: int) -> str | None:
 
 def _is_scraped(db_path: str, game_date: str, source: str) -> bool:
     with get_conn(db_path) as conn:
-        return conn.execute(
-            "SELECT 1 FROM scrape_log WHERE game_date = ? AND source = ? LIMIT 1",
-            (game_date, source),
-        ).fetchone() is not None
+        return (
+            conn.execute(
+                "SELECT 1 FROM scrape_log WHERE game_date = ? AND source = ? LIMIT 1",
+                (game_date, source),
+            ).fetchone()
+            is not None
+        )
 
 
 def _load_cached_injuries(db_path: str, game_date: str, source: str) -> dict[int, list[dict]]:
@@ -60,11 +63,13 @@ def _load_cached_injuries(db_path: str, game_date: str, source: str) -> dict[int
         ).fetchall()
     by_team: dict[int, list] = {}
     for r in rows:
-        by_team.setdefault(r["team_id"], []).append({
-            "player_name": r["player_name"],
-            "status": r["status"],
-            "reason": r["reason"],
-        })
+        by_team.setdefault(r["team_id"], []).append(
+            {
+                "player_name": r["player_name"],
+                "status": r["status"],
+                "reason": r["reason"],
+            }
+        )
     return by_team
 
 
@@ -136,16 +141,22 @@ def _get_importance_map(db_path: str, team_id: int, game_date: str, season_start
     max_usg: float = max(r["usage_rate"] for r in rows) or 1.0
 
     return {
-        r["player_name"]: min(max(
-            (r["minutes_per_game"] / total_minutes) * w.minutes_share
-            + (r["usage_rate"] / max_usg) * w.usage_rate
-            + (r["pts_per_game"] / total_pts) * w.pts_share,
-            0.0), 1.0)
+        r["player_name"]: min(
+            max(
+                (r["minutes_per_game"] / total_minutes) * w.minutes_share
+                + (r["usage_rate"] / max_usg) * w.usage_rate
+                + (r["pts_per_game"] / total_pts) * w.pts_share,
+                0.0,
+            ),
+            1.0,
+        )
         for r in rows
     }
 
 
-def _store_player_injuries(db_path: str, game_date: str, team_id: int, players: list[dict], source: str) -> None:
+def _store_player_injuries(
+    db_path: str, game_date: str, team_id: int, players: list[dict], source: str
+) -> None:
     """Persist raw injury records — always called regardless of scorer."""
     rows = [
         (game_date, team_id, p["player_name"], p.get("status", ""), p.get("reason", ""), source)
@@ -160,7 +171,9 @@ def _store_player_injuries(db_path: str, game_date: str, team_id: int, players: 
         )
 
 
-def _log_scrape(db_path: str, game_date: str, source: str, n_entries: int, report_time: str | None = None) -> None:
+def _log_scrape(
+    db_path: str, game_date: str, source: str, n_entries: int, report_time: str | None = None
+) -> None:
     with get_conn(db_path) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO scrape_log (game_date, source, report_time, n_entries, scraped_at)
@@ -169,17 +182,18 @@ def _log_scrape(db_path: str, game_date: str, source: str, n_entries: int, repor
         )
 
 
-def _upsert_injury_feature(
-    db_path: str, game_date: str, team_id: int, scorer: str, impact: dict
-) -> None:
+def _upsert_injury_feature(db_path: str, game_date: str, team_id: int, scorer: str, impact: dict) -> None:
     with get_conn(db_path) as conn:
         conn.execute(
             """INSERT OR REPLACE INTO injury_features
                (game_date, team_id, scorer, n_out, n_questionable, team_deficit, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
-                game_date, team_id, scorer,
-                impact["n_out"], impact["n_questionable"],
+                game_date,
+                team_id,
+                scorer,
+                impact["n_out"],
+                impact["n_questionable"],
                 impact.get("team_deficit", 0.0),
                 datetime.now(timezone.utc).isoformat(),
             ),
@@ -207,7 +221,9 @@ def _get_games_out_map(db_path: str, game_date: str, team_id: int, player_names:
     return {row[0]: row[1] for row in rows}
 
 
-def _absence_decay(players: list[dict], importance_map: dict[str, float], games_out_map: dict[str, int], rolling_window: int) -> float:
+def _absence_decay(
+    players: list[dict], importance_map: dict[str, float], games_out_map: dict[str, int], rolling_window: int
+) -> float:
     """
     Importance-weighted average of per-player decay factors.
 
@@ -236,21 +252,30 @@ def _absence_decay(players: list[dict], importance_map: dict[str, float], games_
 
 
 def _score_team(
-    scorer: str, team_name: str, game_date: str, players: list[dict],
-    importance_map: dict, cfg, player_stats: dict, team_avg: float | None,
+    scorer: str,
+    team_name: str,
+    game_date: str,
+    players: list[dict],
+    importance_map: dict,
+    cfg,
+    player_stats: dict,
+    team_avg: float | None,
 ) -> dict:
     """Dispatch to formula or LLM scorer based on config."""
     if scorer == "llm":
         result = extract_impact(team_name, game_date, players, importance_map, player_stats, team_avg)
         from src.news_scraping.extractors.formula_scorer import compute_team_deficit
+
         result["team_deficit"] = compute_team_deficit(
-            players, importance_map,
+            players,
+            importance_map,
             cfg.injury_features.severity_weights,
             cfg.injury_features.doubtful_weight,
         )
         return result
     return score_team(
-        players, importance_map,
+        players,
+        importance_map,
         cfg.injury_features.severity_weights,
         cfg.injury_features.doubtful_weight,
     )
@@ -279,7 +304,11 @@ def _process_team(
     games_out_map = _get_games_out_map(db_path, game_date, team_id, out_names)
 
     player_stats = _get_player_stats(db_path, team_id, game_date, season_start) if scorer == "llm" else {}
-    team_avg = _get_team_avg_score(cfg.data_paths.raw_db, team_id, game_date, cfg.features.rolling_window) if scorer == "llm" else None
+    team_avg = (
+        _get_team_avg_score(cfg.data_paths.raw_db, team_id, game_date, cfg.features.rolling_window)
+        if scorer == "llm"
+        else None
+    )
 
     impact = _score_team(scorer, team_name, game_date, players, importance_map, cfg, player_stats, team_avg)
     decay = _absence_decay(players, importance_map, games_out_map, cfg.features.rolling_window)
@@ -367,7 +396,10 @@ def run_historical(start_date: date, end_date: date) -> None:
                 abbr = _team_abbreviation(team_id) or str(team_id)
                 work_items.append((db_path, team_id, abbr, date_str, players, "pdf"))
         else:
-            entries, report_time = fetch_injuries_for_date(game_date)
+            # Third element is extraction telemetry, consumed by the date-aware
+            # rebuild (scripts/rebuild_injury_dates.py); this legacy path still
+            # files every row under the report's own date.
+            entries, report_time, _ = fetch_injuries_for_date(game_date)
             _log_scrape(db_path, date_str, "pdf", len(entries), report_time)
             if entries:
                 by_team: dict[str, list] = {}

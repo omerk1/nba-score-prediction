@@ -160,3 +160,7 @@ config.local.yaml
 tmp/
 temp/
 *.tmp
+
+# Cached injury-report PDFs (scripts/rebuild_injury_dates.py) -- re-parsing
+# after a parser change must never re-download. Local only, like the DBs.
+data/raw/injury_pdfs/
