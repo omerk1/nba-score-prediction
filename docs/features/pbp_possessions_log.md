@@ -257,3 +257,24 @@ win is most expected, not least.
 
 Full CV (all 5 folds) run next, since the screen is ambiguous rather than
 cleanly negative and the project's bar for a final call is the full harness.
+
+## 2026-09-20 — Full CV, market benchmark, and the decision
+
+Result, evidence and reasoning are in `docs/EXPERIMENTS.md`'s
+`pbp_net_rtg_luckadj` entry (the decision log is the canonical record; this
+file holds the data-pipeline detail). Summary: **rejected**, `pbp.enabled`
+stays `false`. Full CV moved mean validation score by −0.0006 on 3 of 5
+folds, but leave-one-fold-out showed the sign flips to +0.0011 without fold5,
+whose validation window is the one season the feature was designed and
+screened on. The market benchmark was mixed. The possession table and all
+`src/pbp/` code are kept as reusable infrastructure.
+
+**Process note worth recording, since this project's own decision log
+repeatedly insists on "config confirmed via `git status`/`git diff` before and
+after":** a `git add -A` issued while the ablation script had
+`pbp.enabled` temporarily toggled swept the transient `true` into a
+docs-only commit. Caught by reading `git diff --cached` before the next
+commit rather than trusting that the script's `finally` block had restored
+it — which it had, on disk, after the commit was already made. The commit was
+amended to drop the stray change. A toggling ablation script and an
+`add -A` are a bad pair; stage explicit paths while one is running.
