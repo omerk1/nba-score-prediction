@@ -1,8 +1,11 @@
 # Injury Report PDF Extraction — Scope
 
-Status: scoped 2026-09-20, not started. Fixes a live data defect and, as a
-secondary goal, is the one place in this repo where document extraction by a
-language model is a natural tool rather than a substitute for a better one.
+Status: scoped 2026-09-20. **Phase A complete 2026-09-21, deterministic only,
+results at the end of this file**; its remaining step, repointing the live
+feature at the corrected dates, is deliberately held for phase D's ablation.
+Phases B and C not started. Fixes a live data defect and, as a secondary goal,
+is the one place in this repo where document extraction by a language model is
+a natural tool rather than a substitute for a better one.
 Related: `docs/PIPELINE_AUDIT.md` (2026-09-17 addendum, the report-date
 finding), `docs/MARKET_EDGE.md` (2026-08-17, the dropped-players finding).
 
