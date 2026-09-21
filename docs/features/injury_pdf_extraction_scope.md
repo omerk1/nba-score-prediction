@@ -128,3 +128,69 @@ movement on folds 3 to 5 only, since injury coverage starts in 2021-22.
 Phase A is a few hours, most of it the re-fetch. Phase B is a focused hour of
 labeling. Phase C is a few hours. Phase D is one CV run. Phases A and D carry
 the model value; B and C carry the extraction-pipeline experience.
+
+---
+
+## Phase A results (2026-09-21)
+
+Deterministic only, no model. `data/raw/injury_dates.sqlite` now holds
+`player_injuries_dated` (game date, report date, team, player, status, reason,
+date source) and `extraction_log` (per-report telemetry). The live
+`injury_features.sqlite` is untouched.
+
+| measure | before | after |
+|---|---:|---:|
+| rows extracted from 814 reports | 76,778 | 96,950 |
+| rows with a usable game date | 47% | 100% |
+| pages skipped whole | 1,461 | 27 |
+| Clippers rows in the whole history | 0 | 2,920 |
+| extracted date matches a scheduled game | not measured | 99.93% |
+
+**D1, the game-date column, fixed.** Read and carried forward across rows and
+continuation pages. Reports split 55.5% / 44.5% between the report's own date
+and the next day, confirming that the old equal-date join attached most rows to
+the wrong game.
+
+**D2, dropped rows, fixed, and it was worse than recorded.** Three compounding
+causes. (a) The reports write "LA Clippers" where nba_api says "Los Angeles
+Clippers", so *every* Clippers listing in the entire history failed to resolve
+and vanished; that team has looked healthy since 2021. (b) From 2023-24 the
+ruled-table extraction returns only a header row, so the text-alignment fallback
+takes over and emits only the columns with content on that page; the parser
+accepted exactly four columns and skipped everything else whole, losing 1,461
+pages. Columns are now located by finding the status column from its contents
+and deriving the rest from its position, which handles three, four and five
+column pages and makes the team column optional. (c) The documented
+2025-10-21 Lakers case now returns LeBron James, Maxi Kleber and Adou Thiero,
+where the old table has no rows at all.
+
+**Dating the newer reports.** The 2023-24+ fallback drops the date column
+entirely, so those rows are dated from the schedule: a report dated D covers D
+and D+1, and a team scheduled on exactly one of them is unambiguous. Scored
+against the 37,881 rows whose PDFs do carry a real date:
+
+| branch | rows | accuracy |
+|---|---:|---:|
+| unambiguous | 34,397 | 1.0000 |
+| back-to-back tie-break | 3,413 | 0.9786 |
+| unresolved | 71 | n/a |
+
+**A rule that was measured, not reasoned.** The first tie-break assumed a late
+report previews the next day and chose D+1. Scored, that branch was 2.1%
+accurate; the answer is D at 97.9%, taking overall agreement from 91.0% to
+99.6%. The wrong rule had a plausible justification and would have shipped
+without the check.
+
+**The gate did not catch any of this.** "Extracted dates match a scheduled game"
+passed at 99.8% on the broken version, because rows that were silently dropped
+never produced a date to test. What worked was telemetry on what got discarded,
+plus scoring the rule against ground truth. Recorded here because it is the
+transferable lesson, not the row counts.
+
+**The 71 unresolved rows are correct extractions**, not failures: 2021-12-18
+listings for games postponed during the COVID outbreak, which therefore have no
+scheduled game.
+
+**Still open in phase A**: rebuilding `injury_features` on the corrected dates
+and pointing `_add_injury_features` at them. That changes a live feature, so it
+goes with phase D's ablation rather than ahead of it.
