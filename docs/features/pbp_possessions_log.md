@@ -234,6 +234,33 @@ the host awake (`caffeinate -i`) or rely on the resumable fetch log, which
 made the interruptions free here: zero failures across 9,514 fetches, no
 manual recovery.
 
+**Disk footprint: `data/raw/pbp.sqlite` is 1.26 GB** (local, gitignored, not
+in the repo). Measured via `dbstat`:
+
+| Object | Size | Share |
+|---|---:|---:|
+| `pbp_events` (5,289,400 rows) + its index | 0.85 GB | 67% |
+| `possessions` (2,137,466 rows) + its index | 0.41 GB | 32% |
+| `pbp_fetch_log`, `possession_game_summary` | <0.01 GB | <1% |
+
+Two thirds is the raw event stream. It is needed only to **re-parse without
+re-fetching** (if `possessions.py` changes) and for **shot-level work**
+(`shots.py` reads it directly, since the possession table keeps only each
+possession's last shot). Dropping `pbp_events` would leave a working 0.41 GB
+possession table and cost a ~3.5 h refetch to undo. Nothing is compressible by
+`VACUUM` — the freelist is empty — and the widest column (`description`,
+~32 bytes avg) is load-bearing for substitution parsing and free-throw
+make/miss detection, so it cannot be trimmed.
+
+For context before optimising this one: `data/raw/` already holds
+`basketball.sqlite` at 2.2 GB, which has **no reference anywhere in the
+codebase** (only a passing mention in an older log describing it as a
+symlinked data file), and `nba_api.sqlite.bak-a8` at 222 MB, a one-time
+pre-migration backup from `scripts/migrate_shot_volume_columns.py` whose
+migration is long since applied. Those two are ~2.4 GB of likely-dead weight
+against this file's 1.26 GB of live-but-rejected-feature data. Neither is
+touched here — flagged for a human decision, not acted on.
+
 ## 2026-09-19 — Ablation, cheap screen (folds 3-5)
 
 `scripts/run_pbp_ablation.py`, both arms through the same `run_split` path,
@@ -269,17 +296,35 @@ whose validation window is the one season the feature was designed and
 screened on. The market benchmark was mixed. The possession table and all
 `src/pbp/` code are kept as reusable infrastructure.
 
-**Open at time of writing: the harness's own noise floor.** The deltas this
-decision turns on are 0.0006 (mean) to 0.0072 (fold5), and the spread a fold's
-`val_score` shows when nothing changes but `model.random_state` has never been
-measured — here or in any prior entry in `docs/EXPERIMENTS.md`, several of
-which were decided on differences in the same range.
-`scripts/measure_cv_noise_floor.py` is running 3 seeds x 5 folds on the
-committed baseline to establish it. It cannot reverse this rejection (the best
-case it supports is "real, 0.04%, resting on the design fold") but it decides
-the wording: a floor near 0.005 makes the result *unresolvable by this
-harness* rather than small, and the number is reusable for every future
-candidate.
+**Resolved 2026-09-21 — the result is inside the harness's noise floor.**
+Measured after this feature was rejected and PR #66 merged
+(`scripts/measure_cv_noise_floor.py`, 3 seeds x 5 folds, committed baseline,
+nothing varied but `model.random_state`; full entry in `docs/EXPERIMENTS.md`
+under `cv_noise_floor`, raw rows in `outputs/cv_noise_floor.csv`):
+
+| Fold | noise range | this feature's delta | |
+|---|---:|---:|---|
+| fold1 | 0.0042 | −0.0001 | inside |
+| fold2 | 0.0017 | −0.0013 | inside |
+| fold3 | 0.0032 | +0.0035 | at the edge |
+| fold4 | 0.0040 | +0.0023 | inside |
+| fold5 | **0.0082** | −0.0072 | inside |
+| mean | **0.0031** | −0.0006 | inside |
+
+**The rejection was right; the reason given above is weaker than the truth.**
+This log rejected on leave-one-fold-out fragility. The stronger statement is
+that the result is *unresolvable*: the mean delta is 5x smaller than the
+spread from reseeding alone, and the fold5 win the whole result rested on is
+smaller than fold5's own noise range — fold5 being the noisiest of the five.
+Most directly: the unmodified baseline scores **1.3721 at seed 7**, better
+than this feature's treatment arm at **1.3722**. Reseeding the champion bought
+more than the feature did.
+
+Read the rest of this file with that in mind. The persistence screens remain
+valid on their own terms — they are measured on block-to-block correlations,
+not `val_score`, and their bootstrap intervals are reported — but the single
+candidate they promoted was never resolvable by the CV harness, which is the
+more useful lesson than anything about this particular aggregate.
 
 **Process note worth recording, since this project's own decision log
 repeatedly insists on "config confirmed via `git status`/`git diff` before and
