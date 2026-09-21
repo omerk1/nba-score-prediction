@@ -78,6 +78,10 @@ _REPORT_HOURS_NEW = [
 ]
 
 _TRACKED_STATUSES = {"Out", "Doubtful", "Questionable"}
+# Every status the reports use, tracked or not. Used only to locate the status
+# COLUMN on header-less continuation pages, so it must include the ones we
+# discard (an "Available" row still marks where the column is).
+_ALL_STATUSES = _TRACKED_STATUSES | {"Available", "Probable", "Not With Team", "Not Yet Submitted"}
 
 _TEAM_MAP: dict[str, str] = {t["full_name"]: t["abbreviation"] for t in nba_teams.get_teams()}
 # 2023-24+ PDFs concatenate team names without spaces (e.g. "LosAngelesLakers")
@@ -137,6 +141,31 @@ def _col_indices(header: list) -> dict[str, int]:
     }
 
 
+def _infer_continuation_columns(table: list[list]) -> dict[str, int] | None:
+    """Locate columns on a header-less continuation page from cell contents.
+
+    The status column is the one whose cells most often hold a known status
+    word; player name sits immediately left of it, reason immediately right,
+    and team two to the left when that column exists at all. Returns None when
+    no status-like column is found, which is the genuine "this page holds no
+    listings" case rather than a layout we failed to read.
+    """
+    counts: dict[int, int] = {}
+    for row in table:
+        for i, cell in enumerate(row or []):
+            if (cell or "").strip() in _ALL_STATUSES:
+                counts[i] = counts.get(i, 0) + 1
+    if not counts:
+        return None
+    status_i = max(counts, key=lambda k: counts[k])
+    if status_i < 1:  # nothing to the left means no player-name column
+        return None
+    col = {"CurrentStatus": status_i, "PlayerName": status_i - 1, "Reason": status_i + 1}
+    if status_i >= 2:
+        col["Team"] = status_i - 2
+    return col
+
+
 def _parse_game_date(raw: str) -> str | None:
     """PDF 'Game Date' cell -> ISO date. Seen as MM/DD/YYYY and MM/DD/YY; ISO is
     accepted defensively. Returns None when the cell is empty or unrecognised,
@@ -171,6 +200,7 @@ def _parse_pdf(content: bytes) -> tuple[list[dict], dict]:
     rows = []
     current_abbr = None  # persists across pages so team context carries over page breaks
     current_date = None  # same, for the Game Date column (absent on continuation pages)
+    current_matchup = None  # same, for Matchup -- the only game identifier from 2023-24 on
     stats = {
         "pages": 0,
         "pages_no_table": 0,
@@ -181,7 +211,9 @@ def _parse_pdf(content: bytes) -> tuple[list[dict], dict]:
         "rows_no_team": 0,
         "rows_untracked_status": 0,
         "rows_no_date": 0,
+        "rows_no_date_or_matchup": 0,
         "unknown_team_names": set(),
+        "has_matchup_column": False,
         "has_date_column": False,
     }
 
@@ -204,12 +236,15 @@ def _parse_pdf(content: bytes) -> tuple[list[dict], dict]:
                     break
 
             if col is None:
-                # Continuation page: no header. Infer format from column count.
-                first_row = next((r for r in table if r and any(r)), None)
-                if first_row and len(first_row) == 4:
-                    col = _CONTINUATION_COL
-                    data_start = 0
-                else:
+                # Continuation page: no header row. Column COUNT is unreliable --
+                # the text-alignment fallback emits only the columns that happen to
+                # have content on that page, so a page where every row inherits the
+                # team name collapses to 3 columns and a page with a matchup keeps 5.
+                # Locate the status column by its contents instead, and derive the
+                # rest from its position.
+                col = _infer_continuation_columns(table)
+                data_start = 0
+                if col is None:
                     stats["pages_no_header"] += 1
                     continue
 
@@ -218,9 +253,22 @@ def _parse_pdf(content: bytes) -> tuple[list[dict], dict]:
             status_i = col.get("CurrentStatus")
             reason_i = col.get("Reason")
             date_i = col.get("GameDate")
+            # 2023-24 onward the ruled-table extraction yields only the header row,
+            # so _extract_table falls back to text alignment -- and that fallback
+            # drops the Game Date and Game Time columns entirely, keeping Matchup
+            # ("MIN@BOS") as the only game identifier. Matchup plus the report date
+            # resolves to a date against the schedule, since a report covers only
+            # that evening and the next day (see resolve_dates_from_matchup in
+            # scripts/rebuild_injury_dates.py).
+            matchup_i = col.get("Matchup")
             if date_i is not None:
                 stats["has_date_column"] = True
-            if any(x is None for x in [team_i, player_i, status_i]):
+            if matchup_i is not None:
+                stats["has_matchup_column"] = True
+            # `team_i` may legitimately be absent on a continuation page whose rows
+            # all inherit the team from the previous page, so only player and
+            # status are required.
+            if any(x is None for x in [player_i, status_i]):
                 stats["pages_missing_columns"] += 1
                 continue
 
@@ -232,7 +280,11 @@ def _parse_pdf(content: bytes) -> tuple[list[dict], dict]:
                     parsed = _parse_game_date(row[date_i])
                     if parsed:
                         current_date = parsed
-                team_name = (row[team_i] or "").strip()
+                if matchup_i is not None and len(row) > matchup_i:
+                    m = (row[matchup_i] or "").strip().replace(" ", "")
+                    if "@" in m:
+                        current_matchup = m
+                team_name = (row[team_i] or "").strip() if team_i is not None and len(row) > team_i else ""
                 player_raw = (row[player_i] or "").strip()
                 status = (row[status_i] or "").strip()
                 reason = (row[reason_i] or "").strip() if reason_i is not None and len(row) > reason_i else ""
@@ -262,6 +314,8 @@ def _parse_pdf(content: bytes) -> tuple[list[dict], dict]:
                     continue
                 if current_date is None:
                     stats["rows_no_date"] += 1
+                    if current_matchup is None:
+                        stats["rows_no_date_or_matchup"] += 1
 
                 stats["rows_kept"] += 1
                 rows.append(
@@ -271,6 +325,7 @@ def _parse_pdf(content: bytes) -> tuple[list[dict], dict]:
                         "status": status,
                         "reason": reason,
                         "game_date": current_date,
+                        "matchup": current_matchup,
                         "days_out": 0,
                     }
                 )
