@@ -3,8 +3,10 @@
 **Status (2026-08-23): the pace/possession candidate (§2) was subsequently built
 and tested as recommended — `docs/EXPERIMENTS.md`'s `official_pace_poss_new_columns`
 entry — and rejected (the two new columns were near-duplicates of each other,
-CV regressed on 4/5 folds). Player availability (§1) and shot-quality (§3)
-remain as assessed below: closed/no-gap and deferred/untested, respectively.**
+CV regressed on 4/5 folds). Player availability (§1) remains closed/no-gap.
+Play-by-play (§3) was picked up 2026-09-17: the raw feed and a validated
+per-possession table now exist for 2024-25 (`docs/features/pbp_possessions_log.md`);
+the cost estimates below held (1.2 s/game), no feature built on it yet.**
 
 Read-only feasibility assessment, not modeling. Written for a human decision on
 whether/which of these are worth a scoped session — nothing here is a recommendation

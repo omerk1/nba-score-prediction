@@ -435,3 +435,15 @@ prediction_intervals:
   enabled: false
   # Miscoverage rate -> nominal (1-alpha) coverage. 0.1 = 90% intervals.
   alpha: 0.1
+
+pbp:
+  # Play-by-play possession table (src/pbp/, scripts/backfill_pbp.py). Raw
+  # PlayByPlayV3 events plus one row per possession (team with the ball,
+  # score state, lineups on the floor, shot/outcome detail) in an additive
+  # sqlite file -- the substrate for context-conditioned aggregates such as
+  # garbage-time-filtered margin, luck-adjusted margin, clutch splits and
+  # lineup continuity. No feature reads it yet; `enabled` is reserved for the
+  # feature-builder hook and follows the usual ablation-gated flip.
+  enabled: false
+  db_path: "data/raw/pbp.sqlite"
+  rolling_window: 10
