@@ -32,6 +32,13 @@ data/processed/*
 # went on to a CV ablation, same rationale as !outputs/experiments.csv above.
 !outputs/pbp_persistence_screen.csv
 
+# CV harness noise floor (scripts/measure_cv_noise_floor.py): one small row per
+# fold per measured config, recording how much val_score moves when nothing
+# changes but model.random_state. This is the yardstick every ablation delta in
+# outputs/experiments_v2.csv has to be read against, so it belongs in the
+# committed history for exactly the reason experiments_v2.csv itself does.
+!outputs/cv_noise_floor.csv
+
 # Same rationale, calibration (Q4) cross-run history -- the per-run
 # reliability-curve/concentration dump (market_benchmark_calibration_<tag>.csv)
 # stays gitignored, same as market_benchmark_games_<tag>.csv above.
