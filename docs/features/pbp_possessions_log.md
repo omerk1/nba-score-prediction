@@ -269,6 +269,18 @@ whose validation window is the one season the feature was designed and
 screened on. The market benchmark was mixed. The possession table and all
 `src/pbp/` code are kept as reusable infrastructure.
 
+**Open at time of writing: the harness's own noise floor.** The deltas this
+decision turns on are 0.0006 (mean) to 0.0072 (fold5), and the spread a fold's
+`val_score` shows when nothing changes but `model.random_state` has never been
+measured — here or in any prior entry in `docs/EXPERIMENTS.md`, several of
+which were decided on differences in the same range.
+`scripts/measure_cv_noise_floor.py` is running 3 seeds x 5 folds on the
+committed baseline to establish it. It cannot reverse this rejection (the best
+case it supports is "real, 0.04%, resting on the design fold") but it decides
+the wording: a floor near 0.005 makes the result *unresolvable by this
+harness* rather than small, and the number is reusable for every future
+candidate.
+
 **Process note worth recording, since this project's own decision log
 repeatedly insists on "config confirmed via `git status`/`git diff` before and
 after":** a `git add -A` issued while the ablation script had
