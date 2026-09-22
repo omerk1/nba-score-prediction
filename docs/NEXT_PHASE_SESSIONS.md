@@ -1307,6 +1307,56 @@ first, per the `official_pace`/B1 precedent, before committing to a full
    own framing — not worth costing before a source is even identified as
    accessible.
 
+   **CLOSED — REJECTED (2026-09-22).** The 2026-08-24 pass concluded data
+   obtainability was the blocker. That was wrong in a specific way worth
+   recording: **the data was already on disk the whole time.**
+   `data/raw/basketball.sqlite` — a Kaggle dump no code path reads, found
+   during a storage audit — carries an `officials` table, 70,971 rows,
+   23,575 games, 235 officials, 1996-11-08 to 2023-06-12. The earlier grep
+   searched for the string "referee" and this table is named "officials",
+   which is why it was missed. Now extracted to
+   `data/reference/nba_officials_1996_2023.csv.gz` (0.33 MB) so it
+   survives deleting the 2.2 GB source.
+
+   With the data in hand the item fails on its merits, on two independent
+   grounds:
+
+   **(a) Coverage stops before the folds that matter.** Against
+   `nba_api.sqlite`'s regular-season games: 90-92% for 2016-2022, 53% for
+   2023, and **0% for 2024, 2025 and 2026**. Fold5 validates on 2024-25
+   and fold4 tests on it — both would be entirely empty. A live feature
+   would additionally need tonight's crew pre-tip, which is a separate
+   scraper this project does not have.
+
+   **(b) The tendency is real but does not reach the scoreboard.**
+   Split-half persistence per official (73 officials with >=200 games,
+   each game measured against its own season's league mean, the same
+   method as the possession persistence screen):
+
+   | Quantity | split-half r |
+   |---|---:|
+   | Fouls called | **+0.486** |
+   | Free-throw attempts | **+0.524** |
+   | Total points | +0.071 |
+   | Point margin | +0.146 |
+   | Home win | +0.061 |
+   | Home foul edge | +0.196 |
+
+   Officials differ strongly and persistently in how tightly they call a
+   game. That trait does **not** propagate to either model target. The
+   method demonstrably detects persistence when present (~0.5 on fouls),
+   so the near-zero on totals and margin is a real negative, not an
+   underpowered test. Magnitudes agree: the spread across officials is
+   0.76 points on margin against a `diff_mae` of ~11, and 1.10 points on
+   totals against a `total_mae` of ~15 — under a point of adjustment on an
+   11-point error, and not persistent anyway.
+
+   **Verdict: closed, not deferred.** Unlike the play-by-play candidate
+   (deferred for years on cost, then tested and rejected), this one is
+   cheap to re-open — the extract is committed — but there is no reason
+   to. Revisit only if someone has a specific mechanism linking officiating
+   tendency to final score that these six statistics would not capture.
+
 **Final recommendation (2026-08-24 scoping pass, read-only, nothing
 built):** ranked by novelty-confirmed + lower complexity + lower
 collinearity risk, same standard used to pick item 5 last time.
