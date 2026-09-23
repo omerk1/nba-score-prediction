@@ -62,6 +62,27 @@ SYSTEM = (
     'differential, bounded as stated), "confidence" (float 0-1), "rationale" (one sentence).'
 )
 
+# Chain-of-thought variant: reasoning happens in the model's own thinking budget
+# (native Gemini 2.5 reasoning, not a prompt trick), but the instruction also
+# asks explicitly for a considered chain before committing, so the model is not
+# just filling a schema -- it is told what the reasoning should weigh.
+SYSTEM_COT = (
+    "You are adjusting a gradient-boosted NBA model's predicted point differential "
+    "(home minus away). The model is well calibrated overall and beats a rolling "
+    "baseline, so the prior on any adjustment is ZERO.\n\n"
+    "Before answering, reason step by step: (1) which listed facts, if any, describe "
+    "a situation the model's training data underrepresents -- an unusual combination "
+    "of rest, injuries, and schedule, rather than a fact the model already sees "
+    "clearly in isolation; (2) for each such fact, estimate its typical point impact "
+    "from basketball knowledge; (3) sum only the impacts the model plausibly "
+    "underweights, not the full effect of each fact (the model already accounts for "
+    "most of it); (4) if nothing stands out, the adjustment is 0.0 -- that should be "
+    "most games.\n\n"
+    'Return JSON with exactly: "adjustment" (float, points to ADD to the model\'s '
+    'differential, bounded as stated), "confidence" (float 0-1), "rationale" (one sentence '
+    "summarizing the reasoning above)."
+)
+
 # Pre-game facts shown to the model. Every one is a feature the trained model
 # already sees; the question is whether the LLM weighs them differently.
 FACT_SPECS = [
@@ -118,19 +139,38 @@ def _parse(text: str, max_adjust: float) -> dict:
 
 
 def call_all(
-    prompts: list[str], model: str, db_path: str, workers: int, rpm: int, max_adjust: float, tag: str
+    prompts: list[str],
+    model: str,
+    db_path: str,
+    workers: int,
+    rpm: int,
+    max_adjust: float,
+    tag: str,
+    system: str = SYSTEM,
+    temperature: float = 0.0,
+    thinking_budget: int = 0,
+    n_samples: int = 1,
 ) -> list[dict | None]:
+    """Returns one result per prompt. When n_samples > 1 (self-consistency),
+    each sample is called and cached independently -- the cache key includes
+    the sample index -- and the returned adjustment/confidence are the mean
+    across whichever samples succeeded, a genuine multi-sample average rather
+    than one call reused."""
     client = GeminiClient(model, rpm)
     conn = get_conn(db_path)
-    keys = [hashlib.sha256(f"{model}\n{tag}\n{p}".encode()).hexdigest() for p in prompts]
+    sample_keys = [
+        [hashlib.sha256(f"{model}\n{tag}\n{si}\n{p}".encode()).hexdigest() for si in range(n_samples)]
+        for p in prompts
+    ]
+    all_keys = [k for row in sample_keys for k in row]
     cached: dict[str, dict] = {}
-    for i in range(0, len(keys), 500):
-        chunk = keys[i : i + 500]
+    for i in range(0, len(all_keys), 500):
+        chunk = all_keys[i : i + 500]
         q = f"SELECT prompt_hash, response_json FROM llm_cache WHERE prompt_hash IN ({','.join('?' * len(chunk))})"
         for h, js in conn.execute(q, chunk):
             cached[h] = json.loads(js)
-    todo = [(k, p) for k, p in dict(zip(keys, prompts)).items() if k not in cached]
-    logger.info(f"{len(prompts)} games, {len(cached)} cached, {len(todo)} to call")
+    flat_todo = [(k, p) for p, row in zip(prompts, sample_keys) for k in row if k not in cached]
+    logger.info(f"{len(prompts)} games x {n_samples} samples, {len(cached)} cached, {len(flat_todo)} to call")
 
     lock, done = threading.Lock(), 0
 
@@ -144,10 +184,10 @@ def call_all(
                     model=model,
                     contents=p,
                     config=client._types.GenerateContentConfig(
-                        system_instruction=SYSTEM,
+                        system_instruction=system,
                         response_mime_type="application/json",
-                        temperature=0.0,
-                        thinking_config=client._types.ThinkingConfig(thinking_budget=0),
+                        temperature=temperature,
+                        thinking_config=client._types.ThinkingConfig(thinking_budget=thinking_budget),
                     ),
                 )
                 client._limiter.wait()
@@ -170,14 +210,29 @@ def call_all(
             done += 1
             if done % 200 == 0:
                 conn.commit()
-                logger.info(f"{done}/{len(todo)} calls done")
+                logger.info(f"{done}/{len(flat_todo)} calls done")
 
-    if todo:
+    if flat_todo:
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            list(ex.map(work, todo))
+            list(ex.map(work, flat_todo))
         conn.commit()
     conn.close()
-    return [cached.get(k) for k in keys]
+
+    results: list[dict | None] = []
+    for row in sample_keys:
+        samples = [cached[k] for k in row if k in cached]
+        if not samples:
+            results.append(None)
+            continue
+        results.append(
+            {
+                "adjustment": float(np.mean([s["adjustment"] for s in samples])),
+                "confidence": float(np.nanmean([s["confidence"] for s in samples])),
+                "rationale": samples[0]["rationale"],
+                "n_samples_ok": len(samples),
+            }
+        )
+    return results
 
 
 def main() -> None:
@@ -187,8 +242,35 @@ def main() -> None:
     ap.add_argument("--anonymize", action="store_true")
     ap.add_argument("--tag", default=None)
     ap.add_argument("--n-boot", type=int, default=10000)
+    ap.add_argument("--model", default=None, help="overrides availability_agent.llm_model")
+    ap.add_argument(
+        "--cot",
+        action="store_true",
+        help="use the chain-of-thought system prompt and enable native reasoning",
+    )
+    ap.add_argument(
+        "--thinking-budget",
+        type=int,
+        default=None,
+        help="explicit reasoning-token budget; default 4096 with --cot, else 0",
+    )
+    ap.add_argument("--temperature", type=float, default=0.0)
+    ap.add_argument(
+        "--n-samples",
+        type=int,
+        default=1,
+        help="self-consistency: sample this many times per game and average",
+    )
+    ap.add_argument("--rpm", type=int, default=None, help="overrides availability_agent.api_calls_per_minute")
+    ap.add_argument("--workers", type=int, default=None, help="overrides availability_agent.parallel_workers")
     args = ap.parse_args()
-    tag = args.tag or f"score_adjust_{args.fold}_max{args.max_adjust:g}{'_anon' if args.anonymize else ''}"
+    tag = args.tag or (
+        f"score_adjust_{args.fold}_max{args.max_adjust:g}"
+        f"{'_anon' if args.anonymize else ''}{'_cot' if args.cot else ''}"
+        f"{f'_n{args.n_samples}' if args.n_samples > 1 else ''}"
+    )
+    system = SYSTEM_COT if args.cot else SYSTEM
+    thinking_budget = args.thinking_budget if args.thinking_budget is not None else (4096 if args.cot else 0)
 
     cfg = load_config()
     validate_fold_definitions(cfg.cv.folds)
@@ -222,12 +304,16 @@ def main() -> None:
     logger.info("example prompt:\n" + prompts[0])
     out = call_all(
         prompts,
-        cfg.availability_agent.llm_model,
+        args.model or cfg.availability_agent.llm_model,
         cfg.availability_agent.db_path,
-        cfg.availability_agent.parallel_workers,
-        cfg.availability_agent.api_calls_per_minute,
+        args.workers or cfg.availability_agent.parallel_workers,
+        args.rpm or cfg.availability_agent.api_calls_per_minute,
         args.max_adjust,
         tag,
+        system=system,
+        temperature=args.temperature,
+        thinking_budget=thinking_budget,
+        n_samples=args.n_samples,
     )
 
     tf["adjustment"] = [o["adjustment"] if o else np.nan for o in out]

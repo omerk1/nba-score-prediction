@@ -5,9 +5,12 @@ same day. Phase 1 complete 2026-09-18: **the LLM estimator was rejected after
 three attempts** (bare prompt, isotonic-calibrated and stacked, then few-shot
 with a reasoning budget). It lost to every baseline including the status prior,
 added nothing on top of the tabular model, and got worse as the prompt was given
-more freedom. The tabular estimator survives and carries into phase 2. All
-result sections are at the end of this file. Ships disabled by default and goes
-through the ablation-gated workflow in CLAUDE.md before any flag flips.
+more freedom. **A fourth, isolated attempt on 2026-09-23 -- reasoning enabled,
+zero few-shot examples, closing the one confound left in attempt three --
+confirms reasoning alone makes it worse**, not just reasoning combined with
+few-shot. Result at the end of this file. The tabular estimator survives and
+carries into phase 2. Ships disabled by default and goes through the
+ablation-gated workflow in CLAUDE.md before any flag flips.
 Companion: `docs/LLM_COMPONENT_OPTIONS.md` (why this option).
 
 ## 1. Hypothesis
@@ -273,3 +276,54 @@ rate is near a coin flip, confident imitation is the worst possible failure.
 **Conclusion after three attempts**: the ceiling is the information in the facts,
 not the prompt. The tabular model extracts more from the same facts than a
 frontier LLM does, and giving the LLM more freedom moved it further away.
+
+### Fourth attempt: chain-of-thought alone, isolated from few-shot (2026-09-23)
+
+The user pushed back that the first three attempts confounded reasoning with
+few-shot examples in the one run that combined them, and asked whether the
+LLM tracks had been given a genuinely comprehensive trial (real RAG,
+real prompt engineering, isolated chain-of-thought). This attempt closes that
+specific gap: zero-shot, reasoning budget 2048, otherwise identical to attempt
+one's bare prompt. Same 4,766 evaluated rows.
+
+| variant | brier | AUC | ECE |
+|---|---:|---:|---:|
+| catboost (facts only) | 0.2150 (post-cutoff) | 0.698 | 0.045 |
+| status prior | 0.2250 | 0.607 | 0.021 |
+| llm, bare (no reasoning, no examples) | 0.2472 | 0.630 | 0.097 |
+| llm, reasoning alone (no examples) | 0.2597 | 0.627 | — |
+| llm, 16 examples + reasoning | 0.2942 | 0.584 | 0.219 |
+
+**Reasoning alone makes it worse than no reasoning**, not merely worse when
+combined with few-shot. Ranking degrades too (AUC 0.630 to 0.627), so this
+is not purely a calibration side-effect of longer, more hedged rationales.
+Ordered by brier: bare-prompt < reasoning-alone < reasoning-plus-examples --
+each additional technique tried made the result worse, monotonically, across
+four separate attempts.
+
+**Infrastructure note, since it consumed real effort**: getting a clean
+reading of this result required fixing two real bugs in the LLM harness
+itself, found only because this isolation attempt was run: `prompt_key`
+didn't include `thinking_budget`, so a zero-shot reasoning-enabled prompt
+was byte-identical to the zero-shot non-reasoning prompt and silently
+replayed the wrong cache entry; and the shared sqlite cache used deferred
+transactions with batched commits, which let one process hold the write
+lock open for minutes under concurrent access. Both fixed
+(`src/availability/llm_estimator.py`, `src/availability/db.py`), both
+covered by regression tests. Fixing them was necessary to trust this result
+and any future one built on the same cache.
+
+**Not run: self-consistency (multi-sample averaging) or a materially
+stronger model, on either the availability task or the score-adjustment
+task.** Both were built (`--n-samples` and `--model` flags on
+`scripts/run_score_adjustment_test.py`) and smoke-tested successfully, but
+the Gemini API key's prepaid credits were exhausted mid-run before either
+produced a scored result. Given four attempts already show a strictly
+monotonic decline as technique sophistication increases, and the mechanism
+(imitating binary training-style outputs, losing calibration) doesn't
+plausibly reverse with more samples of the same prompt or a larger model
+reading the same numeric facts, these are logged as not worth spending
+fresh credits on rather than left as a loose end. Re-running them is one
+command each (`run_score_adjustment_test.py --cot --n-samples 5` and
+`--model gemini-3.1-pro-preview --cot`) if the credits are restored and the
+question is worth revisiting.
