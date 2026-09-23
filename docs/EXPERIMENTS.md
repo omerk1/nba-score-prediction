@@ -497,3 +497,46 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 - Both confirmed rows logged to `outputs/experiments_v2.csv` per the session-end rule (best confirmed + any other row beating baseline); all 15 screening trials + baseline logged to `results/sessions/20260916_1235_hp-tuning-cv-v2.csv` only.
 - **Recommendation: ADOPT.** `configs/config.yaml`'s `model` section updated to trial13's values, rounded to the config's own precision convention (`depth=2, learning_rate=0.0907, subsample=0.50, colsample_bylevel=0.82, l2_leaf_reg=2.84, min_data_in_leaf=37`) — the new standing champion. **Re-verified on the actual committed config** (run `hp_tuning_cv_promoted`, full 5-fold CV): `val_score_mean=1.3728`, per-fold `1.4273/1.3786/1.3682/1.3383/1.3514` — slightly *better* than trial13's raw unrounded values (`1.3746`), and still improving **all 5 folds** vs. baseline (Δ `-0.0063/-0.0102/-0.0026/-0.0096/-0.0091`). The rounding-induced shift (both directions are possible; here it landed favorably) is a reminder that CatBoost is sensitive enough to exact hyperparameter values that "re-verify the literal committed config, don't just trust the search's raw numbers" is a real, not pro-forma, step — consistent with `target_formulation_diff_total`'s own "re-verified after an explicit re-audit before adoption." `scripts/tune_model.py` (broken, pre-CV-harness) is left as-is, unused, not deleted — same "kept but disabled/superseded" treatment as every other rejected-but-kept-as-an-option piece of code in this project's history.
 - Next: the `model.tuning` sub-section's inline comments (`depth` "5-8", `learning_rate` "<0.08") are now confirmed stale/misleading (contradicted by trial13) but left uncorrected — not load-bearing, the bounds themselves are what the sweep reads. A future re-tune (e.g. after a feature-set change materially shifts training-set size or signal) should treat those comments as historical noise, not a prior. No further follow-up scheduled — this closes the "is the model under-tuned" question raised by the market-edge phase, answered: yes, and now fixed.
+
+---
+
+**`injury_dates_corrected`** (2026-09-23) — does attaching injury counts to the
+correct game (rather than the PDF report's own date, mostly the day before)
+move the composite score. Prompted by `docs/PIPELINE_AUDIT.md`'s 2026-09-17
+finding that `_add_injury_features`'s equal-date join attaches most games'
+injury counts to the wrong game entirely.
+
+- Built `scripts/build_injury_features_dated.py`: recomputes `n_out`/
+  `n_questionable`/`team_deficit` from the corrected `player_injuries_dated`
+  table (`docs/features/injury_pdf_extraction_scope.md` phase A), reusing
+  `compute_team_deficit`/`_get_importance_map` unchanged so only the date
+  attachment differs, not the scoring formula. New flag
+  `injury_features.use_corrected_dates` (default `false`); flag-off path
+  verified byte-identical to pre-change behavior (fold3 `diff_mae=11.0459`
+  before and after the code landed).
+- **Cheap screen (folds 3-5, the injury-coverage era) against the recorded
+  champion (`hp_tuning_cv_promoted`): does not clear.** val_score delta
+  (treatment − champion): fold3 +0.0005, fold4 +0.0025, fold5 −0.0022; mean
+  +0.00027 (flat to very slightly worse). 2 of 3 folds regress. No escalation
+  to full 5-fold CV per the cheap-screen rule; not logged to
+  `outputs/experiments_v2.csv` (never reached full CV).
+- **A confound, not fully isolated**: the rebuild's importance-map cutoff uses
+  `game_date` (exclusive), the live pipeline uses `report_date` (exclusive,
+  typically one day earlier) — so the corrected run's importance snapshot
+  legitimately includes one more day of stats than the original, alongside the
+  date-attachment fix itself. Still leakage-safe, but two variables move
+  together here, not one. Untested whether holding the importance-date
+  boundary at `report_date` while only correcting which game each listing
+  attaches to changes the result.
+- **Recommendation: NOT ADOPTED.** `use_corrected_dates` stays `false`.
+  Logged as a failed screen (one clean attempt, not chased further per
+  "failed twice → log as failed, move on" — this wasn't ambiguous enough to
+  warrant a second try with the same design). The underlying data correction
+  (phase A) is kept regardless — it fixed a genuine extraction bug
+  independent of whether it helps this metric, full details in
+  `docs/features/injury_pdf_extraction_scope.md`.
+- Availability-estimator integration (the originally planned Treatment B,
+  layering the tabular P(plays) estimator on top of this) was not built: it
+  was scoped to build on Treatment A's corrected dates, and A did not clear
+  its own screen. Revisit only if the confound above is resolved and
+  re-screened, or scope B as an independent test not layered on A.

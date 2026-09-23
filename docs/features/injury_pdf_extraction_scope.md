@@ -1,11 +1,15 @@
 # Injury Report PDF Extraction — Scope
 
-Status: scoped 2026-09-20. **Phase A complete 2026-09-21, deterministic only,
-results at the end of this file**; its remaining step, repointing the live
-feature at the corrected dates, is deliberately held for phase D's ablation.
-Phases B and C not started. Fixes a live data defect and, as a secondary goal,
-is the one place in this repo where document extraction by a language model is
-a natural tool rather than a substitute for a better one.
+Status: scoped 2026-09-20. **Phase A complete 2026-09-21** (deterministic
+extraction/dating fix, real bugs found and fixed). **Phase D (ablation)
+complete 2026-09-23: does not clear the 3-fold screen, not adopted** —
+`injury_features.use_corrected_dates` stays `false`. Both result sections are
+at the end of this file; decision also logged in `docs/EXPERIMENTS.md`
+(`injury_dates_corrected`). Phases B and C (model extractor) not started and
+not currently planned, since phase D's negative result removes the motivation
+to re-parse for accuracy beyond what phase A already achieved. Still the one
+place in this repo where document extraction by a language model is a natural
+tool rather than a substitute for a better one, if revisited independently.
 Related: `docs/PIPELINE_AUDIT.md` (2026-09-17 addendum, the report-date
 finding), `docs/MARKET_EDGE.md` (2026-08-17, the dropped-players finding).
 
@@ -197,3 +201,56 @@ scheduled game.
 **Still open in phase A**: rebuilding `injury_features` on the corrected dates
 and pointing `_add_injury_features` at them. That changes a live feature, so it
 goes with phase D's ablation rather than ahead of it.
+
+---
+
+## Phase D result (2026-09-23) — corrected dates alone: not adopted
+
+Built `scripts/build_injury_features_dated.py`: recomputes `n_out`/
+`n_questionable`/`team_deficit` from `player_injuries_dated` (phase A's
+corrected table), reusing `compute_team_deficit` and `_get_importance_map`
+unchanged, writing to a new `injury_features_dated` table in this worktree's
+own `injury_dates.sqlite` -- never touches the shared `injury_features.sqlite`.
+Per (game_date, team, player), the listing with the latest `report_date` is
+used as the pre-tip status. 11,605 team-games scored.
+
+Wired behind a new flag, `injury_features.use_corrected_dates` (default
+`false`), in `_add_injury_features`. Verified the flag-off path is
+byte-identical to pre-change behavior: fold3 diff_mae 11.0459 both before and
+after the code landed.
+
+**Three-fold screen (folds 3-5, per CLAUDE.md's cheap-screen rule) against the
+recorded champion (`hp_tuning_cv_promoted`):**
+
+| fold | champion val | treatment val | delta |
+|---|---:|---:|---:|
+| 3 | 1.3682 | 1.3687 | +0.0005 |
+| 4 | 1.3383 | 1.3408 | +0.0025 |
+| 5 | 1.3514 | 1.3492 | -0.0022 |
+| mean | 1.35263 | 1.35290 | +0.00027 |
+
+**Does not clear the screen.** Two of three folds regress; the mean is flat to
+very slightly worse. No escalation to full 5-fold CV. `use_corrected_dates`
+reverted to `false` before commit.
+
+**A confound worth naming rather than hiding**: the rebuild's importance-map
+lookup uses `game_date` as the exclusive cutoff, while the live pipeline uses
+`report_date` (typically one day earlier). Since `game_date` is usually
+`report_date + 1`, the corrected version's importance snapshot legitimately
+includes one more day of player stats than the original -- still point-in-time
+safe (strictly before the actual game), but a second variable moving alongside
+the date fix, not a clean single-variable test. Whether that confound is
+responsible for the (small, mixed-direction) result above is untested; a
+follow-up that holds the importance-date boundary fixed at `report_date` while
+only correcting which game the LISTING itself is attached to would isolate the
+date fix more cleanly, if this is revisited.
+
+**Read on the whole phase**: the extraction and dating work (phase A) is real
+and worth keeping regardless -- it fixed a genuine correctness bug (every
+Clippers listing silently dropped; three-quarters of listings attached to the
+wrong game) and the corrected data is more accurate on its own terms. But
+"more accurate injury data" and "better composite score" turned out not to be
+the same question, at least not with this scoring formula and this level of
+isolation. Logged as a failed screen, not chased further per the project's
+"failed twice -> log as failed, move on" rule (this was a single clean
+attempt, not ambiguous enough to warrant a second).

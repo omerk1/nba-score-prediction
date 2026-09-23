@@ -160,6 +160,18 @@ class InjuryFeaturesConfig(BaseModel):
     # handling operate) -- gated so the ablation ships disabled-from-adoption
     # by default per CLAUDE.md's ablation-gated feature workflow.
     missing_value_strategy: InjuryMissingValueStrategy = InjuryMissingValueStrategy.zero_fill
+    # Ablation flag (docs/PIPELINE_AUDIT.md 2026-09-17 addendum,
+    # docs/features/injury_pdf_extraction_scope.md phase D): the live
+    # `injury_features` table is keyed by the PDF report's own date, which is
+    # mostly the day BEFORE the game it describes, so _add_injury_features's
+    # equal-date join attaches most games' counts to the wrong report. When
+    # true, reads from scripts/build_injury_features_dated.py's output
+    # (injury_features_dated in data/raw/injury_dates.sqlite, scorer
+    # 'formula_dated') instead -- same scoring logic, correct dates. Default
+    # false: current champion behavior is exactly unchanged until this clears
+    # the CV ablation.
+    use_corrected_dates: bool = False
+    dated_db_path: str = "data/raw/injury_dates.sqlite"
 
 
 class StyleMatchupConfig(BaseModel):

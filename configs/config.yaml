@@ -202,6 +202,10 @@ injury_features:
   # native_nan for missing injury rows. Not adopted -- ships at the status quo
   # default per the ablation-gated feature workflow.
   missing_value_strategy: zero_fill
+  # Ablation result (2026-09-23, folds 3-5 screen): worse on 2/3 folds, mean
+  # flat-to-slightly-worse (+0.0003). Does not clear the screen -- see
+  # docs/features/injury_pdf_extraction_scope.md phase D. Not adopted.
+  use_corrected_dates: false
 
 style_matchup:
   # A7 module (src/matchups/), formally read by config_loader.py's Config schema
