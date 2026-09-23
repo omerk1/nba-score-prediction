@@ -307,6 +307,19 @@ class AvailabilityAgentConfig(BaseModel):
     parallel_workers: int = 10
 
 
+class PBPConfig(BaseModel):
+    """Play-by-play possession table (src/pbp/). Raw PlayByPlayV3 events and
+    the derived per-possession rows live in their own additive sqlite file.
+    `enabled` is reserved for the feature-builder hook once possession-derived
+    features exist; the collector/parser scripts run regardless of it."""
+
+    enabled: bool = False
+    db_path: str = "data/raw/pbp.sqlite"
+    # Prior games pooled into each pre-game value. 10 matches
+    # features.naive_rolling_baseline and scored best in the persistence screen.
+    rolling_window: int = 10
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -326,6 +339,7 @@ class Config(BaseModel):
     season_motivation: Optional[SeasonMotivationConfig] = None
     availability_agent: Optional[AvailabilityAgentConfig] = None
     prediction_intervals: Optional[PredictionIntervalsConfig] = None
+    pbp: Optional[PBPConfig] = None
     cv: Optional[CVConfig] = None
 
 
