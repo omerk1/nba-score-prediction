@@ -44,13 +44,21 @@ def get_conn(db_path: str = DEFAULT_DB_PATH) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     # check_same_thread=False: the LLM estimator writes cache rows from worker
     # threads, serialized by its own lock.
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    # Default sqlite locking raises "database is locked" immediately when a
-    # second process tries to write while another holds the lock, rather than
-    # waiting -- hit in practice running several LLM eval scripts concurrently
-    # against this file (2026-09-23), which crashed mid-run losing uncommitted
-    # calls. WAL lets readers proceed during a write; busy_timeout makes a
-    # second writer wait for the lock instead of erroring.
+    #
+    # isolation_level=None (autocommit): Python's sqlite3 module defaults to
+    # isolation_level="", which implicitly opens a transaction on the first
+    # INSERT and does not release it until an explicit commit(). The callers
+    # here batch commit() every ~200 calls to avoid the overhead of committing
+    # per row, which means a single process can hold the WAL write lock open
+    # for MINUTES while it accumulates a batch -- far longer than any
+    # reasonable busy_timeout, so a second process's write is refused outright
+    # rather than actually waiting. This was the real cause of the "database
+    # is locked" crashes seen running LLM eval scripts concurrently
+    # (2026-09-23); WAL + busy_timeout alone did not fix it, because the lock
+    # genuinely was held that long, not merely contended for an instant.
+    # Autocommit makes each INSERT release the lock immediately, so the
+    # batched conn.commit() calls elsewhere become harmless no-ops.
+    conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(_SCHEMA)
