@@ -48,8 +48,15 @@ class _RateLimiter:
             self._last = time.monotonic()
 
 
-def prompt_key(model: str, prompt: str) -> str:
-    return hashlib.sha256(f"{model}\n{SYSTEM_INSTRUCTIONS}\n{prompt}".encode()).hexdigest()
+def prompt_key(model: str, prompt: str, thinking_budget: int = 0) -> str:
+    """Cache key. Must include every generation parameter that can change the
+    response for identical prompt text -- thinking_budget included, since a
+    zero-shot prompt is byte-identical whether or not reasoning is enabled, and
+    without this a reasoning-enabled run would silently replay the
+    reasoning-disabled cache instead of making new calls (caught 2026-09-23:
+    an "isolate chain-of-thought" run returned numbers identical to 4dp with
+    the earlier thinking-disabled run, because it hit exactly this collision)."""
+    return hashlib.sha256(f"{model}\n{thinking_budget}\n{SYSTEM_INSTRUCTIONS}\n{prompt}".encode()).hexdigest()
 
 
 def _parse(text: str) -> dict:
@@ -170,7 +177,7 @@ class LLMEstimator:
 
     def predict(self, df: pd.DataFrame) -> np.ndarray:
         prompts = [self._shot_block + render_prompt(row, self.variant) for _, row in df.iterrows()]
-        keys = [prompt_key(self.model, p) for p in prompts]
+        keys = [prompt_key(self.model, p, self.thinking_budget) for p in prompts]
         conn = get_conn(self.db_path)
         results = self._cached(conn, keys)
         todo = [(k, p) for k, p in dict(zip(keys, prompts)).items() if k not in results]
