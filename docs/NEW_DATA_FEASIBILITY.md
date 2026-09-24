@@ -4,9 +4,13 @@
 and tested as recommended — `docs/EXPERIMENTS.md`'s `official_pace_poss_new_columns`
 entry — and rejected (the two new columns were near-duplicates of each other,
 CV regressed on 4/5 folds). Player availability (§1) remains closed/no-gap.
-Play-by-play (§3) was picked up 2026-09-17: the raw feed and a validated
-per-possession table now exist for 2024-25 (`docs/features/pbp_possessions_log.md`);
-the cost estimates below held (1.2 s/game), no feature built on it yet.**
+Play-by-play (§3) was picked up 2026-09-17 and is now **closed as rejected**:
+full backfill (2017-18 through 2025-26, 10,739 games, ~2.1M possessions), 45
+candidate aggregates screened on persistence, and one feature
+(`pbp_net_rtg_luckadj`) taken to full CV and rejected as a single-fold
+artifact — later downgraded to *unresolvable* against the harness noise floor.
+The cost estimates below held (1.2 s/game). **All three candidates in this doc
+are now closed; nothing here is an open recommendation.**
 
 Read-only feasibility assessment, not modeling. Written for a human decision on
 whether/which of these are worth a scoped session — nothing here is a recommendation

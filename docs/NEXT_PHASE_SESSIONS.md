@@ -25,13 +25,16 @@ value going forward on this feature set's current record.
 A short plain-language summary of this phase also lives in `CLAUDE.md`
 under "Phase history," for anyone who doesn't open this doc at all.
 
-**If picking up model-quality work again**, the live options per the
-rollup are: Track C's shot-quality play-by-play candidate (deferred, not
-rejected — expensive, lower-confidence than it first looks) or the
-untested creative-feature-engineering backlog below (trend/slope,
-distributional shape, asymmetric style-clash, lineup stability, referee
-tendencies) — those are logged candidates, not a queue; pick one up only
-with a deliberate reason, not by default. Do not resume Track A/B/A4/C's
+**If picking up model-quality work again**, the one live option per the
+rollup is the untested creative-feature-engineering backlog below
+(trend/slope, distributional shape, asymmetric style-clash, lineup
+stability, referee tendencies) — those are logged candidates, not a
+queue; pick one up only with a deliberate reason, not by default.
+Track C's shot-quality play-by-play candidate is **no longer live**: it
+was built out and rejected 2026-09-17/19 (`CLAUDE.md`'s phase history,
+`docs/EXPERIMENTS.md`'s `pbp_net_rtg_luckadj`). Every reference to it as
+"deferred, not rejected" further down this doc is historical, true as of
+this phase's close and superseded since. Do not resume Track A/B/A4/C's
 own per-item session prompts below as if they were still open — they are
 kept in this doc as a historical record of the phase's methodology, not as
 live instructions.

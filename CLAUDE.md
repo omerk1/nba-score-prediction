@@ -91,16 +91,26 @@ the phase's strongest result — needed multiple dedicated diagnostic
 sessions before they could be correctly rejected rather than failing
 cleanly on a first pass.
 
-Two things from this phase are logged but not scheduled, for whoever picks
+One thing from this phase is logged but not scheduled, for whoever picks
 model-quality work back up: a set of scoped-but-untested creative feature
 ideas (explicit trend/slope over rolling windows, distributional-shape
 features, asymmetric style-clash features, lineup-stability/continuity,
 referee-tendency data — `docs/NEXT_PHASE_SESSIONS.md`'s backlog section)
-that are candidates to consider, not a queue to work through by default;
-and one deferred (not rejected) new-data option, play-by-play
-shot-quality data, flagged as genuinely orthogonal signal but expensive
-(large per-game backfill, real rate-limit/blocking risk) and
-lower-confidence than it first appears (`docs/NEW_DATA_FEASIBILITY.md`).
+that are candidates to consider, not a queue to work through by default.
+
+The phase's other loose end, play-by-play data, is no longer open: it was
+built out in full 2026-09-17/19 (10,739 games, ~2.1M possessions,
+validated parser — points reconcile with the box score on every game) and
+**rejected**. 45 candidate aggregates were pre-screened on block-to-block
+persistence; the one promoted to full CV proved a single-fold artifact,
+and the later noise-floor measurement downgraded that verdict to
+*unresolvable* — reseeding the champion moved the score more than the
+feature did. `pbp.enabled` stays `false`, the possession table kept as
+reusable infrastructure. The transferable finding is that **within-team
+persistence is ≈0 across all 45 candidates**: what persists is
+between-team spread, which Elo and rolling margin already encode
+(`docs/EXPERIMENTS.md`'s `pbp_net_rtg_luckadj` entry,
+`docs/features/pbp_possessions_log.md`).
 
 **LLM/agentic-component investigation — closed 2026-09-23**
 (full detail: `docs/LLM_COMPONENT_OPTIONS.md`, marked CLOSED at the top of
