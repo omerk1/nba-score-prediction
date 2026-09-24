@@ -767,16 +767,24 @@ class FeatureBuilder:
         if not cfg.injury_features or not cfg.injury_features.enabled:
             return df
 
-        db_path = cfg.injury_features.db_path
+        # Ablation flag: read the game-date-corrected table instead of the
+        # live, report-date-keyed one. See InjuryFeaturesConfig.use_corrected_dates
+        # and scripts/build_injury_features_dated.py. Everything below this
+        # block (the join, native_nan handling, has_injury_data) is unchanged
+        # either way -- only the source table and column differ.
+        use_dated = getattr(cfg.injury_features, "use_corrected_dates", False)
+        db_path = cfg.injury_features.dated_db_path if use_dated else cfg.injury_features.db_path
+        table = "injury_features_dated" if use_dated else "injury_features"
+        scorer = "formula_dated" if use_dated else cfg.injury_features.scorer
+
         if not Path(db_path).exists():
             logger.warning(f"Injury DB not found at {db_path} — skipping injury features")
             return df
 
-        scorer = cfg.injury_features.scorer
         with sqlite3.connect(db_path) as conn:
             injury_df = pd.read_sql_query(
-                "SELECT game_date, team_id, n_out, n_questionable, team_deficit "
-                "FROM injury_features WHERE scorer = ?",
+                f"SELECT game_date, team_id, n_out, n_questionable, team_deficit "
+                f"FROM {table} WHERE scorer = ?",
                 conn,
                 params=(scorer,),
             )

@@ -160,6 +160,18 @@ class InjuryFeaturesConfig(BaseModel):
     # handling operate) -- gated so the ablation ships disabled-from-adoption
     # by default per CLAUDE.md's ablation-gated feature workflow.
     missing_value_strategy: InjuryMissingValueStrategy = InjuryMissingValueStrategy.zero_fill
+    # Ablation flag (docs/PIPELINE_AUDIT.md 2026-09-17 addendum,
+    # docs/features/injury_pdf_extraction_scope.md phase D): the live
+    # `injury_features` table is keyed by the PDF report's own date, which is
+    # mostly the day BEFORE the game it describes, so _add_injury_features's
+    # equal-date join attaches most games' counts to the wrong report. When
+    # true, reads from scripts/build_injury_features_dated.py's output
+    # (injury_features_dated in data/raw/injury_dates.sqlite, scorer
+    # 'formula_dated') instead -- same scoring logic, correct dates. Default
+    # false: current champion behavior is exactly unchanged until this clears
+    # the CV ablation.
+    use_corrected_dates: bool = False
+    dated_db_path: str = "data/raw/injury_dates.sqlite"
 
 
 class StyleMatchupConfig(BaseModel):
@@ -271,6 +283,30 @@ class PredictionIntervalsConfig(BaseModel):
     alpha: float = 0.1
 
 
+class AvailabilitySource(str, Enum):
+    tabular = "tabular"
+    llm = "llm"
+
+
+class AvailabilityAgentConfig(BaseModel):
+    """Per-listing P(plays) estimates for Questionable/Doubtful players
+    (src/availability/, docs/features/availability_agent_scope.md). When
+    `enabled`, the injury feature's absence weight for uncertain players is
+    `1 - p_play` instead of the fixed 0 (Questionable) / `doubtful_weight`
+    (Doubtful). Ships disabled until the estimator beats its baselines
+    intrinsically and the feature clears the CV ablation."""
+
+    enabled: bool = False
+    db_path: str = "data/raw/availability.sqlite"
+    source: AvailabilitySource = AvailabilitySource.tabular
+    # Rows dated on/after this are the only slice where an LLM's score is
+    # trusted against training-data memorization (default LLM's cutoff).
+    llm_cutoff_date: str = "2025-06-01"
+    llm_model: str = "gemini-2.5-flash"
+    api_calls_per_minute: int = 600
+    parallel_workers: int = 10
+
+
 class PBPConfig(BaseModel):
     """Play-by-play possession table (src/pbp/). Raw PlayByPlayV3 events and
     the derived per-possession rows live in their own additive sqlite file.
@@ -301,6 +337,7 @@ class Config(BaseModel):
     style_matchup: Optional[StyleMatchupConfig] = None
     on_off_splits: Optional[OnOffSplitsConfig] = None
     season_motivation: Optional[SeasonMotivationConfig] = None
+    availability_agent: Optional[AvailabilityAgentConfig] = None
     prediction_intervals: Optional[PredictionIntervalsConfig] = None
     pbp: Optional[PBPConfig] = None
     cv: Optional[CVConfig] = None

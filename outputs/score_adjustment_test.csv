@@ -1,0 +1,2 @@
+tag,fold,n_games,n_failed,base_diff_mae,adjusted_diff_mae,mae_delta,ci_low,ci_high,pct_nonzero_adjustment,mean_abs_adjustment,adjustment_corr_with_residual,base_win_acc,adjusted_win_acc,run_at,verdict
+score_adjust_fold5_max4,fold5,1225,0,11.43778080194405,11.444173303668396,0.0063925017243464865,-0.03635990651536272,0.04912713010216446,0.2522448979591837,0.3742857142857143,0.0032111623471785342,0.68,0.68,2026-09-20T18:03:40+00:00,no significant effect

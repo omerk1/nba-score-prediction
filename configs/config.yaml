@@ -202,6 +202,10 @@ injury_features:
   # native_nan for missing injury rows. Not adopted -- ships at the status quo
   # default per the ablation-gated feature workflow.
   missing_value_strategy: zero_fill
+  # Ablation result (2026-09-23, folds 3-5 screen): worse on 2/3 folds, mean
+  # flat-to-slightly-worse (+0.0003). Does not clear the screen -- see
+  # docs/features/injury_pdf_extraction_scope.md phase D. Not adopted.
+  use_corrected_dates: false
 
 style_matchup:
   # A7 module (src/matchups/), formally read by config_loader.py's Config schema
@@ -422,6 +426,23 @@ season_motivation:
   # the seeding endgame carries this incentive. All of 15/20/25 passed; 20
   # chosen as the middle value, no CV tiebreaker favored 15 or 25.
   preferred_opponent_delta_window_games: 20
+
+availability_agent:
+  # Per-listing P(plays) for Questionable/Doubtful players (src/availability/,
+  # docs/features/availability_agent_scope.md). Replaces the fixed absence
+  # weights in injury_features (Questionable = 0, Doubtful = doubtful_weight)
+  # with a per-case estimate once it clears the intrinsic eval and the CV
+  # ablation. Labels come from per-game box-score minutes
+  # (scripts/backfill_player_game_logs.py -> db_path). Ships disabled.
+  enabled: false
+  db_path: "data/raw/availability.sqlite"
+  source: tabular            # tabular (baseline model, no API) or llm
+  # Rows dated on/after this are the only slice where an LLM's score is
+  # trusted against training-data memorization (gemini-2.5-flash cutoff).
+  llm_cutoff_date: "2025-06-01"
+  llm_model: "gemini-2.5-flash"
+  api_calls_per_minute: 600   # paid tier is 1000 RPM
+  parallel_workers: 10        # concurrent calls; responses are cached in db_path
 
 prediction_intervals:
   # Post-hoc split-conformal prediction intervals around the existing

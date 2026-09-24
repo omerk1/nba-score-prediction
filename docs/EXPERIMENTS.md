@@ -534,3 +534,46 @@ Every item below: hypothesis, config change, protocol, expected effect, effort, 
 - **The champion is unaffected, and shows what a robust result looks like.** `hp_tuning_cv_promoted` was Δ−0.0057 **improving all 5 folds individually** — above the mean-level floor, and the all-folds criterion is the robust one: 5/5 in one direction by chance is ~3%, whereas a bare 3/5 majority is ~50/50. `target_formulation_diff_total` cleared the same per-fold bar.
 - **Proposal (NOT applied — `CLAUDE.md`'s adoption bar is unchanged by this entry, since it governs how prior decisions are read as well as future ones).** For any candidate whose mean delta is under ~0.003, either (a) average `val_score` over ≥3 seeds per arm before comparing, which cuts the spread roughly as 1/√n, or (b) require the all-folds-improve criterion rather than a bare majority. Option (b) is free and already has two clean precedents; option (a) triples run cost but is the only one that resolves a genuinely small effect. Either way, **a bare 3/5 fold majority with a sub-0.003 mean delta should not be treated as evidence of anything** — that is exactly the pattern noise produces.
 - **Reusable**: `--seeds`/`--tag` re-measure any config; the floor should be re-measured after a change that alters training-set size or model capacity (e.g. the next hyperparameter re-tune), since it is a property of the config, not a universal constant.
+
+---
+
+**`injury_dates_corrected`** (2026-09-23) — does attaching injury counts to the
+correct game (rather than the PDF report's own date, mostly the day before)
+move the composite score. Prompted by `docs/PIPELINE_AUDIT.md`'s 2026-09-17
+finding that `_add_injury_features`'s equal-date join attaches most games'
+injury counts to the wrong game entirely.
+
+- Built `scripts/build_injury_features_dated.py`: recomputes `n_out`/
+  `n_questionable`/`team_deficit` from the corrected `player_injuries_dated`
+  table (`docs/features/injury_pdf_extraction_scope.md` phase A), reusing
+  `compute_team_deficit`/`_get_importance_map` unchanged so only the date
+  attachment differs, not the scoring formula. New flag
+  `injury_features.use_corrected_dates` (default `false`); flag-off path
+  verified byte-identical to pre-change behavior (fold3 `diff_mae=11.0459`
+  before and after the code landed).
+- **Cheap screen (folds 3-5, the injury-coverage era) against the recorded
+  champion (`hp_tuning_cv_promoted`): does not clear.** val_score delta
+  (treatment − champion): fold3 +0.0005, fold4 +0.0025, fold5 −0.0022; mean
+  +0.00027 (flat to very slightly worse). 2 of 3 folds regress. No escalation
+  to full 5-fold CV per the cheap-screen rule; not logged to
+  `outputs/experiments_v2.csv` (never reached full CV).
+- **A confound, not fully isolated**: the rebuild's importance-map cutoff uses
+  `game_date` (exclusive), the live pipeline uses `report_date` (exclusive,
+  typically one day earlier) — so the corrected run's importance snapshot
+  legitimately includes one more day of stats than the original, alongside the
+  date-attachment fix itself. Still leakage-safe, but two variables move
+  together here, not one. Untested whether holding the importance-date
+  boundary at `report_date` while only correcting which game each listing
+  attaches to changes the result.
+- **Recommendation: NOT ADOPTED.** `use_corrected_dates` stays `false`.
+  Logged as a failed screen (one clean attempt, not chased further per
+  "failed twice → log as failed, move on" — this wasn't ambiguous enough to
+  warrant a second try with the same design). The underlying data correction
+  (phase A) is kept regardless — it fixed a genuine extraction bug
+  independent of whether it helps this metric, full details in
+  `docs/features/injury_pdf_extraction_scope.md`.
+- Availability-estimator integration (the originally planned Treatment B,
+  layering the tabular P(plays) estimator on top of this) was not built: it
+  was scoped to build on Treatment A's corrected dates, and A did not clear
+  its own screen. Revisit only if the confound above is resolved and
+  re-screened, or scope B as an independent test not layered on A.

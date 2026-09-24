@@ -101,3 +101,32 @@ and one deferred (not rejected) new-data option, play-by-play
 shot-quality data, flagged as genuinely orthogonal signal but expensive
 (large per-game backfill, real rate-limit/blocking risk) and
 lower-confidence than it first appears (`docs/NEW_DATA_FEASIBILITY.md`).
+
+**LLM/agentic-component investigation — closed 2026-09-23**
+(full detail: `docs/LLM_COMPONENT_OPTIONS.md`, marked CLOSED at the top of
+that doc). Explored whether an LLM component could add value anywhere in
+this pipeline — an availability estimator for uncertain injury listings
+(three prompt variants, isotonic calibration, stacking, isolated
+chain-of-thought), semantic retrieval over injury-reason text (two variants,
+a full tuning/sealed split), and a direct post-hoc adjustment of the trained
+model's own predictions. All six attempts rejected, each on its own clean
+evidence, with one consistent mechanism: the ceiling was the information in
+the engineered features, not how it was read, and results got monotonically
+worse as more prompting sophistication was added. Two real, unrelated
+correctness bugs were found and fixed along the way (an injury-report
+team-name mismatch silently dropping every Clippers listing since 2021;
+most injury listings attached to the wrong game via the PDF report's own
+publish date) — kept regardless of the LLM outcome, though a downstream
+ablation wiring the corrected dates into the live injury feature did not
+clear its own screen either (`docs/features/injury_pdf_extraction_scope.md`
+phase D).
+
+Not scheduled for revisit on this codebase: re-running variants of "read
+engineered features, output a number" is a closed question here, not an
+open one — this project's data is exactly the case (dense, well-labeled,
+tabular, years of history) where a tuned gradient booster already wins and
+an LLM has nothing to add. The one live branch from this work,
+`feature/availability-agent`, holds the box-score availability labels and
+tabular estimator (non-LLM, does beat its baselines) plus the injury-PDF
+extraction fixes, both still gated behind disabled flags pending their own
+adoption decisions.

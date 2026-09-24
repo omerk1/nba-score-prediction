@@ -73,6 +73,15 @@ data/processed/*
 !outputs/season_motivation_results.csv
 !outputs/season_motivation_iteration_scratch.csv
 
+# Availability estimator intrinsic eval (scripts/run_availability_eval.py): one
+# small row per (estimator, slice) per run, same rationale as the pairs above.
+!outputs/availability_eval.csv
+
+# LLM score-adjustment diagnostic: one summary row per run, same rationale
+# as the market-benchmark summaries above. The per-game dump
+# (outputs/score_adjustment_games_<tag>.csv) stays ignored.
+!outputs/score_adjustment_test.csv
+
 # CLAUDE.md's "Leaderboards & research sessions" rules: research/autonomous
 # sessions log every run to results/sessions/<session_id>.csv before
 # promoting the session's best row(s) to outputs/experiments_v2.csv. Session
@@ -163,3 +172,7 @@ config.local.yaml
 tmp/
 temp/
 *.tmp
+
+# Cached injury-report PDFs (scripts/rebuild_injury_dates.py) -- re-parsing
+# after a parser change must never re-download. Local only, like the DBs.
+data/raw/injury_pdfs/
