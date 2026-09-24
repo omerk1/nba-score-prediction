@@ -195,3 +195,50 @@ closed question, not an open one. For the hands-on RAG/pipeline/agentic
 experience that motivated this whole investigation, pick a task where the
 input is actually unstructured or the workflow requires live tool use, not a
 structured-data problem that already has the right tool.
+
+---
+
+## Future direction: a live pre-game news and market-reaction agent
+
+One idea survives the closing recommendation above because it has a mechanism
+none of the six rejected attempts had: live, unstructured input with no
+historical training corpus, and a flag/alert action rather than a number fed
+to the score model.
+
+**What it does.** Watches for breaking pre-game information in the hours
+before tip-off — injury updates, lineup announcements, beat-reporter posts —
+and judges whether Polymarket's current price already reflects it. When it
+judges a real, unpriced gap, it flags the game with its reasoning.
+
+**Why the mechanism actually fits, unlike everything just closed out.**
+Option 4 above (news as a training feature) was rejected because building a
+supervised feature needs a timestamped, point-in-time news archive spanning
+years — expensive, and the retroactive labeling is itself hard to get right.
+An agent that acts live, today, needs none of that backfill. It only has to
+be good in the moment it runs. Same data source, a use case the earlier
+rejection doesn't touch.
+
+The input is genuinely unstructured (a tweet, a vague coach's quote, a
+lineup graphic) and the judgment — is this credible, is it already priced
+in — is not something the existing structured injury-PDF pipeline can
+express as a feature at all.
+
+**Shape.** A monitoring loop (poll a small set of sources for each of
+today's games) → retrieval of that game's recent context (this repo's own
+injury history, past price moves, this team's recent news) as grounding →
+an LLM judgment call with tools (fetch the current Polymarket price, fetch
+the source article) → a flag with stated reasoning and confidence, not an
+autonomous trade.
+
+**Evaluation, the part that keeps it honest.** Track flagged games forward:
+did the price move in the flagged direction afterward, and by how much
+relative to games it didn't flag. That is a real, checkable question,
+independent of whether the underlying prediction model ever uses the
+output. Start with human-reviewed flags before any auto-action.
+
+**Honest caveats.** Source access (X/Twitter API, beat-reporter feeds) is
+the main friction, not the agent logic. Small sample size per season limits
+how confidently the evaluation can speak. This is a monitoring/alerting
+tool, not a new model feature — its value is a faster or more careful read
+of public information, not exclusive information, matching what
+`docs/MARKET_EDGE.md` already found about this specific market.
