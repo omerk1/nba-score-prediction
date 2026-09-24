@@ -125,8 +125,8 @@ Not scheduled for revisit on this codebase: re-running variants of "read
 engineered features, output a number" is a closed question here, not an
 open one — this project's data is exactly the case (dense, well-labeled,
 tabular, years of history) where a tuned gradient booster already wins and
-an LLM has nothing to add. The one live branch from this work,
-`feature/availability-agent`, holds the box-score availability labels and
-tabular estimator (non-LLM, does beat its baselines) plus the injury-PDF
-extraction fixes, both still gated behind disabled flags pending their own
-adoption decisions.
+an LLM has nothing to add. All of it (PR #70, merged 2026-09-24) is on `main`
+now, not a separate branch: the box-score availability labels and tabular
+estimator (non-LLM, does beat its baselines) plus the injury-PDF extraction
+fixes, both still gated behind disabled flags pending their own adoption
+decisions.
