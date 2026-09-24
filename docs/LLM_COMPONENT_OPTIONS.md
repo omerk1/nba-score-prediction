@@ -203,7 +203,7 @@ structured-data problem that already has the right tool.
 One idea survives the closing recommendation above because it has a mechanism
 none of the six rejected attempts had: live, unstructured input with no
 historical training corpus, and a flag/alert action rather than a number fed
-to the score model.
+to the score model. Scoped in `docs/features/news_market_agent/scope.md`.
 
 **What it does.** Watches for breaking pre-game information in the hours
 before tip-off — injury updates, lineup announcements, beat-reporter posts —
