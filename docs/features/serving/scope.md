@@ -119,17 +119,19 @@ out. Two pieces:
   dropped, not guessed. `scripts/recommend_from_screenshot.py`: ties this to
   `recommend_game` end-to-end (screenshot in, one recommendation per
   recognized NBA game out).
-- **Not runtime-verified against a real screenshot yet.** The account's
-  Gemini API prepayment credits are depleted (`402 RESOURCE_EXHAUSTED`), an
-  external billing constraint, not a code error (the request was
-  well-formed and reached the API). Verified instead: the module imports
-  cleanly, the team-nickname lookup resolves real IDs, the request payload
-  is correctly constructed, and (once `client` became injectable)
-  `tests/test_extract_picks.py` covers the parsing/validation logic — team
-  resolution, dropping an unrecognized team, empty/malformed-response
-  handling — against canned model output, real network calls mocked out.
-  None of that tests whether Gemini can actually *read* a screenshot
-  correctly; that still needs a real call once credits are available.
+- **Runtime-verified against a real screenshot — 2026-09-25, credits
+  restored.** `screenshot_spread_example.png` (full context: team names,
+  NBA badge, time): both games extracted with 100% correct team IDs, spread
+  signs/values, and odds (Heat -1.5/Celtics +1.5 and Mavericks
+  -11.5/Warriors +11.5, both @ 1.80 — verified against nba_api's real team
+  IDs, not just visually plausible output). `screenshot_total_example.png`
+  (a bare odds-row crop with NO team name or NBA badge anywhere in it)
+  correctly returned an empty array rather than guessing which game the
+  total belonged to — exactly the "can't confidently match, drop rather
+  than guess" behavior the prompt asks for, not a bug. Real takeaway: a
+  screenshot needs to include the team-name/context row for a market to be
+  extracted at all — a totals-only crop with no team context is an
+  unreasonable input, not a gap in this code.
 - **Two real example screenshots** (real NBA games, Hebrew) saved as
   `tests/fixtures/screenshot_spread_example.png` and
   `screenshot_total_example.png` — both for the test above and for live
