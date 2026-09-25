@@ -71,6 +71,13 @@ Keep `.md` docs and logs concise — state findings and numbers tersely, don't n
 - Failed twice → log as failed, move on.
 - Preprocessing changes go through the central pipeline only, no per-feature ad hoc handling.
 
+## Cost discipline
+
+Non-production checks (exploratory prototypes, sanity tests, one-off diagnostics) default to the cheapest version that still answers the question, and escalate only once a result looks worth trusting, logging, or adopting.
+
+- **CV/training runs**: the cheap-screening rule above isn't limited to the formal `train_model.py` ablation workflow — any one-off prototype or diagnostic script that trains/evaluates across `cv.folds` (e.g. a throwaway `scripts/prototype_*.py`) should default to 1-2 folds or `--protocol single_split` first. Full 5-fold CV is for a result that already looks promising enough to report, not for an early "does this idea show any signal at all" check — a strongly negative or degenerate result is almost always visible on far fewer folds, and running all 5 anyway just burns time without changing the conclusion.
+- **Paid LLM API calls** (Gemini, `GOOGLE_API_KEY`): tests use a fake/mocked client (see `src/availability/llm_estimator.py`'s `GeminiClient` or `src/serving/extract_picks.py`'s injectable `client` param for the pattern), never a real call — real calls are billed usage, not free. When a real call is genuinely needed to verify behavior (e.g. confirming a prompt actually works against a real image), make the minimum number needed — one or two small, deliberately chosen cases, not a batch or a repeated loop while iterating on a prompt.
+
 ## Phase history
 
 **Rolling-window representation-enrichment phase — closed 2026-08-24**
