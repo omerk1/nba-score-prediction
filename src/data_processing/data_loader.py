@@ -123,8 +123,15 @@ class NBADataLoader:
         team_id: int,
         n_games: int,
         allowed_season_types: Optional[list[str]] = None,
+        end_date: Optional[str] = None,
     ) -> pd.DataFrame:
-        """Load the last n_games for a team (regardless of home/away role)."""
+        """Load the last n_games for a team (regardless of home/away role),
+        as of end_date (inclusive) if given. Without end_date, "last
+        n_games" means the DB's own most recent games for that team --
+        once the DB contains more than n_games of a team's games after a
+        given as-of date (e.g. backtesting a past date after a full season
+        of newer games has been loaded), that silently returns zero rows
+        for anything on or before it."""
         self.connect()
         conditions = ["WHERE (team_id_home = ? OR team_id_away = ?)"]
         params: list = [team_id, team_id]
@@ -132,6 +139,9 @@ class NBADataLoader:
             placeholders = ",".join("?" * len(allowed_season_types))
             conditions.append(f"AND season_type IN ({placeholders})")
             params.extend(allowed_season_types)
+        if end_date:
+            conditions.append("AND game_date <= ?")
+            params.append(end_date)
         query = self._GAME_SELECT + " ".join(conditions) + " ORDER BY game_date DESC LIMIT ?"
         params.append(n_games)
         df = pd.read_sql(query, self.conn, params=params)

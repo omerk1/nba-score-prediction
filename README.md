@@ -76,6 +76,16 @@ venv/bin/python3 predict_game.py --home 1610612747 --away 1610612744 --date 2026
 
 `--home` and `--away` take numeric NBA team IDs. `--date` defaults to today.
 
+### Recommend
+
+```bash
+venv/bin/python3 scripts/recommend_game.py --home 1610612747 --away 1610612744 \
+    --home-spread -9 --home-spread-odds 1.80 --away-spread-odds 1.80
+venv/bin/python3 scripts/recommend_from_screenshot.py path/to/screenshot.png
+```
+
+Adds win/cover/over-under probabilities, edge vs. given market odds, and a full margin-probability heatmap on top of `predict_game.py`'s point prediction (`src/serving/recommend.py`). `recommend_from_screenshot.py` extracts picks (teams, spread, odds) from a screenshot of betting odds via Gemini vision first (`src/serving/extract_picks.py`, needs `GOOGLE_API_KEY`) — see `docs/features/serving/scope.md`.
+
 ## Project Structure
 
 ```
@@ -85,6 +95,7 @@ nba-score-prediction/
 │   ├── feature_engineering/      # Statistical and injury feature construction
 │   ├── models/                   # Model training and evaluation
 │   ├── news_scraping/            # Injury scrapers, DB, and impact extractors
+│   ├── serving/                  # Live prediction, recommendation, screenshot extraction
 │   └── utils/                    # Config loading and shared utilities
 ├── configs/
 │   └── config.yaml               # All runtime parameters
@@ -96,7 +107,8 @@ nba-score-prediction/
 ├── notebooks/                    # Exploration notebooks
 ├── outputs/                      # Predictions and experiments.csv
 ├── scripts/                      # Maintenance/tuning entry points (backfills, injury
-│                                  # features, hyperparameter tuning, Polymarket data)
+│                                  # features, hyperparameter tuning, Polymarket data,
+│                                  # recommend_game.py / recommend_from_screenshot.py)
 ├── train_model.py                # Training entry point
 └── predict_game.py               # Inference entry point
 ```
