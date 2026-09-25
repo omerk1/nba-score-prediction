@@ -57,18 +57,60 @@ out. Two pieces:
    layout (not assumed) before it's turned into the "diff must exceed this"
    value `predictive_distribution.cover_probability` expects.
 
-## Proposed shape (not yet built)
+## Built (this branch)
 
-- `src/serving/` (new):
-  - extraction module — vision-based screenshot -> structured picks. Not
-    yet designed in detail (prompt shape, output schema, error handling for
-    unrecognized teams/layouts).
-  - recommendation module — structured pick -> prediction +
-    `predictive_distribution` -> a recommendation dict (model probability,
-    market-implied probability, edge, heatmap).
-- A CLI or small script to run end-to-end on a screenshot path first,
-  before any API/web-app wrapper — matches how every other piece of this
-  project got built (script first, product surface later).
+- `data/models/score_predictor.pkl` retrained against the current champion
+  config (`serving_champion_model_refresh`, `outputs/experiments_v2.csv`).
+- `src/serving/live_features.py`: `build_live_game_features` (extracted from
+  `predict_game.py`'s own inline logic, now shared by both). Fixes two real
+  pre-existing bugs found while building this, neither introduced here:
+  - `NBADataLoader.load_recent_team_games` had no date cutoff at the SQL
+    level (`ORDER BY game_date DESC LIMIT n_games` over the *whole* table),
+    so predicting any date other than "today" silently returned zero rows
+    once the DB held more than `n_games` of a team's games after it. Fixed
+    with an `end_date` param — but superseded below anyway.
+  - **Elo came out NaN on every live prediction.** `_add_elo_features`
+    (`feature_builder.py`) computes Elo by reloading real games from the DB
+    and merging back onto `GAME_ID` — it can never see the synthetic
+    "upcoming" row `build_live_game_features` injects (not in the DB, no
+    matching `GAME_ID`), regardless of how much history is loaded. `elo_diff`
+    is a top-3 feature by importance in the current champion, so this wasn't
+    a minor gap — every live prediction was silently missing its
+    single most important signal. Fixed by also loading the *full* game
+    history (`data_start_date` through the prediction date, matching
+    `load_training_data`'s own context window, not just a per-team recent
+    slice) and recomputing Elo/momentum directly from that in-memory history
+    (which does include the synthetic row) via `compute_elo_ratings`/
+    `compute_elo_momentum`, splicing the result into just the synthetic
+    row. Verified: predicting a known historical matchup now nearly
+    reproduces the CV/test-fold pipeline's own prediction for that exact
+    game (110.1/107.6 live vs. 110.1/107.3 via `run_split`) and 0/148
+    feature columns are NaN, vs. NaN Elo and a visibly different (110→113
+    home score) prediction before the fix.
+  - Also fixes a same-date collision: predicting a date that already has a
+    real game for either team duplicates a merge key inside
+    `_add_rolling_features` and crashes — now excluded explicitly, which
+    matters for backtesting a known past matchup (used above to verify the
+    Elo fix), not just genuinely future dates.
+- `src/serving/recommend.py`: `load_resources` (model + fold5 val residuals
+  + bandwidths) and `recommend_game` (matchup + optional spread/moneyline/
+  total lines and decimal odds -> point prediction, win probability, cover
+  probability, edge vs. given odds, margin heatmap). Market-sign-convention
+  and decimal-odds handling from gaps #3/#4 below implemented here.
+- `scripts/recommend_game.py`: CLI demo, already-structured picks in
+  (mirrors the screenshot's shape: team IDs, spread, decimal odds on both
+  sides, total line) — run end-to-end, output sanity-checked (e.g. a home
+  team predicted to win by only +2.6 correctly shows a large negative edge
+  against a -9 home spread priced near even odds).
+
+## Not yet built
+
+- Extraction module — vision-based screenshot -> structured picks (team
+  names translated to canonical NBA nicknames per gap #3, feeding
+  `recommend_game`'s team-ID/spread/odds arguments). Not yet designed in
+  detail (prompt shape, output schema, error handling for unrecognized
+  teams/layouts).
+- No API/web-app wrapper yet — CLI only, per this branch's non-goals below.
 
 ## Explicit non-goals for this branch
 
