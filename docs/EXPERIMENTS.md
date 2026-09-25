@@ -577,3 +577,43 @@ injury counts to the wrong game entirely.
   was scoped to build on Treatment A's corrected dates, and A did not clear
   its own screen. Revisit only if the confound above is resolved and
   re-screened, or scope B as an independent test not layered on A.
+
+---
+
+**`heteroscedastic_interval_screen`** (2026-09-24) — can per-game prediction-interval width vary with how confident the model actually is on that specific game, instead of `prediction_interval_conformal_v1`'s constant-width band? Prompted by a screenshot-to-recommendation betting-tool idea that wants real per-game confidence, not one fixed band applied to every game.
+
+- **Method 1** (`scripts/prototype_conditional_intervals.py`): CatBoost's native uncertainty estimation (virtual ensembles, `model.virtual_ensembles_predict(..., prediction_type="TotalUncertainty")`) was tried first and confirmed empirically incompatible with the champion's `loss_function="MultiRMSE"` (`CatBoostError: unsupported loss function for uncertainty MultiRMSE`) — not usable without retraining as separate single-target models, which is a model-class change, not a diagnostic. Fell back to a secondary shallow CatBoost model (depth=3, 200 iterations) regressing `|residual|` on the same point-in-time features — fit on the first half of each fold's validation season (chronological split), calibrated as a normalized/locally-weighted split-conformal correction (reusing `conformal_quantile`) on the second half, applied to the test fold.
+- **Method 2** (`scripts/prototype_cqr_intervals.py`), conformalized quantile regression (CQR, Romano/Patterson/Candès 2019): CatBoost native `MultiQuantile:alpha=0.05,0.5,0.95` loss, trained directly on each fold's training set (champion's own hyperparameters/features), conformal-corrected on val, evaluated on test — a mechanistically different route to the same goal (quantiles fit through the tree-splitting objective itself, not a separate residual-magnitude target).
+- **Both found ≈0 correlation between predicted per-game uncertainty and actual test-set error** — the deciding number in each case:
+
+  | fold | method 1 (`sigma_hat` vs `\|resid\|`), diff | method 2 (raw quantile width vs `\|resid\|`), diff |
+  |---|---:|---:|
+  | 1 | 0.007 | −0.031 |
+  | 2 | 0.006 | 0.011 |
+  | 3 | −0.012 | −0.020 |
+  | 4 | −0.043 | −0.028 |
+  | 5 | 0.032 | 0.015 |
+  | **mean** | **−0.002** | **−0.011** |
+
+  (`total` target: method 1 mean −0.021, method 2 mean −0.003 — same story.) Method 1's bucket-by-predicted-sigma coverage rises monotonically low→high (e.g. fold1 diff 0.79→0.91→0.96), which looks like calibration at a glance but is mechanical — a wider predicted band covers more by construction — and isn't evidence of anything given the ~0 correlation above. Method 2's raw quantile width barely varies per game at all (std 3–5 points on a mean width of 47–65).
+- **Aggregate coverage tracked nominal 90% in both methods** (conformal correction doing its job), but **mean width was wider than the existing constant-width conformal in every fold/target for both methods** (method 1 diff: 49.6 vs 46.7; method 1 total: 69.8 vs 61.0; method 2 diff: 47.3 vs 46.3; method 2 total: 62.9 vs 62.0) — worse efficiency for more machinery, on top of finding no real signal.
+- **Recommendation: REJECT** adaptive/heteroscedastic intervals for now. Two independently-mechanistic methods (residual-magnitude regression; native quantile regression through tree splits) agreeing that this feature set carries ≈0 recoverable information about its own error is triangulating evidence, not a single-method artifact. `prediction_interval_conformal_v1`'s existing constant-width conformal band is the practical choice going forward — already implemented, already validated (~90% coverage, `outputs/interval_calibration.csv`), and neither fancier method beat it on width or coverage. Both prototype scripts kept, not deleted — same "kept but unused" treatment as every other rejected-but-kept piece of code in this project's history.
+- Not logged to `outputs/experiments_v2.csv`/`results/sessions/` — pure diagnostic scripts, no `train_model.py` run, no `val_score_mean` involved, same category as `measure_cv_noise_floor.py`.
+- **Next: not scheduled.** The ≈0 correlation is a property of the *current* 148-column feature set, not a general claim that game-level uncertainty is unpredictable — if purpose-built volatility features (e.g. explicit rest/injury/back-to-back interactions, rolling variance of scoring) are ever developed for another reason, re-testing method 1 against those specific features would be a fair reopening. Practical follow-up: build the recommendation-system heatmap on the validated constant-width conformal quantiles instead (same shape for every game, shifted to each game's own point prediction).
+
+---
+
+**`predictive_distribution_heatmap`** (2026-09-24, same session as `heteroscedastic_interval_screen` above) — the practical follow-up from that entry: a full per-game probability distribution over the margin (not just one interval), for the screenshot-to-recommendation betting-tool idea's "wins by 12 with probability p1, by 13 with p2" heatmap.
+
+- **Implementation**: new `src/evaluation/predictive_distribution.py` (`silverman_bandwidth`, `residual_cdf`, `margin_pmf`, `win_probability`, `cover_probability`). Homoscedastic by construction, matching `heteroscedastic_interval_screen`'s verdict: a Gaussian-kernel density over a fold's validation-set signed residuals (`actual − point_pred`), same shape for every game, shifted to that game's own point prediction. `residual_cdf` is a fully vectorized closed form (`mean_i Phi((x - r_i) / bandwidth)`, no per-call KDE object), `margin_pmf` discretizes it to integer margins for the heatmap. Purely additive/diagnostic, same category as `conformal.py` — never touches training or point predictions.
+- **Calibration check** (`scripts/validate_predictive_distribution.py`): probability integral transform (PIT) on each test-fold game — evaluate the CDF (fit on that fold's own validation residuals only) at the actual outcome, check the resulting values are ~Uniform(0,1) via mean PIT and coverage at 3 nominal levels. Full 5-fold CV, `diff` and `total` both:
+
+  | target | mean_pit | coverage_50 (nominal 0.50) | coverage_80 (nominal 0.80) | coverage_90 (nominal 0.90) |
+  |---|---:|---:|---:|---:|
+  | diff | 0.5052 | 0.5070 | 0.8023 | 0.9019 |
+  | total | 0.5109 | 0.5080 | 0.8039 | 0.9026 |
+
+  Per-fold spread is tight (coverage_90 range 0.880–0.929 across both targets/5 folds) — no fold stands out as miscalibrated. This directly confirms the homoscedastic-shape assumption `heteroscedastic_interval_screen` settled on: good calibration at three different nominal levels at once, not just the one alpha=0.1 interval `prediction_interval_conformal_v1` checked.
+- **Output shape** (worked example in the validation script): for a point prediction, returns a win probability, a cover probability against an arbitrary spread line, and a full margin→probability table (`margin_pmf`) — e.g. fold5 test game 0, point prediction home +2.9: win probability 58.7%, P(home covers −5.5) 42.5%, P(home covers −9.5) 31.5%, smooth unimodal heatmap peaking at +2.
+- **Not wired into `cv_harness.run_split`/`train_model.py`** (unlike `conformal.py`'s interval metrics) — this is a downstream/serving-side utility for a specific product use case, not a per-run CV diagnostic; nothing currently calls it outside `scripts/validate_predictive_distribution.py`. No config flag added (nothing to gate — it consumes an already-trained predictor's residuals, doesn't change training or add a feature).
+- **Recommendation: usable as-is** for the recommendation-system prototype. Revisit the homoscedastic assumption only if `heteroscedastic_interval_screen`'s "Next" condition is ever met (purpose-built volatility features materialize and change that verdict).
