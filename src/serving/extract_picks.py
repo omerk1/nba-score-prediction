@@ -26,7 +26,9 @@ _MIME_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "w
 
 _SYSTEM_INSTRUCTIONS_TEMPLATE = """You read screenshots of basketball betting odds -- often in Hebrew, \
 sometimes other languages -- and extract structured picks for NBA games only. Ignore any non-NBA \
-games in the image (other leagues, exhibitions).
+games in the image (other leagues, exhibitions), and ignore any UI chrome that isn't itself an odds \
+value -- promo/boost badges, bet-type labels (e.g. "SD"), or icon buttons (e.g. "recommendation", \
+"source") that sit next to the odds table but aren't part of it.
 
 For each NBA game visible, extract a JSON object with these fields. Every field except \
 home_team_nickname/away_team_nickname is optional -- omit a field entirely if that market isn't \
@@ -37,11 +39,12 @@ shown, rather than guessing a value:
   {nicknames}. If a team can't be confidently matched to one of these, drop that entire game rather \
   than guessing.
 - home_spread, away_spread: the point spread shown next to each team, with its own printed sign \
-  (negative = favored by that many points).
+  (negative = favored by that many points). Most bookmakers show a plain 2-way spread (often a \
+  half-point line specifically to rule out a tie) -- don't assume a 3-way market exists.
 - home_spread_odds, away_spread_odds: decimal odds for each side of the spread.
 - push_odds: decimal odds for an exact-margin "push"/tie outcome, ONLY if the market shows one as a \
   separate bettable option distinct from either team (some bookmakers show a 3-way market: \
-  team / exact-push / team).
+  team / exact-push / team, usually with a whole-number line instead of a half-point one).
 - home_moneyline_odds, away_moneyline_odds: decimal odds to win outright, if a separate moneyline \
   market is shown.
 - total_line: the over/under total points line, if shown.
@@ -56,12 +59,20 @@ def _gemini_client():
     return genai.Client(api_key=os.environ.get("GOOGLE_API_KEY", ""))
 
 
-def extract_picks_from_screenshot(image_path: str, model: str = "gemini-2.5-flash") -> list[dict]:
+def extract_picks_from_screenshot(
+    image_path: str, model: str = "gemini-2.5-flash", client=None
+) -> list[dict]:
     """Reads image_path, returns a list of pick dicts (schema above, plus
     home_team_id/away_team_id resolved from the nickname). Every returned
     pick's team_ids are guaranteed to be real NBA team_ids -- anything the
     model couldn't confidently map to a canonical nickname is dropped, not
-    guessed. Raises ValueError if the model's response isn't valid JSON."""
+    guessed. Raises ValueError if the model's response isn't valid JSON.
+
+    `client`: injectable for tests (anything exposing
+    `.models.generate_content(...) -> object with .text`, the same surface
+    `google.genai.Client` exposes) -- defaults to a real Gemini client, same
+    pattern as src/availability/llm_estimator.py's GeminiClient being
+    swappable for a fake."""
     from google.genai import types
 
     nick2id = build_nickname_to_team_id()
@@ -72,7 +83,7 @@ def extract_picks_from_screenshot(image_path: str, model: str = "gemini-2.5-flas
     with open(image_path, "rb") as f:
         image_bytes = f.read()
 
-    client = _gemini_client()
+    client = client or _gemini_client()
     response = client.models.generate_content(
         model=model,
         contents=[

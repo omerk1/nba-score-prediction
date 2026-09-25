@@ -119,17 +119,33 @@ out. Two pieces:
   dropped, not guessed. `scripts/recommend_from_screenshot.py`: ties this to
   `recommend_game` end-to-end (screenshot in, one recommendation per
   recognized NBA game out).
-- **Not runtime-verified against a real screenshot yet.** No real bookmaker
-  screenshot was available (the one example given during scoping used
-  placeholder Israeli teams, not NBA), and a synthetic Hebrew test image
-  built for this couldn't be tested either — the account's Gemini API
-  prepayment credits are depleted (`402 RESOURCE_EXHAUSTED`), an external
-  billing constraint, not a code error (the request was well-formed and
-  reached the API). Verified instead: the module imports cleanly, the
-  team-nickname lookup resolves real IDs, and the request payload is
-  correctly constructed up to the point of the API call. Re-verify against
-  both a real screenshot and the synthetic Hebrew one once credits are
-  topped up, before trusting this in practice.
+- **Not runtime-verified against a real screenshot yet.** The account's
+  Gemini API prepayment credits are depleted (`402 RESOURCE_EXHAUSTED`), an
+  external billing constraint, not a code error (the request was
+  well-formed and reached the API). Verified instead: the module imports
+  cleanly, the team-nickname lookup resolves real IDs, the request payload
+  is correctly constructed, and (once `client` became injectable)
+  `tests/test_extract_picks.py` covers the parsing/validation logic — team
+  resolution, dropping an unrecognized team, empty/malformed-response
+  handling — against canned model output, real network calls mocked out.
+  None of that tests whether Gemini can actually *read* a screenshot
+  correctly; that still needs a real call once credits are available.
+- **Two real example screenshots** (real NBA games, Hebrew) saved as
+  `tests/fixtures/screenshot_spread_example.png` and
+  `screenshot_total_example.png` — both for the test above and for live
+  re-verification later. They corrected two assumptions from the earlier
+  placeholder mockup:
+  - Real spread markets on this bookmaker are a plain 2-way market with a
+    half-point line specifically to rule out a push (e.g. Heat -1.5 /
+    Celtics +1.5), not the 3-way team/push/team structure the placeholder
+    example showed. `push_odds` is kept in the schema (harmless, optional)
+    for a bookmaker that does show one, but 2-way is the common case, not
+    the exception — the extraction prompt now says so explicitly.
+  - Real screenshots carry UI chrome next to the odds (a promo/boost badge,
+    a "SD" bet-type label, "recommendation"/"source" icon buttons) that
+    isn't itself odds data. The extraction prompt now explicitly says to
+    ignore it — a genuine risk once real images are involved, invisible
+    when testing against clean structured JSON alone.
 
 ## Not yet built
 
