@@ -105,7 +105,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from nba_api.stats.static import teams as nba_teams
 from scipy.stats import norm
 from sklearn.isotonic import IsotonicRegression
 from sklearn.linear_model import LogisticRegression
@@ -115,6 +114,7 @@ sys.path.append(str(REPO))
 os.chdir(REPO)
 
 from src.evaluation.cv_harness import run_split, validate_fold_definitions  # noqa: E402
+from src.serving.team_lookup import build_nickname_to_team_id  # noqa: E402
 from src.utils.config_loader import load_config  # noqa: E402
 
 # Rows in games.csv that don't correspond to a real, mappable NBA team pair --
@@ -125,10 +125,6 @@ from src.utils.config_loader import load_config  # noqa: E402
 KNOWN_UNMAPPABLE_TEAMS = {"Team USA Stars", "Team USA Stripes", "Team World", "bkn", "pho"}
 
 MARKET_CLOSENESS_BUCKETS = [(0, 3, "pick_em"), (3, 7, "modest_favorite"), (7, np.inf, "big_favorite")]
-
-
-def build_nickname_to_team_id() -> dict:
-    return {t["nickname"]: t["id"] for t in nba_teams.get_teams()}
 
 
 def load_polymarket_games(games_csv: Path) -> pd.DataFrame:

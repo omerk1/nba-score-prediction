@@ -180,3 +180,59 @@ def recommend_game(
     result["margin_heatmap"] = {int(m): round(float(p), 5) for m, p in zip(margins, probs)}
 
     return result
+
+
+def format_recommendation(rec: dict, heatmap_top: int = 15) -> str:
+    """Human-readable rendering of a recommend_game() result, shared by
+    scripts/recommend_game.py and scripts/recommend_from_screenshot.py so
+    the two CLIs don't carry two copies of the same formatting."""
+    lines = [
+        f"{rec['home_team_id']} (home) vs {rec['away_team_id']} (away)",
+        f"Predicted score: {rec['predicted_home_score']} - {rec['predicted_away_score']}",
+        f"Predicted diff: {rec['predicted_diff']:+.1f} | Predicted total: {rec['predicted_total']:.1f}",
+        f"Home win probability: {rec['home_win_probability']:.1%}",
+    ]
+
+    if "home_moneyline_edge" in rec:
+        lines.append(
+            f"Home moneyline: market {rec['home_moneyline_market_probability']:.1%} "
+            f"| edge {rec['home_moneyline_edge']:+.1%}"
+        )
+    if "away_moneyline_edge" in rec:
+        lines.append(
+            f"Away moneyline: model {rec['away_win_probability']:.1%} vs market "
+            f"{rec['away_moneyline_market_probability']:.1%} | edge {rec['away_moneyline_edge']:+.1%}"
+        )
+
+    if "home_spread" in rec:
+        lines.append(f"\nSpread {rec['home_spread']:+.1f} (home):")
+        home_line = f"  Home cover probability: {rec['home_cover_probability']:.1%}"
+        if "home_spread_edge" in rec:
+            home_line += (
+                f" | market {rec['home_spread_market_probability']:.1%} | edge {rec['home_spread_edge']:+.1%}"
+            )
+        lines.append(home_line)
+        away_line = f"  Away cover probability: {rec['away_cover_probability']:.1%}"
+        if "away_spread_edge" in rec:
+            away_line += (
+                f" | market {rec['away_spread_market_probability']:.1%} | edge {rec['away_spread_edge']:+.1%}"
+            )
+        lines.append(away_line)
+
+    if "total_line" in rec:
+        lines.append(f"\nTotal {rec['total_line']}:")
+        over_line = f"  Over probability: {rec['over_probability']:.1%}"
+        if "over_edge" in rec:
+            over_line += f" | market {rec['over_market_probability']:.1%} | edge {rec['over_edge']:+.1%}"
+        lines.append(over_line)
+        under_line = f"  Under probability: {rec['under_probability']:.1%}"
+        if "under_edge" in rec:
+            under_line += f" | market {rec['under_market_probability']:.1%} | edge {rec['under_edge']:+.1%}"
+        lines.append(under_line)
+
+    lines.append(f"\nMargin heatmap (home margin : probability), top {heatmap_top}:")
+    top = sorted(rec["margin_heatmap"].items(), key=lambda kv: kv[1], reverse=True)[:heatmap_top]
+    for margin, prob in sorted(top):
+        lines.append(f"  {margin:+3d}: {prob:.4f}")
+
+    return "\n".join(lines)

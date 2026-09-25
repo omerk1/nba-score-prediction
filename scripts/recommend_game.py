@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-from src.serving.recommend import load_resources, recommend_game  # noqa: E402
+from src.serving.recommend import format_recommendation, load_resources, recommend_game  # noqa: E402
 
 
 def main():
@@ -55,56 +55,7 @@ def main():
         under_odds=args.under_odds,
     )
 
-    print(f"\n{args.home} (home) vs {args.away} (away){f' on {args.date}' if args.date else ''}")
-    print(f"Predicted score: {rec['predicted_home_score']} - {rec['predicted_away_score']}")
-    print(f"Predicted diff: {rec['predicted_diff']:+.1f} | Predicted total: {rec['predicted_total']:.1f}")
-    print(f"Home win probability: {rec['home_win_probability']:.1%}")
-
-    if "home_moneyline_edge" in rec:
-        print(
-            f"Home moneyline: market {rec['home_moneyline_market_probability']:.1%} "
-            f"| edge {rec['home_moneyline_edge']:+.1%}"
-        )
-    if "away_moneyline_edge" in rec:
-        print(
-            f"Away moneyline: model {rec['away_win_probability']:.1%} vs market "
-            f"{rec['away_moneyline_market_probability']:.1%} | edge {rec['away_moneyline_edge']:+.1%}"
-        )
-
-    if "home_spread" in rec:
-        print(f"\nSpread {rec['home_spread']:+.1f} (home):")
-        print(f"  Home cover probability: {rec['home_cover_probability']:.1%}", end="")
-        if "home_spread_edge" in rec:
-            print(
-                f" | market {rec['home_spread_market_probability']:.1%} | edge {rec['home_spread_edge']:+.1%}"
-            )
-        else:
-            print()
-        print(f"  Away cover probability: {rec['away_cover_probability']:.1%}", end="")
-        if "away_spread_edge" in rec:
-            print(
-                f" | market {rec['away_spread_market_probability']:.1%} | edge {rec['away_spread_edge']:+.1%}"
-            )
-        else:
-            print()
-
-    if "total_line" in rec:
-        print(f"\nTotal {rec['total_line']}:")
-        print(f"  Over probability: {rec['over_probability']:.1%}", end="")
-        if "over_edge" in rec:
-            print(f" | market {rec['over_market_probability']:.1%} | edge {rec['over_edge']:+.1%}")
-        else:
-            print()
-        print(f"  Under probability: {rec['under_probability']:.1%}", end="")
-        if "under_edge" in rec:
-            print(f" | market {rec['under_market_probability']:.1%} | edge {rec['under_edge']:+.1%}")
-        else:
-            print()
-
-    print(f"\nMargin heatmap (home margin : probability), top {args.heatmap_top}:")
-    top = sorted(rec["margin_heatmap"].items(), key=lambda kv: kv[1], reverse=True)[: args.heatmap_top]
-    for margin, prob in sorted(top):
-        print(f"  {margin:+3d}: {prob:.4f}")
+    print(f"\n{format_recommendation(rec, heatmap_top=args.heatmap_top)}")
 
 
 if __name__ == "__main__":

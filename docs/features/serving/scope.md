@@ -102,14 +102,37 @@ out. Two pieces:
   sides, total line) — run end-to-end, output sanity-checked (e.g. a home
   team predicted to win by only +2.6 correctly shows a large negative edge
   against a -9 home spread priced near even odds).
+- `src/serving/team_lookup.py`: `build_nickname_to_team_id` (canonical NBA
+  nickname -> team_id), moved out of `scripts/market_benchmark.py` so the
+  extraction module below reuses the exact same mapping instead of a second
+  copy. `market_benchmark.py` now imports it; behavior unchanged.
+- `src/serving/extract_picks.py`: `extract_picks_from_screenshot`, vision
+  extraction via Gemini (`google-genai`, `GOOGLE_API_KEY` — this project's
+  existing LLM pattern from `src/availability/llm_estimator.py`, not a new
+  provider). Deliberately extracts a loose, mostly-optional per-game schema
+  (gap #3/#4's Hebrew-nickname-translation and decimal-odds handling; a
+  `push_odds` field for the 3-way spread-with-push market structure the
+  original screenshot example actually showed, since a bookmaker's exact
+  market shape shouldn't be hand-coded per layout) rather than one fixed
+  layout, closed-vocabulary-constrained to `build_nickname_to_team_id()`'s
+  own real NBA nicknames so a team that can't be confidently matched is
+  dropped, not guessed. `scripts/recommend_from_screenshot.py`: ties this to
+  `recommend_game` end-to-end (screenshot in, one recommendation per
+  recognized NBA game out).
+- **Not runtime-verified against a real screenshot yet.** No real bookmaker
+  screenshot was available (the one example given during scoping used
+  placeholder Israeli teams, not NBA), and a synthetic Hebrew test image
+  built for this couldn't be tested either — the account's Gemini API
+  prepayment credits are depleted (`402 RESOURCE_EXHAUSTED`), an external
+  billing constraint, not a code error (the request was well-formed and
+  reached the API). Verified instead: the module imports cleanly, the
+  team-nickname lookup resolves real IDs, and the request payload is
+  correctly constructed up to the point of the API call. Re-verify against
+  both a real screenshot and the synthetic Hebrew one once credits are
+  topped up, before trusting this in practice.
 
 ## Not yet built
 
-- Extraction module — vision-based screenshot -> structured picks (team
-  names translated to canonical NBA nicknames per gap #3, feeding
-  `recommend_game`'s team-ID/spread/odds arguments). Not yet designed in
-  detail (prompt shape, output schema, error handling for unrecognized
-  teams/layouts).
 - No API/web-app wrapper yet — CLI only, per this branch's non-goals below.
 
 ## Explicit non-goals for this branch
