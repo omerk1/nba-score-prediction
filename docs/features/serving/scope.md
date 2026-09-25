@@ -119,19 +119,29 @@ out. Two pieces:
   dropped, not guessed. `scripts/recommend_from_screenshot.py`: ties this to
   `recommend_game` end-to-end (screenshot in, one recommendation per
   recognized NBA game out).
-- **Runtime-verified against a real screenshot — 2026-09-25, credits
-  restored.** `screenshot_spread_example.png` (full context: team names,
-  NBA badge, time): both games extracted with 100% correct team IDs, spread
-  signs/values, and odds (Heat -1.5/Celtics +1.5 and Mavericks
-  -11.5/Warriors +11.5, both @ 1.80 — verified against nba_api's real team
-  IDs, not just visually plausible output). `screenshot_total_example.png`
-  (a bare odds-row crop with NO team name or NBA badge anywhere in it)
-  correctly returned an empty array rather than guessing which game the
-  total belonged to — exactly the "can't confidently match, drop rather
-  than guess" behavior the prompt asks for, not a bug. Real takeaway: a
-  screenshot needs to include the team-name/context row for a market to be
-  extracted at all — a totals-only crop with no team context is an
-  unreasonable input, not a gap in this code.
+- **Two example screenshots** (real bookmaker UI/format, Hebrew) saved as
+  `tests/fixtures/screenshot_spread_example.png` and
+  `screenshot_total_example.png` — the site chrome and layout are real, but
+  the user confirmed the specific matchups/data shown are constructed for
+  illustration, not a capture of an actual real slate, so they can't be
+  checked against the real NBA schedule (no such game exists to look up).
+  Useful for two different things, and it matters not to conflate them:
+  - **Reading accuracy** (2026-09-25, credits restored): given what's
+    depicted in the image, extraction got it right — both games in
+    `screenshot_spread_example.png` with correct team IDs, spread
+    signs/values, and odds (Heat -1.5/Celtics +1.5, Mavericks
+    -11.5/Warriors +11.5, both @ 1.80). `screenshot_total_example.png` (a
+    bare odds-row crop with no team name or NBA badge anywhere in it)
+    correctly returned an empty array rather than guessing which game the
+    total belonged to. This is "did it read the pixels correctly," not "is
+    the game real."
+  - **UI-format learnings** (real, since the site chrome itself is real):
+    spread markets here are a plain 2-way market with a half-point line
+    (not the 3-way team/push/team structure the earlier placeholder mockup
+    assumed — `push_odds` kept in the schema for a bookmaker that does show
+    one, but described as the less common case now), and real screenshots
+    carry UI chrome next to the odds (promo/boost badge, "SD" bet-type
+    label, icon buttons) that isn't odds data and must be ignored.
 - **Home/away bug found and fixed.** Re-running extraction on the same
   spread screenshot repeatedly (still `temperature=0`) showed one game's
   home/away assignment flip-flopping across calls (the other stayed
@@ -148,30 +158,22 @@ out. Two pieces:
   `ScoreboardV3`), and `extract_picks_from_screenshot` now corrects (swaps
   every paired `home_*`/`away_*` field, not just the team IDs) whenever the
   schedule disagrees with the model's guess; falls back to the model's
-  guess only if no scheduled game is found (wrong/missing date, a game the
-  live scoreboard doesn't cover). Verified against known ground truth (a
-  game already in the local DB with a known true home team) — correct.
-  12 new tests in `tests/test_extract_picks.py` cover the override/swap
-  logic with the schedule call mocked out (no live network call in the
-  suite); the ground-truth check itself was run manually, once, not added
-  as a test (a real network call every run for no coverage beyond what the
-  mocked tests already give — see `CLAUDE.md`'s Cost discipline section).
-- **Two real example screenshots** (real NBA games, Hebrew) saved as
-  `tests/fixtures/screenshot_spread_example.png` and
-  `screenshot_total_example.png` — both for the test above and for live
-  re-verification later. They corrected two assumptions from the earlier
-  placeholder mockup:
-  - Real spread markets on this bookmaker are a plain 2-way market with a
-    half-point line specifically to rule out a push (e.g. Heat -1.5 /
-    Celtics +1.5), not the 3-way team/push/team structure the placeholder
-    example showed. `push_odds` is kept in the schema (harmless, optional)
-    for a bookmaker that does show one, but 2-way is the common case, not
-    the exception — the extraction prompt now says so explicitly.
-  - Real screenshots carry UI chrome next to the odds (a promo/boost badge,
-    a "SD" bet-type label, "recommendation"/"source" icon buttons) that
-    isn't itself odds data. The extraction prompt now explicitly says to
-    ignore it — a genuine risk once real images are involved, invisible
-    when testing against clean structured JSON alone.
+  guess only if no scheduled game is found. Verified against known ground
+  truth using a **separate, genuinely real** historical game already in the
+  local DB (Lakers vs. Warriors, 2025-10-21, known true home team) — since
+  the two fixtures above have no real schedule entry to check against, they
+  can't validate this fix themselves; the schedule lookup would (correctly)
+  find no match for them and fall back to the model's raw, unverified
+  guess, same as before the fix. 12 new tests in `tests/test_extract_picks.py`
+  cover the override/swap logic with the schedule call mocked out (no live
+  network call in the suite); the ground-truth check itself was run
+  manually, once, not added as a test (a real network call every run for no
+  coverage beyond what the mocked tests already give — see `CLAUDE.md`'s
+  Cost discipline section).
+  **Still open**: this fix is unverified against a real screenshot of an
+  actual scheduled game end-to-end (extraction's raw guess *and* the
+  schedule correcting it, together, on a real case) — needs a genuinely
+  real screenshot to close out.
 
 ## Not yet built
 

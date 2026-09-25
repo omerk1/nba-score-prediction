@@ -7,12 +7,14 @@ call. This does NOT test whether Gemini can actually read a screenshot
 correctly; see docs/features/serving/scope.md for that gap.
 
 tests/fixtures/screenshot_spread_example.png and screenshot_total_example.png
-are real bookmaker screenshots (Hebrew, real NBA games) saved for this and
-for future live re-verification once GOOGLE_API_KEY has credits. The canned
-JSON below is what a correct reading of those specific images should look
-like (established by manually reading them), used here purely as example
-model output for testing the parsing code -- not a live check that Gemini
-actually produces it.
+are real bookmaker UI screenshots (Hebrew) -- the site chrome/layout is
+real, but the specific matchups/data shown are constructed for illustration,
+not a capture of an actual scheduled game (confirmed by the user), so they
+have no real NBA schedule entry to check against. The canned JSON below is
+what a correct reading of those specific images should look like
+(established by manually reading them), used here purely as example model
+output for testing the parsing code -- not a live check that Gemini
+actually produces it, and not a claim that the matchups themselves are real.
 """
 
 import json
