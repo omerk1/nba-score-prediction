@@ -47,7 +47,7 @@ def main():
     )
     args = parser.parse_args()
 
-    picks = extract_picks_from_screenshot(args.image_path, model=args.model)
+    picks = extract_picks_from_screenshot(args.image_path, model=args.model, game_date=args.date)
     if not picks:
         print("No NBA games recognized in this screenshot.")
         return

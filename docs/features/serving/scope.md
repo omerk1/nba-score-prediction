@@ -132,6 +132,30 @@ out. Two pieces:
   screenshot needs to include the team-name/context row for a market to be
   extracted at all — a totals-only crop with no team context is an
   unreasonable input, not a gap in this code.
+- **Home/away bug found and fixed.** Re-running extraction on the same
+  spread screenshot repeatedly (still `temperature=0`) showed one game's
+  home/away assignment flip-flopping across calls (the other stayed
+  stable) — the screenshot itself has no home/away marker at all, just two
+  teams' odds boxes side by side, so the model was guessing. Adding an
+  explicit layout rule to the prompt ("right side is home team," per this
+  bookmaker's Hebrew/RTL convention) *reduced* but didn't eliminate the
+  instability (still flipped 2/4 repeated runs). Given this model's
+  `home_advantage` is a large, tuned Elo term, a backwards home/away isn't
+  noise, it's a silently wrong prediction — not something to leave to a
+  vision model's guess. Fixed properly with `src/serving/schedule_lookup.py`
+  (`resolve_home_away`): cross-references the two extracted teams + the
+  game date against the NBA's own published schedule (`nba_api`'s
+  `ScoreboardV3`), and `extract_picks_from_screenshot` now corrects (swaps
+  every paired `home_*`/`away_*` field, not just the team IDs) whenever the
+  schedule disagrees with the model's guess; falls back to the model's
+  guess only if no scheduled game is found (wrong/missing date, a game the
+  live scoreboard doesn't cover). Verified against known ground truth (a
+  game already in the local DB with a known true home team) — correct.
+  12 new tests in `tests/test_extract_picks.py` cover the override/swap
+  logic with the schedule call mocked out (no live network call in the
+  suite); the ground-truth check itself was run manually, once, not added
+  as a test (a real network call every run for no coverage beyond what the
+  mocked tests already give — see `CLAUDE.md`'s Cost discipline section).
 - **Two real example screenshots** (real NBA games, Hebrew) saved as
   `tests/fixtures/screenshot_spread_example.png` and
   `screenshot_total_example.png` — both for the test above and for live
