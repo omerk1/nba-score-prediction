@@ -14,6 +14,7 @@ nba_api>=1.4.0
 # Injury pipeline
 requests>=2.31.0
 python-dotenv>=1.0.0
+playwright>=1.47.0,<1.54  # Winner capture via installed Chrome (channel="chrome", no `playwright install` needed); 1.54+ drops macOS 13
 pdfplumber>=0.9.0
 google-genai>=1.0.0
 

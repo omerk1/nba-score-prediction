@@ -176,3 +176,7 @@ temp/
 # Cached injury-report PDFs (scripts/rebuild_injury_dates.py) -- re-parsing
 # after a parser change must never re-download. Local only, like the DBs.
 data/raw/injury_pdfs/
+
+# Daily Winner lines captures (src/serving/capture_winner.py) -- dated
+# debugging artifacts, pruned after 14 days, never history worth keeping.
+outputs/winner_captures/

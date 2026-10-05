@@ -47,7 +47,50 @@ navigation timeout. Screenshots land in `outputs/winner_captures/`
 (dated filenames, gitignored like the rest of `outputs/`), kept ~14 days
 — the screenshot is the debugging artifact when extraction goes wrong.
 
-## Unknowns that require a live probe (cannot be scoped from code)
+## Probe results (2026-10-05, residential IL IP)
+
+The probe planned below ran during implementation; answers:
+
+1. **URL**: `https://www.winner.co.il/mainbook/sport-כדורסל` (Winner
+   Line, basketball). Stable route, no session tokens. Plain HTTP GET
+   returns a JS app shell with no content — browser rendering required,
+   as assumed.
+2. **Bot posture — the decisive finding**: the site sits behind
+   **Imperva**, which blocks Playwright's bundled headless shell AND
+   real Chrome in headless mode (same "Error 15 / Access denied" page,
+   residential IP shown — fingerprint-based, not IP-based). **Headed
+   real Chrome (`channel="chrome", headless=False`) renders the full
+   lines page.** So the capture runs headed: a Chrome window appears for
+   ~15s per daily run. No stealth/fingerprint spoofing — the passing
+   configuration is just a real browser being a real browser.
+3. **Markets render in the list view, no drill-down needed**: spreads as
+   the 3-way spread-with-push market (e.g. `1.80 (-6) | X 9.00 | 1.80
+   (+6)`), over/under totals, and quarter-market variants — exactly the
+   format `extract_picks.py` was built around. Date tabs (today +6 days)
+   default to today.
+4. **Cookie banner** renders as a bottom overlay that does not cover the
+   odds content — no dismissal needed for capture.
+5. **NBA verification deferred**: NBA lines didn't exist yet at probe
+   time (season starts ~Oct 21), so the NBA-specific rendering and the
+   end-to-end extraction check are an opening-week fine-tune (below).
+   v1 captures the whole basketball page — extract_picks only returns
+   games it resolves to NBA teams, so other leagues filter themselves
+   out of the pipeline.
+
+Environment note: Playwright ≥1.54 drops macOS 13 (this Mac) support;
+pinned `<1.54` in requirements.txt. `channel="chrome"` uses the
+installed Google Chrome, so no `playwright install chromium` step and
+Chrome's auto-updates keep the fingerprint current.
+
+**Opening-week fine-tune checklist** (when NBA lines are live):
+- One real capture → `scripts/recommend_from_screenshot.py` (one Gemini
+  call) → verify NBA games extract with correct teams/spreads/totals.
+- Decide whether the full basketball page is good enough in-season or
+  the USA league filter is worth adding (longer page vs. navigation
+  dependency).
+- Confirm tonight's NBA lines are posted by the 16:00 IL run.
+
+## Unknowns that required a live probe (answered above; original list)
 
 1. The NBA page URL and whether it's stable (vs. session-tokenized).
 2. Whether the full slate renders in one page (full-page screenshot
