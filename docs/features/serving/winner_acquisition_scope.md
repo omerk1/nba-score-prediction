@@ -1,5 +1,30 @@
 # Serving — Winner odds acquisition (scope)
 
+## Status (2026-10-05)
+
+**Implemented and live-verified:** `src/serving/capture_winner.py` +
+`scripts/capture_winner.py` capture the real lines page end to end
+(multiple runs; first-attempt clean after a pre-scroll fix for a
+reproducible lazy-render screenshot stall). Retry, `.failed.png`
+diagnostic, non-zero exit, and 14-day pruning all exercised; 8 unit
+tests on a fake page. Launch mode is headed real Chrome — load-bearing,
+see probe results below.
+
+**Gaps — real, named, and untestable until NBA lines exist (~Oct 21):**
+1. NBA extraction end to end: no capture with actual NBA games has been
+   run through Gemini → `recommend_game`. The page format matches what
+   `extract_picks` expects, but that is an observation, not a test.
+2. Lines timing: "tonight's NBA lines are up by the 16:00 IL run" is
+   assumed, not observed.
+3. Imperva stability: headed real Chrome passes *today*; the vendor can
+   retune. Failure is loud (non-zero exit → orchestrator will report),
+   but this is a standing external dependency.
+4. Headed capture under a closed lid: the daily wake runs headed Chrome
+   with no physical display — behavior unverified; test once on AC
+   power before trusting the schedule.
+
+All four are on the opening-week fine-tune checklist below.
+
 Goal: automated daily capture of winner.co.il's NBA offering (spreads,
 totals, moneylines as available) in a form the existing pipeline consumes —
 feeding `src/serving/extract_picks.py` (vision extraction) →
@@ -89,6 +114,8 @@ Chrome's auto-updates keep the fingerprint current.
   the USA league filter is worth adding (longer page vs. navigation
   dependency).
 - Confirm tonight's NBA lines are posted by the 16:00 IL run.
+- One lid-closed capture on AC power (headed Chrome, no physical
+  display -- the daily wake's actual condition).
 
 ## Unknowns that required a live probe (answered above; original list)
 
