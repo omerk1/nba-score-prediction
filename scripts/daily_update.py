@@ -15,12 +15,19 @@ sending anything.
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.append(str(_REPO_ROOT))
+# Every store this job refreshes is addressed by a cwd-relative path
+# (fetch_data's DB_PATH, config's raw_db, the outputs/ style cache), and
+# launchd's default cwd is "/" — don't depend on the plist's
+# WorkingDirectory being set correctly.
+os.chdir(_REPO_ROOT)
 
 load_dotenv()  # must run before the injury-chain imports inside the refresh steps
 

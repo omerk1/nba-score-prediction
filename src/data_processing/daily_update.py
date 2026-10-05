@@ -59,11 +59,10 @@ def _season_for(d: datetime.date) -> str:
     return f"{year}-{str(year + 1)[2:]}"
 
 
-def _retry(step_name: str, fn: Callable[[], None]) -> None:
+def _retry(step_name: str, fn: Callable[[], object]) -> object:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            fn()
-            return
+            return fn()
         except Exception as e:
             if attempt == MAX_RETRIES:
                 raise
@@ -98,7 +97,11 @@ def refresh_injuries() -> None:
     """Today's ESPN injury report → (game_date, team_id) impact rows."""
     from src.news_scraping.pipeline import run_nightly
 
-    run_nightly()
+    # Explicit Eastern date: run_nightly defaults to the machine-local
+    # calendar day, and the serving path's injury join is exact-date — a
+    # small-hours local run would otherwise file tonight's report one day
+    # ahead of the Eastern game night and zero out the live injury signal.
+    run_nightly(_today_nba())
 
 
 def refresh_player_importance() -> None:
@@ -107,7 +110,8 @@ def refresh_player_importance() -> None:
     backfill_season skips already-stored dates, so re-running is cheap."""
     from src.news_scraping.player_importance import backfill_season
 
-    backfill_season(_season_for(_today_nba()))
+    today_nba = _today_nba()
+    backfill_season(_season_for(today_nba), end=today_nba)
 
 
 def should_run_importance_snapshot(today: Optional[datetime.date] = None) -> bool:
@@ -138,7 +142,11 @@ def check_game_table_freshness(
     today = today or _today_nba()
     yesterday = today - datetime.timedelta(days=1)
 
-    conn = sqlite3.connect(db_path)
+    if not db_path.exists():
+        return FreshnessResult(False, f"game DB missing at {db_path}")
+    # Read-only URI: a bare connect() would create an empty DB file as a
+    # side effect of a check that must never mutate state.
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         row = conn.execute("SELECT MAX(game_date) FROM game").fetchone()
     finally:
@@ -158,7 +166,11 @@ def check_game_table_freshness(
     )
     d = yesterday
     while d >= earliest:
-        scheduled = fetch_upcoming_games(d.isoformat())
+        # Same retry budget as the refresh steps — a single transient
+        # scoreboard error must not fail an otherwise-successful run.
+        scheduled = _retry(
+            f"scoreboard check {d}", lambda d=d: fetch_upcoming_games(d.isoformat())
+        )
         if not scheduled.empty:
             return FreshnessResult(
                 False,

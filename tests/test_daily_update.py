@@ -118,6 +118,30 @@ class TestFreshnessGate:
         assert result.fresh
         assert calls == ["2026-01-09", "2026-01-08", "2026-01-07"]
 
+    def test_missing_db_fails_without_creating_file(self, tmp_path):
+        db = tmp_path / "nba_api.sqlite"
+        result = check_game_table_freshness(db_path=db, today=TODAY)
+        assert not result.fresh
+        assert "missing" in result.reason
+        assert not db.exists()  # a read-only check must not create the DB
+
+    def test_transient_scoreboard_error_is_retried(self, tmp_path, monkeypatch):
+        db = _game_db(tmp_path, ["2026-01-08"])
+        attempts = []
+
+        def flaky(target_date=None):
+            attempts.append(target_date)
+            if len(attempts) == 1:
+                raise ConnectionError("transient 500")
+            return pd.DataFrame()
+
+        import src.data_processing.fetch_data as fetch_data
+
+        monkeypatch.setattr(fetch_data, "fetch_upcoming_games", flaky)
+        result = check_game_table_freshness(db_path=db, today=TODAY)
+        assert result.fresh
+        assert attempts == ["2026-01-09", "2026-01-09"]
+
 
 class TestRunDailyUpdate:
     @pytest.fixture
@@ -167,6 +191,22 @@ class TestRunDailyUpdate:
 
         monkeypatch.setattr(daily_update, "check_game_table_freshness", boom)
         assert run_daily_update() == 1
+
+
+def test_fetch_data_main_raises_when_fetches_fail(tmp_path, monkeypatch):
+    # The orchestrator's retry depends on main() surfacing failures instead
+    # of swallowing them (its historical behavior).
+    import src.data_processing.fetch_data as fetch_data
+
+    monkeypatch.setattr(fetch_data, "DB_PATH", tmp_path / "nba_api.sqlite")
+    monkeypatch.setattr(fetch_data.time, "sleep", lambda s: None)
+
+    def broken(season, season_type):
+        raise ConnectionError("stats.nba.com timeout")
+
+    monkeypatch.setattr(fetch_data, "_fetch_season", broken)
+    with pytest.raises(RuntimeError, match="fetch\\(es\\) failed"):
+        fetch_data.main()
 
 
 def test_importance_snapshot_weekly_on_monday():

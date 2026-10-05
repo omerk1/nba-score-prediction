@@ -198,6 +198,7 @@ def main():
         logger.info(f"Full backfill from {start_season}")
 
     total = 0
+    errors: list[str] = []
     for season in seasons:
         for season_type in SEASON_TYPES:
             try:
@@ -211,10 +212,16 @@ def main():
                     total += inserted
             except Exception as e:
                 logger.error(f"  Error: {e}")
+                errors.append(f"{season} {season_type}: {e}")
             time.sleep(SLEEP_SECONDS)
 
     conn.close()
     logger.info(f"Done. Total new games inserted: {total:,}")
+    # Surface failures to callers (the daily-update orchestrator retries on
+    # exceptions): still finish the loop first — every successful season is
+    # already committed, so a rerun only re-asks for the failed ones.
+    if errors:
+        raise RuntimeError(f"{len(errors)} fetch(es) failed: {'; '.join(errors)}")
 
 
 if __name__ == "__main__":

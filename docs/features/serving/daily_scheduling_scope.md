@@ -19,12 +19,18 @@ invoking the single wrapper entry point. Key plist decisions:
 - `WorkingDirectory`: repo root (`/Users/omerkoren/dev/nba-score-prediction`).
   Required — imports (`from src...`) and relative paths (`configs/`,
   `data/`, `.env`) only resolve from repo root.
-- `StartCalendarInterval`: **16:00 Israel time** (launchd uses the Mac's
-  local timezone — no conversion needed in the plist). Reasoning: NBA games
-  tip off US evenings ≈ 02:00–05:30 Israel; final box scores are in by
-  Israel morning and the next slate's Winner lines are posted by Israel
-  afternoon — so 16:00 catches both fresh yesterday-results and today's
-  lines, with hours of margin before the earliest tipoff.
+- `StartCalendarInterval`: **18:00 Israel time** (launchd uses the Mac's
+  local timezone — no conversion needed in the plist). 18:00 IL ≈ 11:00 ET
+  (12:00 ET during the brief weeks when US and Israel DST transitions are
+  misaligned). Reasoning: NBA games tip off US evenings ≈ 02:00–05:30
+  Israel and the last box scores are final by ≈ 01:30 ET — a late-morning-
+  ET run leaves zero chance of a partially posted yesterday slate (the
+  freshness gate in `scripts/daily_update.py` is date-granular and cannot
+  detect a partial day, so the schedule carries that guarantee); it also
+  matches the injury pipeline's own "~11:00 ET on game days" cadence, so
+  tonight's ESPN injury rows are populated, and Winner's lines for the
+  night's slate are posted by Israel afternoon. Earliest tipoff is still
+  ≈ 8 h away.
 - `StandardOutPath` / `StandardErrorPath`: `logs/` under the repo root
   (doesn't exist yet — create at install; `.gitignore` already covers it:
   `logs/` and `*.log` entries exist).
@@ -37,15 +43,15 @@ invoking the single wrapper entry point. Key plist decisions:
 
 ## Missed-run semantics (launchd facts)
 
-- Mac **asleep** at 16:00: launchd coalesces the missed
+- Mac **asleep** at 18:00: launchd coalesces the missed
   `StartCalendarInterval` event and fires the job **once on next wake**.
-- Mac **powered off** at 16:00: the event is **not** run retroactively on
+- Mac **powered off** at 18:00: the event is **not** run retroactively on
   boot — that day's run is simply lost (hence the Telegram dead-man's
   switch below).
 
 ## pmset scheduled wake
 
-- `sudo pmset repeat wakeorpoweron MTWRFSU 15:55:00` — wake ~5 min before
+- `sudo pmset repeat wakeorpoweron MTWRFSU 17:55:00` — wake ~5 min before
   the launchd time so the system is fully up when the job fires.
 - Needs sudo **once**; the schedule persists in SMC/PMU across reboots.
 - Lid-closed wake requires **AC power connected**; on battery a closed
@@ -93,7 +99,7 @@ bootstrap + the pmset command — out of scope to write here.
 - **Battery at wake time**: `wakeorpoweron` fires, but a lid-closed MacBook
   on battery won't actually wake. The run isn't lost — launchd coalescing
   runs it at the next manual wake — just late. Degraded, not fatal; keep
-  the Mac on AC for reliable 16:00 runs.
+  the Mac on AC for reliable 18:00 runs.
 - **Login requirement**: a user LaunchAgent (gui domain) runs only while
   the user is logged in. Logged-out Mac = no run. A LaunchDaemon would
   survive logout but is **not recommended**: it runs as root/other user,
@@ -106,4 +112,4 @@ bootstrap + the pmset command — out of scope to write here.
   should fail loudly (Telegram error message) rather than silently skip.
 - **Timezone edge**: `StartCalendarInterval` follows the Mac's local
   clock, but the SMC `pmset` schedule is set once — after a DST shift or
-  travel, re-check `pmset -g sched` still precedes 16:00 local.
+  travel, re-check `pmset -g sched` still precedes 18:00 local.
