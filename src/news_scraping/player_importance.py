@@ -137,15 +137,19 @@ def compute_and_store(season: str, as_of_date: date) -> int:
     return len(rows)
 
 
-def backfill_season(season: str, interval_days: int = 7) -> None:
-    """Compute weekly importance snapshots across a full season. Skips dates already in DB."""
+def backfill_season(season: str, interval_days: int = 7, end: date | None = None) -> None:
+    """Compute weekly importance snapshots across a full season. Skips dates already in DB.
+
+    `end` caps the snapshot dates (default: local today). Callers that reason
+    in NBA (US/Eastern) dates should pass their own "today" so a snapshot is
+    never computed as of a date that hasn't finished there yet."""
     cfg = load_config()
     init_db(cfg.injury_features.db_path)
 
     season_year = int(season[:4])
     season_start, season_end = _get_season_bounds(season_year)
     cursor = season_start + timedelta(days=interval_days)
-    end = min(season_end, date.today())
+    end = min(season_end, end or date.today())
 
     while cursor <= end:
         with get_conn(cfg.injury_features.db_path) as conn:

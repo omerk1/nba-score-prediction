@@ -20,11 +20,24 @@ invoking the single wrapper entry point. Key plist decisions:
   Required — imports (`from src...`) and relative paths (`configs/`,
   `data/`, `.env`) only resolve from repo root.
 - `StartCalendarInterval`: **16:00 Israel time** (launchd uses the Mac's
-  local timezone — no conversion needed in the plist). Reasoning: NBA games
-  tip off US evenings ≈ 02:00–05:30 Israel; final box scores are in by
-  Israel morning and the next slate's Winner lines are posted by Israel
-  afternoon — so 16:00 catches both fresh yesterday-results and today's
-  lines, with hours of margin before the earliest tipoff.
+  local timezone — no conversion needed in the plist). 16:00 IL ≈ 09:00 ET
+  (10:00 ET during the brief weeks when US and Israel DST transitions are
+  misaligned — late Oct–early Nov and March, both in-season). The window
+  is bounded on both sides:
+  - **Not earlier than ≈ 04:00 ET**: the last box scores go final ≈ 01:30
+    ET and post within the hour; a mid-morning-ET run leaves no chance of
+    a partially posted yesterday slate (the freshness gate in
+    `scripts/daily_update.py` is date-granular and cannot detect a partial
+    day, so the schedule carries that guarantee).
+  - **Not later than ≈ 10:00 ET**: the earliest NBA tipoffs are ≈ 12:00 ET
+    (Christmas opener, MLK/weekend matinees) — 16:00 IL keeps ≥ 2 h of
+    margin before them year-round, including the DST-misaligned weeks. An
+    11:00-ET run would cut a noon game to 1 h, and to 0 in those weeks.
+  - Injury freshness is the only pull later (the injury pipeline suggests
+    ~11:00 ET), but ESPN's page updates continuously and noon-game
+    statuses are often game-time decisions anyway — a 1–2 h earlier read
+    is noise. Winner's lines for the night's slate are posted by Israel
+    afternoon.
 - `StandardOutPath` / `StandardErrorPath`: `logs/` under the repo root
   (doesn't exist yet — create at install; `.gitignore` already covers it:
   `logs/` and `*.log` entries exist).
