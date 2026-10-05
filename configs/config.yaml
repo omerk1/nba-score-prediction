@@ -476,5 +476,4 @@ notifications:
     # docs/features/serving/telegram_notify_scope.md). Secrets
     # (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID) live in .env, never here.
     enabled: false
-    parse_mode: "HTML"
     timeout_seconds: 10

@@ -324,10 +324,11 @@ class TelegramNotifyConfig(BaseModel):
     """One-way Telegram delivery of recommendations
     (src/serving/notify_telegram.py). Secrets (TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID) live in .env, never here. `enabled` gates
-    send_recommendations."""
+    send_recommendations. Parse mode is intentionally NOT a knob: the
+    formatter emits HTML, so any other value would just 400-reject
+    every message."""
 
     enabled: bool = False
-    parse_mode: str = "HTML"
     timeout_seconds: int = 10
 
 
