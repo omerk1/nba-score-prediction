@@ -468,3 +468,12 @@ pbp:
   enabled: false
   db_path: "data/raw/pbp.sqlite"
   rolling_window: 10
+
+notifications:
+  telegram:
+    # One-way Telegram delivery of daily recommendations
+    # (src/serving/notify_telegram.py; scope and format decisions in
+    # docs/features/serving/telegram_notify_scope.md). Secrets
+    # (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID) live in .env, never here.
+    enabled: false
+    timeout_seconds: 10

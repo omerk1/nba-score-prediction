@@ -17,6 +17,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 load_dotenv()  # GOOGLE_API_KEY for extract_picks_from_screenshot's Gemini call
 
 from src.serving.extract_picks import extract_picks_from_screenshot  # noqa: E402
+from src.serving.notify_telegram import SendStatus, send_recommendations  # noqa: E402
 from src.serving.recommend import format_recommendation, load_resources, recommend_game  # noqa: E402
 
 # recommend_game's own accepted kwargs -- a pick may carry extra fields
@@ -54,14 +55,23 @@ def main():
 
     print(f"Extracted {len(picks)} NBA game(s).")
     resources = load_resources()
+    recs = []
     for pick in picks:
         dropped = {k: v for k, v in pick.items() if k not in _RECOMMEND_KWARGS}
         if dropped:
             print(f"(ignoring fields recommend_game doesn't use yet: {dropped})")
         kwargs = {k: v for k, v in pick.items() if k in _RECOMMEND_KWARGS}
         rec = recommend_game(game_date=args.date, resources=resources, **kwargs)
+        recs.append(rec)
         print(f"\n{'=' * 60}")
         print(format_recommendation(rec, heatmap_top=args.heatmap_top))
+
+    # One send for the whole slate; no-op unless notifications.telegram.enabled.
+    status = send_recommendations(recs)
+    if status is SendStatus.SENT:
+        print("\nSent to Telegram.")
+    elif status is SendStatus.FAILED:
+        print("\nWARNING: Telegram send failed — see errors above.")
 
 
 if __name__ == "__main__":

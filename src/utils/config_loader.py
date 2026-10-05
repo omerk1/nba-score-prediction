@@ -320,6 +320,22 @@ class PBPConfig(BaseModel):
     rolling_window: int = 10
 
 
+class TelegramNotifyConfig(BaseModel):
+    """One-way Telegram delivery of recommendations
+    (src/serving/notify_telegram.py). Secrets (TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID) live in .env, never here. `enabled` gates
+    send_recommendations. Parse mode is intentionally NOT a knob: the
+    formatter emits HTML, so any other value would just 400-reject
+    every message."""
+
+    enabled: bool = False
+    timeout_seconds: int = 10
+
+
+class NotificationsConfig(BaseModel):
+    telegram: Optional[TelegramNotifyConfig] = None
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -341,6 +357,7 @@ class Config(BaseModel):
     prediction_intervals: Optional[PredictionIntervalsConfig] = None
     pbp: Optional[PBPConfig] = None
     cv: Optional[CVConfig] = None
+    notifications: Optional[NotificationsConfig] = None
 
 
 # --- Loader Functions ---

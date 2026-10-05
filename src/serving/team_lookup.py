@@ -10,3 +10,9 @@ from nba_api.stats.static import teams as nba_teams
 
 def build_nickname_to_team_id() -> dict:
     return {t["nickname"]: t["id"] for t in nba_teams.get_teams()}
+
+
+def build_team_id_to_name() -> dict:
+    """id -> nickname, the reverse mapping (same offline static source),
+    for consumers rendering IDs back to names (e.g. notify_telegram)."""
+    return {t["id"]: t["nickname"] for t in nba_teams.get_teams()}

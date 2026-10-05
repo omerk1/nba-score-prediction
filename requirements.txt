@@ -13,6 +13,7 @@ nba_api>=1.4.0
 
 # Injury pipeline
 requests>=2.31.0
+python-dotenv>=1.0.0
 pdfplumber>=0.9.0
 google-genai>=1.0.0
 
