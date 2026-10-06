@@ -180,3 +180,6 @@ data/raw/injury_pdfs/
 # Daily Winner lines captures (src/serving/capture_winner.py) -- dated
 # debugging artifacts, pruned after 14 days, never history worth keeping.
 outputs/winner_captures/
+
+# Daily job overlap guard (src/serving/daily_job.py), created at runtime.
+outputs/daily_job.lock
