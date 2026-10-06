@@ -34,6 +34,12 @@ def main():
     parser.add_argument(
         "--heatmap-top", type=int, default=15, help="How many top-probability margins to print"
     )
+    parser.add_argument(
+        "--no-send",
+        action="store_true",
+        help="Don't post to Telegram (for debugging reruns — the channel is live, "
+        "and unlike the daily job this script has no same-day dedup)",
+    )
     args = parser.parse_args()
 
     picks = extract_picks_from_screenshot(args.image_path, model=args.model, game_date=args.date)
@@ -53,7 +59,11 @@ def main():
         print(f"\n{'=' * 60}")
         print(format_recommendation(rec, heatmap_top=args.heatmap_top))
 
-    # One send for the whole slate; no-op unless notifications.telegram.enabled.
+    # One send for the whole slate. The channel is LIVE in the checked-in
+    # config — pass --no-send when re-running interactively, or every
+    # debug iteration posts the same slate again.
+    if args.no_send:
+        return
     status = send_recommendations(recs)
     if status is SendStatus.SENT:
         print("\nSent to Telegram.")

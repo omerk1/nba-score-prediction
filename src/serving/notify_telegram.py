@@ -252,7 +252,8 @@ def _resolve_send_config(config):
     if not token or not chat_id:
         logger.error(
             "notifications.telegram.enabled is true but TELEGRAM_BOT_TOKEN/"
-            "TELEGRAM_CHAT_ID missing from the environment (.env) — skipping send"
+            "TELEGRAM_CHAT_ID missing from the environment (.env) — cannot send, "
+            "reporting FAILED"
         )
         return SendStatus.FAILED
     return tg, token, chat_id

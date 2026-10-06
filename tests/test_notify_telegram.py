@@ -248,17 +248,27 @@ class TestSendTelegram:
 
 
 class TestSendRecommendations:
-    def test_repo_config_enabled_without_secrets_fails_not_sends(self, monkeypatch):
-        # Go-live: the checked-in config is enabled (channel verified
-        # 2026-10-06). What the suite must guarantee is that a test or
-        # CI environment WITHOUT the .env secrets can never emit a real
-        # send — enabled + no secrets is a loud FAILED, not a network
-        # call (send_telegram is unreachable without a token).
+    def test_repo_config_without_secrets_never_sends(self, monkeypatch):
+        # The invariant that must hold through every future flip of the
+        # enabled flag (go-live true today, maybe false off-season): an
+        # environment WITHOUT the .env secrets can never emit a real
+        # send, whatever the checked-in config says. Deliberately not
+        # asserting the flag's current value — that's operations, not a
+        # code contract.
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
         monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
-        config = load_config()
-        assert config.notifications.telegram.enabled is True
-        assert send_recommendations([MINIMAL_REC], config=config) is SendStatus.FAILED
+        status = send_recommendations([MINIMAL_REC], config=load_config())
+        assert status in (SendStatus.SKIPPED, SendStatus.FAILED)
+
+    def test_disabled_config_is_skipped_not_failed(self):
+        # The daily job's exit codes rely on SKIPPED (benign, exit 0)
+        # staying distinct from FAILED (exit 1) when the channel is off.
+        config = SimpleNamespace(
+            notifications=SimpleNamespace(
+                telegram=SimpleNamespace(enabled=False, timeout_seconds=10)
+            )
+        )
+        assert send_recommendations([MINIMAL_REC], config=config) is SendStatus.SKIPPED
 
     def _enabled_config(self):
         return SimpleNamespace(
