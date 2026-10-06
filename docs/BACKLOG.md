@@ -138,6 +138,23 @@ exploration plateaus below what richer inputs might unlock)
 
 ---
 
+## Play-in game ingestion (candidate experiment, not scheduled)
+
+**What:** the `game` table has never contained play-in games (GAME_ID
+prefix 005; 0 rows since the format began in 2021) — `fetch_data`
+pulls Regular Season + Playoffs only. The omission is consistent
+between training and serving, so it's a data-completeness question,
+not leakage.
+**Why it's not a quick fix:** adding ~30 historical games shifts
+rolling-window and Elo features for every subsequent playoff game, so
+it changes training inputs and needs a full ablation (baseline vs.
+treatment under `--protocol cv`) plus a champion re-check before
+`SEASON_TYPES` gains `"PlayIn"`.
+**Where it surfaced:** the daily freshness gate's game-type filter
+(PR #83); the gate deliberately excludes 005 until this is decided.
+
+---
+
 ## Notes
 
 - **PR #21 merged** — backfill resilience (backfill_player_stats.py retry logic, recover_failed_backfill.py)

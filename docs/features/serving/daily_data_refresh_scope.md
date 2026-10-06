@@ -85,7 +85,14 @@ store's incremental/idempotent path already exists; a flag on
 3. Injury nightly update; weekly, the current-season importance snapshot.
 4. Freshness check: fail (non-zero exit) if `MAX(game_date)` < yesterday
    while yesterday had scheduled games — the only non-self-reporting
-   staleness case (#1 above).
+   staleness case (#1 above). "Scheduled games" means regular-season and
+   playoff games only (derived from `fetch_data`'s season-type mapping):
+   the scoreboard also lists preseason/All-Star/play-in games that the
+   `game` table never holds, and demanding those failed the gate every
+   preseason day (observed live 2026-10-06). Note play-in games have
+   NEVER been ingested (0 rows historically) — a consistent train/serve
+   omission; ingesting them is a backlogged modeling decision requiring
+   its own ablation, not a gate or fetch tweak.
 
 ## Failure handling
 

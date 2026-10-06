@@ -39,7 +39,10 @@ SCOREBOARD_SLEEP_SECONDS = 0.7  # same stats.nba.com courtesy sleep as fetch_dat
 # scheduled games before giving up and assuming an off-period. Caps the
 # offseason cost (every checked day is one ScoreboardV2 call); a gap
 # older than this that still contains missed games goes undetected, but
-# any in-season fetch failure surfaces within a day.
+# any in-season fetch failure surfaces within a day. During preseason
+# (~3 weeks) every daily run pays the full cap — all checked days filter
+# to zero countable games — which is ~5s/day; accepted over early-stop
+# complexity.
 FRESHNESS_LOOKBACK_DAYS = 7
 
 # NBA game dates are US/Eastern calendar days; "yesterday" must be
@@ -158,7 +161,7 @@ def check_game_table_freshness(
     if last_stored >= yesterday:
         return FreshnessResult(True, f"game table current through {last_stored}")
 
-    from src.data_processing.fetch_data import fetch_upcoming_games
+    from src.data_processing.fetch_data import EXPECTED_GAME_ID_PREFIXES, fetch_upcoming_games
 
     earliest = max(
         last_stored + datetime.timedelta(days=1),
@@ -171,6 +174,16 @@ def check_game_table_freshness(
         scheduled = _retry(
             f"scoreboard check {d}", lambda d=d: fetch_upcoming_games(d.isoformat())
         )
+        # Only count game types the table can actually contain (derived
+        # from fetch_data's own season-type mapping so they can't drift):
+        # the scoreboard also lists preseason/All-Star/play-in games that
+        # LeagueGameLog never returns for the fetched season types —
+        # demanding those failed the gate every preseason day (observed
+        # live 2026-10-06). zfill keeps the gate fail-CLOSED if game_id
+        # ever arrives numeric (leading zeros dropped, nothing would
+        # match a prefix and real missing games would pass unnoticed).
+        ids = scheduled["game_id"].astype(str).str.zfill(10)
+        scheduled = scheduled[ids.str.startswith(EXPECTED_GAME_ID_PREFIXES)]
         if not scheduled.empty:
             return FreshnessResult(
                 False,
