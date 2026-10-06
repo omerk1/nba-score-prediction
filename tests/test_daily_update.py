@@ -115,6 +115,20 @@ class TestFreshnessGate:
         assert result.fresh
         assert "2026-01-09" in calls  # consulted, preseason games filtered out
 
+    def test_numeric_game_ids_fail_closed(self, tmp_path, monkeypatch):
+        # a dtype change that drops leading zeros must still count real
+        # regular-season games as missing, not filter them all out
+        db = _game_db(tmp_path, ["2026-01-07"])
+
+        def fake(target_date=None):
+            return pd.DataFrame({"game_id": [22600001, 22600002]})  # int64, no zeros
+
+        import src.data_processing.fetch_data as fetch_data
+
+        monkeypatch.setattr(fetch_data, "fetch_upcoming_games", fake)
+        result = check_game_table_freshness(db_path=db, today=TODAY)
+        assert not result.fresh
+
     def test_gap_behind_empty_yesterday_detected(self, tmp_path, monkeypatch):
         # yesterday had no games, but the day before did and is missing
         db = _game_db(tmp_path, ["2026-01-06"])

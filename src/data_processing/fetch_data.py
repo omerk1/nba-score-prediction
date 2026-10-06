@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path("data/raw/nba_api.sqlite")
 SLEEP_SECONDS = 0.7  # required to avoid stats.nba.com rate limiting
 SEASON_TYPES = ["Regular Season", "Playoffs"]
+# GAME_ID prefix per season type (NBA convention: 001 preseason, 002
+# regular season, 003 All-Star, 004 playoffs, 005 play-in). The freshness
+# gate derives the game types it may demand from this mapping so the two
+# can't drift. Play-in games (005) are deliberately absent: they have
+# never been ingested (0 rows historically, consistent in training and
+# serving), and adding them changes rolling/Elo features — a modeling
+# decision needing its own ablation (docs/BACKLOG.md), not a fetch tweak.
+SEASON_TYPE_GAME_ID_PREFIXES = {"Regular Season": "002", "Playoffs": "004"}
+EXPECTED_GAME_ID_PREFIXES = tuple(SEASON_TYPE_GAME_ID_PREFIXES[t] for t in SEASON_TYPES)
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS game (
@@ -165,7 +174,18 @@ def fetch_upcoming_games(target_date: Optional[str] = None) -> pd.DataFrame:
 
     scoreboard = ScoreboardV2(game_date=target_date).game_header.get_data_frame()
     if scoreboard.empty:
-        return pd.DataFrame()
+        # keep the declared columns so consumers can filter without
+        # special-casing the empty day
+        return pd.DataFrame(
+            columns=[
+                "game_id",
+                "game_date",
+                "season_id",
+                "season_type",
+                "team_id_home",
+                "team_id_away",
+            ]
+        )
 
     return pd.DataFrame({
         "game_id":      scoreboard["GAME_ID"],
