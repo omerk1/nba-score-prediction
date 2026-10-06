@@ -286,6 +286,22 @@ class TestSendRecommendations:
         assert "Lakers vs Celtics" in messages[0]
         assert kwargs["token"] == "T" and kwargs["chat_id"] == "C"
 
+    def test_notice_truncated_to_message_limit(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "C")
+        transport = FakeTransport()
+        monkeypatch.setattr(
+            notify_telegram,
+            "send_telegram",
+            lambda messages, **kw: transport.post("u", json={"text": messages[0]}) or True,
+        )
+        huge = "extraction FAILED: " + "& model garbage " * 2000
+        status = notify_telegram.send_notice(huge, config=self._enabled_config())
+        assert status is SendStatus.SENT
+        sent_text = transport.posts[0]["json"]["text"]
+        assert len(sent_text) <= notify_telegram.TELEGRAM_MESSAGE_LIMIT
+        assert sent_text.endswith("…truncated")
+
     def test_rejected_send_is_failed(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "T")
         monkeypatch.setenv("TELEGRAM_CHAT_ID", "C")

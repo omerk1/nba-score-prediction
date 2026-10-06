@@ -237,11 +237,10 @@ def send_telegram(
     return all_ok
 
 
-def send_recommendations(recs: list[dict], config=None) -> SendStatus:
-    """Top-level entry for callers holding recommend_game() dicts: checks
-    the config gate and env secrets, formats, sends. Never raises:
-    SKIPPED when disabled or nothing to send, FAILED on missing secrets
-    or any rejected message."""
+def _resolve_send_config(config):
+    """Config gate + env secrets, shared by every top-level sender.
+    Returns (tg_config, token, chat_id) when sending is possible, or a
+    SendStatus (SKIPPED/FAILED) explaining why not."""
     config = config or load_config()
     tg = getattr(getattr(config, "notifications", None), "telegram", None)
     if tg is None or not tg.enabled:
@@ -256,6 +255,42 @@ def send_recommendations(recs: list[dict], config=None) -> SendStatus:
             "TELEGRAM_CHAT_ID missing from the environment (.env) — skipping send"
         )
         return SendStatus.FAILED
+    return tg, token, chat_id
+
+
+def send_notice(text: str, config=None) -> SendStatus:
+    """One short operational message (failure notice, empty slate) — the
+    daily job's dead-man's-switch channel. Plain text, escaped here, so
+    callers can pass exception strings without HTML concerns. Truncated
+    to the message limit: exception texts can embed an entire model
+    response, and a 400-rejected oversize notice would silence the
+    channel on exactly the failure it exists to report. Never raises;
+    same status semantics as send_recommendations."""
+    resolved = _resolve_send_config(config)
+    if isinstance(resolved, SendStatus):
+        return resolved
+    tg, token, chat_id = resolved
+    escaped = html.escape(text)
+    if len(escaped) > TELEGRAM_MESSAGE_LIMIT:
+        escaped = escaped[: TELEGRAM_MESSAGE_LIMIT - 12]
+        # don't end on a sliced entity fragment ("&am") — Telegram's HTML
+        # parser rejects the whole message over it
+        escaped = re.sub(r"&[a-zA-Z#0-9]*$", "", escaped) + "\n…truncated"
+    ok = send_telegram(
+        [escaped], token=token, chat_id=chat_id, timeout_seconds=tg.timeout_seconds
+    )
+    return SendStatus.SENT if ok else SendStatus.FAILED
+
+
+def send_recommendations(recs: list[dict], config=None) -> SendStatus:
+    """Top-level entry for callers holding recommend_game() dicts: checks
+    the config gate and env secrets, formats, sends. Never raises:
+    SKIPPED when disabled or nothing to send, FAILED on missing secrets
+    or any rejected message."""
+    resolved = _resolve_send_config(config)
+    if isinstance(resolved, SendStatus):
+        return resolved
+    tg, token, chat_id = resolved
 
     messages = format_telegram_message(recs)
     if not messages:

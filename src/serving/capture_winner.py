@@ -77,7 +77,15 @@ def prune_old_captures(
         return 0
     for f in output_dir.iterdir():
         m = _CAPTURE_NAME.match(f.name)
-        if m and datetime.date.fromisoformat(m.group(1)) < cutoff:
+        if not m:
+            continue
+        try:
+            file_date = datetime.date.fromisoformat(m.group(1))
+        except ValueError:
+            # a stray regex-matching-but-invalid date must not take the
+            # capture down over housekeeping
+            continue
+        if file_date < cutoff:
             f.unlink()
             removed += 1
     return removed

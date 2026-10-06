@@ -18,24 +18,12 @@ load_dotenv()  # GOOGLE_API_KEY for extract_picks_from_screenshot's Gemini call
 
 from src.serving.extract_picks import extract_picks_from_screenshot  # noqa: E402
 from src.serving.notify_telegram import SendStatus, send_recommendations  # noqa: E402
-from src.serving.recommend import format_recommendation, load_resources, recommend_game  # noqa: E402
-
-# recommend_game's own accepted kwargs -- a pick may carry extra fields
-# (e.g. push_odds) that extract_picks_from_screenshot returns but
-# recommend_game doesn't consume yet; filtered out here rather than passed
-# through and erroring.
-_RECOMMEND_KWARGS = {
-    "home_team_id",
-    "away_team_id",
-    "home_spread",
-    "home_spread_odds",
-    "away_spread_odds",
-    "home_moneyline_odds",
-    "away_moneyline_odds",
-    "total_line",
-    "over_odds",
-    "under_odds",
-}
+from src.serving.recommend import (  # noqa: E402
+    format_recommendation,
+    load_resources,
+    recommend_pick,
+    split_pick,
+)
 
 
 def main():
@@ -57,11 +45,10 @@ def main():
     resources = load_resources()
     recs = []
     for pick in picks:
-        dropped = {k: v for k, v in pick.items() if k not in _RECOMMEND_KWARGS}
+        _, dropped = split_pick(pick)
         if dropped:
             print(f"(ignoring fields recommend_game doesn't use yet: {dropped})")
-        kwargs = {k: v for k, v in pick.items() if k in _RECOMMEND_KWARGS}
-        rec = recommend_game(game_date=args.date, resources=resources, **kwargs)
+        rec = recommend_pick(pick, resources, game_date=args.date)
         recs.append(rec)
         print(f"\n{'=' * 60}")
         print(format_recommendation(rec, heatmap_top=args.heatmap_top))
