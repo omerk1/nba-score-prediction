@@ -1,5 +1,5 @@
 """
-Headless capture of winner.co.il's basketball lines page — a full-page
+Daily capture of winner.co.il's basketball lines page — a full-page
 PNG that feeds src/serving/extract_picks.py unchanged. Scope and the
 screenshot-over-parser decision: docs/features/serving/
 winner_acquisition_scope.md.
@@ -51,7 +51,7 @@ RETENTION_DAYS = 14
 # Tall viewport: fewer virtualized-list surprises in full_page capture.
 VIEWPORT = {"width": 1440, "height": 2400}
 
-_CAPTURE_NAME = re.compile(r"^winner_nba_(\d{4}-\d{2}-\d{2})\.png$")
+_CAPTURE_NAME = re.compile(r"^winner_nba_(\d{4}-\d{2}-\d{2})(\.failed)?\.png$")
 
 
 def dated_capture_path(output_dir: Path = DEFAULT_OUTPUT_DIR, today=None) -> Path:
@@ -105,7 +105,15 @@ def _capture(page, url: str, output_path: Path, settle_seconds: float = RENDER_S
         )
     except Exception:
         try:
-            page.screenshot(path=str(failure_path(output_path)), full_page=True)
+            # Viewport-only with the hardened settings: the known failure
+            # mode IS the full-page shot stalling, so the diagnostic must
+            # not repeat the configuration that just failed.
+            page.screenshot(
+                path=str(failure_path(output_path)),
+                full_page=False,
+                timeout=SCREENSHOT_TIMEOUT_MS,
+                animations="disabled",
+            )
             logger.warning(f"capture failed; partial render saved to {failure_path(output_path)}")
         except Exception:
             pass
@@ -137,11 +145,20 @@ def capture_nba_page(
     url: str = WINNER_BASKETBALL_URL,
     page_factory=None,
 ) -> Path:
-    """Captures the lines page to a dated PNG and prunes old captures.
-    One retry on any failure (fresh browser each attempt); raises
-    RuntimeError after both attempts fail. `page_factory` is a context
-    manager yielding a page-like object (default: real Playwright)."""
-    output_path = output_path or dated_capture_path()
+    """Captures the lines page to a dated PNG. One retry on any failure
+    (fresh browser each attempt); raises RuntimeError after both attempts
+    fail. `page_factory` is a context manager yielding a page-like object
+    (default: real Playwright).
+
+    Retention is enforced only on the managed DEFAULT_OUTPUT_DIR, and only
+    on default-path runs — a custom output_path must never cause deletions
+    in a directory the caller owns. A prune error can't fail the run: the
+    capture on disk is the product, housekeeping is not."""
+    if output_path is None:
+        output_path = dated_capture_path(DEFAULT_OUTPUT_DIR)
+        prune_dir = DEFAULT_OUTPUT_DIR
+    else:
+        prune_dir = None
     output_path.parent.mkdir(parents=True, exist_ok=True)
     factory = page_factory or _playwright_page
 
@@ -150,9 +167,17 @@ def capture_nba_page(
         try:
             with factory() as page:
                 _capture(page, url, output_path)
-            prune_old_captures(output_path.parent)
-            return output_path
         except Exception as e:
             last_err = e
             logger.warning(f"capture attempt {attempt} failed: {e}")
+            continue
+        # Success: a .failed.png from an earlier attempt (or an earlier
+        # run today) is now a misleading diagnostic — remove it.
+        failure_path(output_path).unlink(missing_ok=True)
+        if prune_dir is not None:
+            try:
+                prune_old_captures(prune_dir)
+            except Exception as e:
+                logger.warning(f"capture succeeded but pruning failed (ignored): {e}")
+        return output_path
     raise RuntimeError(f"Winner capture failed after 2 attempts: {last_err}") from last_err

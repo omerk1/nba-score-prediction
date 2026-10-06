@@ -56,10 +56,12 @@ for free. Not scoped further unless needed.
 
 ## New dependency
 
-`playwright` (+ `playwright install chromium`, ~130MB one-time). The
-project's first non-pure-Python tool dependency; added to
-`requirements.txt` with the install step documented. No system Chrome
-dependency — the bundled Chromium pins the browser version.
+`playwright`, pinned `<1.54` (1.54+ drops macOS 13, this machine's OS).
+No browser download: the capture launches the **installed Google
+Chrome** (`channel="chrome"` — required, see probe finding 2: only
+headed real Chrome passes Imperva), so Chrome on the machine is a hard
+dependency and its auto-updates keep the fingerprint current. No
+`playwright install` step.
 
 ## Module placement
 
@@ -173,10 +175,9 @@ accepted at project start — recorded here, not re-litigated.
 
 ## Open questions
 
-- All of "Unknowns" above — the probe answers them; the implementation
-  PR should update this doc with the answers.
-- Playwright pin: latest at implementation time, pinned in
-  requirements.txt like the rest.
-- Whether to also save the page HTML alongside the PNG on capture (cheap,
-  helps the fallback route if it's ever needed) — decide at
-  implementation.
+- NBA-season items only — see the opening-week fine-tune checklist in
+  "Probe results". (Formerly-open items, decided at implementation:
+  Playwright pinned `<1.54` for macOS 13; page HTML is NOT saved
+  alongside the PNG in v1 — the vision route is verified live, so the
+  HTML would be dead weight unless the parser fallback is ever actually
+  needed.)

@@ -19,9 +19,11 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+# A relative --output must mean "relative to where I ran this", so grab
+# the invoking cwd before pinning the process to the repo root (which
+# default output paths and config loading need; launchd runs from "/").
+_INVOKED_FROM = Path.cwd()
 sys.path.append(str(_REPO_ROOT))
-# Output paths are repo-relative (outputs/winner_captures/); like
-# daily_update, don't depend on launchd's cwd.
 os.chdir(_REPO_ROOT)
 
 from src.serving.capture_winner import WINNER_BASKETBALL_URL, capture_nba_page  # noqa: E402
@@ -37,7 +39,7 @@ def main() -> int:
 
     try:
         path = capture_nba_page(
-            output_path=Path(args.output) if args.output else None, url=args.url
+            output_path=(_INVOKED_FROM / args.output) if args.output else None, url=args.url
         )
     except RuntimeError as e:
         logging.getLogger(__name__).error(str(e))

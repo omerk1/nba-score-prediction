@@ -79,15 +79,41 @@ class TestPrune:
 
 
 class TestCapture:
-    def test_happy_path_writes_png_and_prunes(self, tmp_path):
+    def test_happy_path_custom_output_never_prunes_callers_dir(self, tmp_path):
         out = tmp_path / "winner_nba_2026-10-05.png"
-        (tmp_path / "winner_nba_2020-01-01.png").write_bytes(b"ancient")
+        (tmp_path / "winner_nba_2020-01-01.png").write_bytes(b"archive")
         page = FakePage()
         result = capture_nba_page(output_path=out, url="http://x", page_factory=_factory([page]))
         assert result == out
         assert out.read_bytes() == b"png"
         assert page.calls[0] == ("goto", "http://x", "domcontentloaded")
-        assert not (tmp_path / "winner_nba_2020-01-01.png").exists()  # pruned
+        # a caller-owned directory must never see deletions
+        assert (tmp_path / "winner_nba_2020-01-01.png").exists()
+
+    def test_default_path_prunes_managed_dir(self, tmp_path, monkeypatch):
+        managed = tmp_path / "managed"
+        managed.mkdir()
+        (managed / "winner_nba_2020-01-01.png").write_bytes(b"ancient")
+        (managed / "winner_nba_2020-01-02.failed.png").write_bytes(b"old diagnostic")
+        monkeypatch.setattr(capture_winner, "DEFAULT_OUTPUT_DIR", managed)
+        result = capture_nba_page(url="http://x", page_factory=_factory([FakePage()]))
+        assert result.parent == managed
+        assert not (managed / "winner_nba_2020-01-01.png").exists()
+        assert not (managed / "winner_nba_2020-01-02.failed.png").exists()  # .failed pruned too
+
+    def test_prune_failure_does_not_fail_a_successful_capture(self, tmp_path, monkeypatch):
+        managed = tmp_path / "managed"
+        monkeypatch.setattr(capture_winner, "DEFAULT_OUTPUT_DIR", managed)
+
+        def broken_prune(*a, **kw):
+            raise PermissionError("undeletable")
+
+        monkeypatch.setattr(capture_winner, "prune_old_captures", broken_prune)
+        pages = [FakePage()]
+        result = capture_nba_page(url="http://x", page_factory=_factory(pages))
+        assert result.exists()
+        gotos = [c for c in pages[0].calls if c[0] == "goto"]
+        assert len(gotos) == 1  # no retry happened
 
     def test_failed_goto_writes_best_effort_screenshot_then_retries(self, tmp_path):
         out = tmp_path / "winner_nba_2026-10-05.png"
@@ -97,9 +123,10 @@ class TestCapture:
             output_path=out, url="http://x", page_factory=_factory([first, second])
         )
         assert result == out
-        # best-effort partial render saved by the failed attempt
-        assert ("screenshot", str(failure_path(out)), True) in first.calls
-        assert failure_path(out).exists()
+        # best-effort partial render: viewport-only, written by the failed
+        # attempt, then removed once the retry succeeded (stale diagnostic)
+        assert ("screenshot", str(failure_path(out)), False) in first.calls
+        assert not failure_path(out).exists()
 
     def test_two_failures_raise_runtime_error(self, tmp_path):
         out = tmp_path / "winner_nba_2026-10-05.png"
