@@ -159,7 +159,9 @@ class TestFreshnessGate:
             attempts.append(target_date)
             if len(attempts) == 1:
                 raise ConnectionError("transient 500")
-            return pd.DataFrame()
+            # empty days keep the declared columns (fetch_upcoming_games
+            # contract) so the gate can filter unconditionally
+            return pd.DataFrame(columns=["game_id"])
 
         import src.data_processing.fetch_data as fetch_data
 
