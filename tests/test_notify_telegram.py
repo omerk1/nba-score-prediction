@@ -248,12 +248,26 @@ class TestSendTelegram:
 
 
 class TestSendRecommendations:
-    def test_repo_config_default_is_disabled_skip(self, monkeypatch):
-        # guards the ship-disabled convention: the checked-in config must
-        # not send (and therefore needs no secrets)
+    def test_repo_config_without_secrets_never_sends(self, monkeypatch):
+        # The invariant that must hold through every future flip of the
+        # enabled flag (go-live true today, maybe false off-season): an
+        # environment WITHOUT the .env secrets can never emit a real
+        # send, whatever the checked-in config says. Deliberately not
+        # asserting the flag's current value — that's operations, not a
+        # code contract.
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
-        config = load_config()
-        assert config.notifications.telegram.enabled is False
+        monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+        status = send_recommendations([MINIMAL_REC], config=load_config())
+        assert status in (SendStatus.SKIPPED, SendStatus.FAILED)
+
+    def test_disabled_config_is_skipped_not_failed(self):
+        # The daily job's exit codes rely on SKIPPED (benign, exit 0)
+        # staying distinct from FAILED (exit 1) when the channel is off.
+        config = SimpleNamespace(
+            notifications=SimpleNamespace(
+                telegram=SimpleNamespace(enabled=False, timeout_seconds=10)
+            )
+        )
         assert send_recommendations([MINIMAL_REC], config=config) is SendStatus.SKIPPED
 
     def _enabled_config(self):
