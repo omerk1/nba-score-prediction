@@ -248,13 +248,17 @@ class TestSendTelegram:
 
 
 class TestSendRecommendations:
-    def test_repo_config_default_is_disabled_skip(self, monkeypatch):
-        # guards the ship-disabled convention: the checked-in config must
-        # not send (and therefore needs no secrets)
+    def test_repo_config_enabled_without_secrets_fails_not_sends(self, monkeypatch):
+        # Go-live: the checked-in config is enabled (channel verified
+        # 2026-10-06). What the suite must guarantee is that a test or
+        # CI environment WITHOUT the .env secrets can never emit a real
+        # send — enabled + no secrets is a loud FAILED, not a network
+        # call (send_telegram is unreachable without a token).
         monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
         config = load_config()
-        assert config.notifications.telegram.enabled is False
-        assert send_recommendations([MINIMAL_REC], config=config) is SendStatus.SKIPPED
+        assert config.notifications.telegram.enabled is True
+        assert send_recommendations([MINIMAL_REC], config=config) is SendStatus.FAILED
 
     def _enabled_config(self):
         return SimpleNamespace(
