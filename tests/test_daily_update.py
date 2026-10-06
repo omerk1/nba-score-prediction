@@ -31,14 +31,16 @@ def _game_db(tmp_path, game_dates):
     return db_path
 
 
-def _patch_scoreboard(monkeypatch, scheduled_by_date):
-    """fetch_upcoming_games stub: date iso string -> number of scheduled games."""
+def _patch_scoreboard(monkeypatch, scheduled_by_date, game_id_prefix="002"):
+    """fetch_upcoming_games stub: date iso string -> number of scheduled
+    games, with realistic GAME_ID prefixes (002 = regular season by
+    default) since the gate filters on them."""
     calls = []
 
     def fake(target_date=None):
         calls.append(target_date)
         n = scheduled_by_date.get(target_date, 0)
-        return pd.DataFrame({"game_id": [f"s{i}" for i in range(n)]})
+        return pd.DataFrame({"game_id": [f"{game_id_prefix}2600{i:03d}" for i in range(n)]})
 
     import src.data_processing.fetch_data as fetch_data
 
@@ -102,6 +104,16 @@ class TestFreshnessGate:
         assert result.fresh
         # checks back only to the day after the last stored game
         assert calls == ["2026-01-09", "2026-01-08"]
+
+    def test_preseason_games_do_not_fail_the_gate(self, tmp_path, monkeypatch):
+        # Observed live 2026-10-06: the scoreboard lists preseason games
+        # (prefix 001) that LeagueGameLog (RS+Playoffs) will never return;
+        # they must not count as "missing".
+        db = _game_db(tmp_path, ["2026-01-07"])
+        calls = _patch_scoreboard(monkeypatch, {"2026-01-09": 5}, game_id_prefix="001")
+        result = check_game_table_freshness(db_path=db, today=TODAY)
+        assert result.fresh
+        assert "2026-01-09" in calls  # consulted, preseason games filtered out
 
     def test_gap_behind_empty_yesterday_detected(self, tmp_path, monkeypatch):
         # yesterday had no games, but the day before did and is missing

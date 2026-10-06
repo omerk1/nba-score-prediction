@@ -171,6 +171,17 @@ def check_game_table_freshness(
         scheduled = _retry(
             f"scoreboard check {d}", lambda d=d: fetch_upcoming_games(d.isoformat())
         )
+        # Only count game types the table can actually contain: fetch_data
+        # pulls Regular Season + Playoffs, but the scoreboard also lists
+        # preseason (GAME_ID prefix 001) and All-Star (003) — demanding
+        # those would fail the gate every preseason day on games that
+        # LeagueGameLog will never return (observed live 2026-10-06).
+        # Prefixes: 001 preseason, 002 regular season, 003 All-Star,
+        # 004 playoffs, 005 play-in.
+        if not scheduled.empty:
+            scheduled = scheduled[
+                scheduled["game_id"].astype(str).str.startswith(("002", "004"))
+            ]
         if not scheduled.empty:
             return FreshnessResult(
                 False,
