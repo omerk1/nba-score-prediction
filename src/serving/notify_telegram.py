@@ -261,14 +261,23 @@ def _resolve_send_config(config):
 def send_notice(text: str, config=None) -> SendStatus:
     """One short operational message (failure notice, empty slate) — the
     daily job's dead-man's-switch channel. Plain text, escaped here, so
-    callers can pass exception strings without HTML concerns. Never
-    raises; same status semantics as send_recommendations."""
+    callers can pass exception strings without HTML concerns. Truncated
+    to the message limit: exception texts can embed an entire model
+    response, and a 400-rejected oversize notice would silence the
+    channel on exactly the failure it exists to report. Never raises;
+    same status semantics as send_recommendations."""
     resolved = _resolve_send_config(config)
     if isinstance(resolved, SendStatus):
         return resolved
     tg, token, chat_id = resolved
+    escaped = html.escape(text)
+    if len(escaped) > TELEGRAM_MESSAGE_LIMIT:
+        escaped = escaped[: TELEGRAM_MESSAGE_LIMIT - 12]
+        # don't end on a sliced entity fragment ("&am") — Telegram's HTML
+        # parser rejects the whole message over it
+        escaped = re.sub(r"&[a-zA-Z#0-9]*$", "", escaped) + "\n…truncated"
     ok = send_telegram(
-        [html.escape(text)], token=token, chat_id=chat_id, timeout_seconds=tg.timeout_seconds
+        [escaped], token=token, chat_id=chat_id, timeout_seconds=tg.timeout_seconds
     )
     return SendStatus.SENT if ok else SendStatus.FAILED
 

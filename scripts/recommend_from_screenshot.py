@@ -19,10 +19,10 @@ load_dotenv()  # GOOGLE_API_KEY for extract_picks_from_screenshot's Gemini call
 from src.serving.extract_picks import extract_picks_from_screenshot  # noqa: E402
 from src.serving.notify_telegram import SendStatus, send_recommendations  # noqa: E402
 from src.serving.recommend import (  # noqa: E402
-    RECOMMEND_KWARGS,
     format_recommendation,
     load_resources,
     recommend_pick,
+    split_pick,
 )
 
 
@@ -45,7 +45,7 @@ def main():
     resources = load_resources()
     recs = []
     for pick in picks:
-        dropped = {k: v for k, v in pick.items() if k not in RECOMMEND_KWARGS}
+        _, dropped = split_pick(pick)
         if dropped:
             print(f"(ignoring fields recommend_game doesn't use yet: {dropped})")
         rec = recommend_pick(pick, resources, game_date=args.date)

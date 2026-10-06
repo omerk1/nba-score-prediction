@@ -199,12 +199,20 @@ RECOMMEND_KWARGS = {
 }
 
 
+def split_pick(pick: dict) -> tuple[dict, dict]:
+    """(fields recommend_game accepts, fields it doesn't) — the single
+    home of the filter, so a caller reporting what was dropped can never
+    disagree with what recommend_pick actually passes through."""
+    kwargs = {k: v for k, v in pick.items() if k in RECOMMEND_KWARGS}
+    dropped = {k: v for k, v in pick.items() if k not in RECOMMEND_KWARGS}
+    return kwargs, dropped
+
+
 def recommend_pick(pick: dict, resources: PredictionResources, game_date: str = None) -> dict:
     """One extracted pick dict (extract_picks_from_screenshot's shape) ->
     one recommend_game() result, dropping fields recommend_game doesn't
-    accept. Shared by the screenshot CLI and the daily job so the filter
-    set lives in exactly one place."""
-    kwargs = {k: v for k, v in pick.items() if k in RECOMMEND_KWARGS}
+    accept. Shared by the screenshot CLI and the daily job."""
+    kwargs, _ = split_pick(pick)
     return recommend_game(game_date=game_date, resources=resources, **kwargs)
 
 

@@ -181,5 +181,7 @@ data/raw/injury_pdfs/
 # debugging artifacts, pruned after 14 days, never history worth keeping.
 outputs/winner_captures/
 
-# Daily job overlap guard (src/serving/daily_job.py), created at runtime.
+# Daily job overlap guard + same-day re-run marker
+# (src/serving/daily_job.py), created at runtime.
 outputs/daily_job.lock
+outputs/daily_job_last_success

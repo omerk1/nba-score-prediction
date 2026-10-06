@@ -9,6 +9,15 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# REPO_ROOT is templated into plist XML and a zsh -c string below; a
+# path with XML- or quote-special characters would produce a malformed
+# plist or a mangled command, so refuse it outright.
+case "$REPO_ROOT" in
+    *[\&\<\>\"\']*)
+        echo "Repo path '$REPO_ROOT' contains XML/quote-special characters; refusing to template the plist." >&2
+        exit 1
+        ;;
+esac
 LABEL="com.omerkoren.nba-daily-recommendations"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 GUI_DOMAIN="gui/$(id -u)"
