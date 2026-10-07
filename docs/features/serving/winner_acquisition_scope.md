@@ -144,6 +144,16 @@ capture; then `scripts/recommend_from_screenshot.py` on the capture (one
 Gemini call) to verify extraction end-to-end. A handful of page loads
 total — indistinguishable from normal browsing volume.
 
+**Post-launch fix (2026-10-07):** once real season content loaded
+(~6.5k-px page: Euroleague + NBA preseason lines), Playwright's
+`full_page=True` screenshot hung past its 90s timeout on every attempt,
+and the follow-up viewport-only diagnostic shot on the same page hung
+too (no `.failed.png` was ever written). A plain viewport screenshot of
+the identical content took ~4s. The capture now grows the viewport to
+the measured content height (clamped at 16,000px — Chromium's ~16,384px
+texture ceiling) and takes a non-full-page shot; verified live same day,
+28s end-to-end.
+
 ## Failure handling
 
 - Capture failure (timeout, block, selector never appears) → non-zero
