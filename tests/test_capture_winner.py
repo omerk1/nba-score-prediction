@@ -27,7 +27,12 @@ class FakePage:
     def __init__(self, goto_errors=None, screenshot_errors=None, scroll_height=3000):
         self.goto_errors = list(goto_errors or [])
         self.screenshot_errors = list(screenshot_errors or [])
-        self.scroll_height = scroll_height
+        # int, or a sequence consumed one value per height query (the last
+        # value repeats) to model a virtualized list growing on each resize
+        if isinstance(scroll_height, (list, tuple)):
+            self.scroll_heights = list(scroll_height)
+        else:
+            self.scroll_heights = [scroll_height]
         self.calls = []
 
     def goto(self, url, timeout=None, wait_until=None):
@@ -38,7 +43,9 @@ class FakePage:
     def evaluate(self, script):
         self.calls.append(("evaluate", script))
         if script == "document.documentElement.scrollHeight":
-            return self.scroll_height
+            if len(self.scroll_heights) > 1:
+                return self.scroll_heights.pop(0)
+            return self.scroll_heights[0]
 
     def set_viewport_size(self, size):
         self.calls.append(("set_viewport_size", size["width"], size["height"]))
@@ -162,6 +169,36 @@ class TestCapture:
         page = FakePage(scroll_height=1200)
         capture_nba_page(output_path=out, url="http://x", page_factory=_factory([page]))
         assert not any(c[0] == "set_viewport_size" for c in page.calls)
+
+    def test_growth_settles_only_on_a_stable_remeasure(self, tmp_path):
+        # a virtualized list that mounts more rows on each resize: every
+        # resize must be followed by another measurement, so the final
+        # viewport reflects the last-measured height, not an earlier one
+        out = tmp_path / "winner_nba_2026-10-05.png"
+        page = FakePage(scroll_height=[3000, 6000, 9000, 9000])
+        capture_nba_page(output_path=out, url="http://x", page_factory=_factory([page]))
+        resizes = [c for c in page.calls if c[0] == "set_viewport_size"]
+        assert resizes[-1] == ("set_viewport_size", 1440, 9000)
+        measures = [c for c in page.calls if c == ("evaluate", "document.documentElement.scrollHeight")]
+        assert len(measures) == len(resizes) + 1  # a confirming measure after the last resize
+
+    def test_clamped_capture_logs_truncation_warning(self, tmp_path, caplog):
+        out = tmp_path / "winner_nba_2026-10-05.png"
+        page = FakePage(scroll_height=50_000)
+        with caplog.at_level("WARNING", logger="src.serving.capture_winner"):
+            capture_nba_page(output_path=out, url="http://x", page_factory=_factory([page]))
+        assert any("page bottom will be cut off" in r.message for r in caplog.records)
+
+    def test_diagnostic_shot_resets_viewport_to_default(self, tmp_path):
+        # the grown viewport may itself be why the main shot failed; the
+        # .failed.png diagnostic must shrink back to the default first
+        out = tmp_path / "winner_nba_2026-10-05.png"
+        first = FakePage(scroll_height=6504, screenshot_errors=[TimeoutError("hang")])
+        second = FakePage()
+        capture_nba_page(output_path=out, url="http://x", page_factory=_factory([first, second]))
+        failed_shot_idx = first.calls.index(("screenshot", str(failure_path(out)), False))
+        reset = ("set_viewport_size", capture_winner.VIEWPORT["width"], capture_winner.VIEWPORT["height"])
+        assert first.calls[failed_shot_idx - 1] == reset
 
     def test_output_dir_created(self, tmp_path):
         out = tmp_path / "nested" / "dir" / "winner_nba_2026-10-05.png"

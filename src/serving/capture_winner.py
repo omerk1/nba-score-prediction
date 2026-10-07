@@ -100,9 +100,12 @@ def _grow_viewport_to_content(page) -> int:
     past the 90s timeout on every attempt — and left the page unable to
     serve the follow-up diagnostic shot — while a viewport shot of the
     identical content took ~4s. Re-measures after each resize because the
-    odds list mounts more rows once they enter the viewport."""
+    odds list mounts more rows once they enter the viewport — the loop
+    only settles on a measurement that confirmed no further growth, so a
+    resize is never the last word on the content height."""
     height = VIEWPORT["height"]
-    for _ in range(3):
+    content = 0
+    for _ in range(4):
         content = int(page.evaluate("document.documentElement.scrollHeight") or 0)
         target = min(max(content, VIEWPORT["height"]), MAX_CAPTURE_HEIGHT_PX)
         if target <= height:
@@ -110,6 +113,13 @@ def _grow_viewport_to_content(page) -> int:
         page.set_viewport_size({"width": VIEWPORT["width"], "height": target})
         height = target
         time.sleep(VIEWPORT_RELAYOUT_SECONDS)
+    else:
+        logger.warning(f"content still growing after 4 viewport resizes; capturing at {height}px")
+    if content > MAX_CAPTURE_HEIGHT_PX:
+        logger.warning(
+            f"content height {content}px exceeds the {MAX_CAPTURE_HEIGHT_PX}px "
+            "capture ceiling — page bottom will be cut off"
+        )
     return height
 
 
@@ -136,6 +146,10 @@ def _capture(page, url: str, output_path: Path, settle_seconds: float = RENDER_S
         )
     except Exception:
         try:
+            # The diagnostic must not repeat the configuration that just
+            # failed: a grown viewport may itself be why the main shot
+            # stalled, so shrink back to the default before shooting.
+            page.set_viewport_size(VIEWPORT)
             page.screenshot(
                 path=str(failure_path(output_path)),
                 full_page=False,
