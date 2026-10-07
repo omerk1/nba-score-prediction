@@ -24,9 +24,10 @@ class FakePage:
     (consumed per call), otherwise records the call sequence and writes a
     stub file on screenshot."""
 
-    def __init__(self, goto_errors=None, screenshot_errors=None):
+    def __init__(self, goto_errors=None, screenshot_errors=None, scroll_height=3000):
         self.goto_errors = list(goto_errors or [])
         self.screenshot_errors = list(screenshot_errors or [])
+        self.scroll_height = scroll_height
         self.calls = []
 
     def goto(self, url, timeout=None, wait_until=None):
@@ -36,6 +37,11 @@ class FakePage:
 
     def evaluate(self, script):
         self.calls.append(("evaluate", script))
+        if script == "document.documentElement.scrollHeight":
+            return self.scroll_height
+
+    def set_viewport_size(self, size):
+        self.calls.append(("set_viewport_size", size["width"], size["height"]))
 
     def screenshot(self, path=None, full_page=None, timeout=None, animations=None):
         self.calls.append(("screenshot", path, full_page))
@@ -119,9 +125,7 @@ class TestCapture:
         out = tmp_path / "winner_nba_2026-10-05.png"
         first = FakePage(goto_errors=[TimeoutError("nav timeout")])
         second = FakePage()
-        result = capture_nba_page(
-            output_path=out, url="http://x", page_factory=_factory([first, second])
-        )
+        result = capture_nba_page(output_path=out, url="http://x", page_factory=_factory([first, second]))
         assert result == out
         # best-effort partial render: viewport-only, written by the failed
         # attempt, then removed once the retry succeeded (stale diagnostic)
@@ -136,6 +140,28 @@ class TestCapture:
         ]
         with pytest.raises(RuntimeError, match="after 2 attempts"):
             capture_nba_page(output_path=out, url="http://x", page_factory=_factory(pages))
+
+    def test_viewport_grows_to_content_height_and_shot_is_never_full_page(self, tmp_path):
+        out = tmp_path / "winner_nba_2026-10-05.png"
+        page = FakePage(scroll_height=6504)
+        capture_nba_page(output_path=out, url="http://x", page_factory=_factory([page]))
+        resizes = [c for c in page.calls if c[0] == "set_viewport_size"]
+        assert resizes == [("set_viewport_size", 1440, 6504)]
+        shots = [c for c in page.calls if c[0] == "screenshot"]
+        assert shots and all(full_page is False for _, _, full_page in shots)
+
+    def test_viewport_height_clamped_to_chromium_ceiling(self, tmp_path):
+        out = tmp_path / "winner_nba_2026-10-05.png"
+        page = FakePage(scroll_height=50_000)
+        capture_nba_page(output_path=out, url="http://x", page_factory=_factory([page]))
+        resizes = [c for c in page.calls if c[0] == "set_viewport_size"]
+        assert resizes == [("set_viewport_size", 1440, capture_winner.MAX_CAPTURE_HEIGHT_PX)]
+
+    def test_short_page_keeps_default_viewport(self, tmp_path):
+        out = tmp_path / "winner_nba_2026-10-05.png"
+        page = FakePage(scroll_height=1200)
+        capture_nba_page(output_path=out, url="http://x", page_factory=_factory([page]))
+        assert not any(c[0] == "set_viewport_size" for c in page.calls)
 
     def test_output_dir_created(self, tmp_path):
         out = tmp_path / "nested" / "dir" / "winner_nba_2026-10-05.png"

@@ -42,14 +42,15 @@ logger = logging.getLogger(__name__)
 WINNER_BASKETBALL_URL = "https://www.winner.co.il/mainbook/sport-כדורסל"
 DEFAULT_OUTPUT_DIR = Path("outputs/winner_captures")
 PAGE_LOAD_TIMEOUT_MS = 45_000
-# Full-page shots of this page hit Playwright's default 30s screenshot
-# timeout intermittently (tall page + animated ad banners that keep
-# repainting); freeze animations and give it longer.
 SCREENSHOT_TIMEOUT_MS = 90_000
 RENDER_SETTLE_SECONDS = 8.0  # SPA: odds render well after domcontentloaded (probe-verified)
+VIEWPORT_RELAYOUT_SECONDS = 2.0  # SPA re-renders rows after a viewport resize
 RETENTION_DAYS = 14
-# Tall viewport: fewer virtualized-list surprises in full_page capture.
 VIEWPORT = {"width": 1440, "height": 2400}
+# Chromium can't rasterize arbitrarily tall surfaces (~16384px texture
+# ceiling); beyond the clamp the page bottom is lost rather than the
+# capture hanging.
+MAX_CAPTURE_HEIGHT_PX = 16_000
 
 _CAPTURE_NAME = re.compile(r"^winner_nba_(\d{4}-\d{2}-\d{2})(\.failed)?\.png$")
 
@@ -91,6 +92,27 @@ def prune_old_captures(
     return removed
 
 
+def _grow_viewport_to_content(page) -> int:
+    """Resizes the viewport to the page's content height (clamped to
+    MAX_CAPTURE_HEIGHT_PX) so a plain viewport screenshot captures the
+    whole page. full_page=True is deliberately not used anywhere here:
+    once real season content loaded (2026-10-07, ~6.5k-px page) it hung
+    past the 90s timeout on every attempt — and left the page unable to
+    serve the follow-up diagnostic shot — while a viewport shot of the
+    identical content took ~4s. Re-measures after each resize because the
+    odds list mounts more rows once they enter the viewport."""
+    height = VIEWPORT["height"]
+    for _ in range(3):
+        content = int(page.evaluate("document.documentElement.scrollHeight") or 0)
+        target = min(max(content, VIEWPORT["height"]), MAX_CAPTURE_HEIGHT_PX)
+        if target <= height:
+            break
+        page.set_viewport_size({"width": VIEWPORT["width"], "height": target})
+        height = target
+        time.sleep(VIEWPORT_RELAYOUT_SECONDS)
+    return height
+
+
 def _capture(page, url: str, output_path: Path, settle_seconds: float = RENDER_SETTLE_SECONDS):
     """Drives one page-like object (Playwright's, or a test fake) through
     the capture. On any failure, writes a best-effort screenshot of
@@ -98,24 +120,22 @@ def _capture(page, url: str, output_path: Path, settle_seconds: float = RENDER_S
     try:
         page.goto(url, timeout=PAGE_LOAD_TIMEOUT_MS, wait_until="domcontentloaded")
         time.sleep(settle_seconds)
-        # Force below-the-fold lazy content to render before the full-page
-        # shot — capturing with it still streaming in is what stalled
-        # first-attempt screenshots during the probe.
+        # Force below-the-fold lazy content to render before measuring the
+        # content height — capturing with it still streaming in is what
+        # stalled first-attempt screenshots during the probe.
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
         time.sleep(2)
         page.evaluate("window.scrollTo(0, 0)")
         time.sleep(1)
+        _grow_viewport_to_content(page)
         page.screenshot(
             path=str(output_path),
-            full_page=True,
+            full_page=False,
             timeout=SCREENSHOT_TIMEOUT_MS,
             animations="disabled",
         )
     except Exception:
         try:
-            # Viewport-only with the hardened settings: the known failure
-            # mode IS the full-page shot stalling, so the diagnostic must
-            # not repeat the configuration that just failed.
             page.screenshot(
                 path=str(failure_path(output_path)),
                 full_page=False,
