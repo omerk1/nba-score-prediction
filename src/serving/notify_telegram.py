@@ -26,6 +26,7 @@ import time
 from enum import Enum
 
 import requests
+import urllib3
 
 from src.serving.team_lookup import build_team_id_to_name
 from src.utils.config_loader import load_config
@@ -34,6 +35,8 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_MESSAGE_LIMIT = 4096
 MAX_RATE_LIMIT_WAIT_SECONDS = 30
+# ~5.5 min of total backoff for sends that never left the machine
+NETWORK_RETRY_WAITS_SECONDS = (5, 15, 30, 60, 120, 120)
 _BLOCK_SEPARATOR = "\n\n"
 
 
@@ -178,28 +181,48 @@ def _redact(text: str, token: str) -> str:
     return text.replace(token, "<token>") if token else text
 
 
+def _never_sent(e: Exception) -> bool:
+    """True when the request provably never reached Telegram — DNS
+    failure, refused connection, connect timeout — so resending can't
+    duplicate it. A connection dropped AFTER connecting (RemoteDisconnected,
+    read timeout) may already have been processed and is not covered."""
+    if isinstance(e, requests.exceptions.ConnectTimeout):
+        return True
+    if isinstance(e, requests.exceptions.ConnectionError):
+        reason = getattr(e.args[0], "reason", None) if e.args else None
+        return isinstance(reason, urllib3.exceptions.NewConnectionError)
+    return False
+
+
 def _post_message(transport, url: str, payload: dict, timeout_seconds: int, token: str) -> bool:
-    for attempt in (1, 2):
+    network_waits = iter(NETWORK_RETRY_WAITS_SECONDS)
+    rate_limited = False
+    while True:
         try:
             response = transport.post(url, json=payload, timeout=timeout_seconds)
-        except requests.exceptions.ConnectTimeout:
-            # The request never left, so resending can't duplicate. A READ
-            # timeout is deliberately not retried: Telegram may already
-            # have processed the send, and sendMessage has no idempotency
-            # key — a rare missing message beats a duplicated slate guess,
-            # and it falls through to the generic handler below.
-            if attempt == 2:
-                logger.error("Telegram send: connect timeout twice; giving up on this message")
-                return False
-            continue
         except Exception as e:
-            logger.error(f"Telegram send failed: {_redact(str(e), token)}")
-            return False
+            # Pre-connect failures are retried with backoff: right after a
+            # scheduled wake the network (DNS especially) can lag by
+            # minutes, and this channel is the daily job's only way to
+            # report anything. Everything else — notably a READ timeout,
+            # where Telegram may already have processed the send and
+            # sendMessage has no idempotency key — is not retried: a rare
+            # missing message beats a duplicated slate guess.
+            wait = next(network_waits, None) if _never_sent(e) else None
+            if wait is None:
+                logger.error(f"Telegram send failed: {_redact(str(e), token)}")
+                return False
+            logger.warning(
+                f"Telegram send: network unavailable ({type(e).__name__}); retry in {wait}s"
+            )
+            time.sleep(wait)
+            continue
 
         if response.status_code == 200:
             return True
-        if response.status_code == 429 and attempt == 1:
+        if response.status_code == 429 and not rate_limited:
             # Rate limited: honor retry_after (capped) and resend once.
+            rate_limited = True
             retry_after = 1
             try:
                 retry_after = int(response.json()["parameters"]["retry_after"])
@@ -210,7 +233,6 @@ def _post_message(transport, url: str, payload: dict, timeout_seconds: int, toke
         # Telegram 400 bodies name the offending entity/escape
         logger.error(f"Telegram send failed ({response.status_code}): {response.text}")
         return False
-    return False
 
 
 def send_telegram(
