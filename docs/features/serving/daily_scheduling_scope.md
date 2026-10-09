@@ -64,6 +64,10 @@ invoking the single wrapper entry point. Key plist decisions:
 - Lid-closed wake requires **AC power connected**; on battery a closed
   MacBook won't wake (degraded-mode note under risks).
 - Verify with `pmset -g sched`.
+- The wake alone is a ~45s dark wake; the job runs under
+  `caffeinate -i -s` so the Mac stays up until it exits. Without it, runs
+  re-slept mid-job and resumed with DNS down (2026-10-08/09 failures).
+  `-s` only holds on AC — on battery with the lid closed the run is lost.
 - **Single-slot limitation**: `pmset repeat` holds exactly one repeating
   wake/poweron schedule system-wide — setting this overwrites any existing
   repeat schedule (e.g. a prior Energy Saver "wake for backup" setting).
