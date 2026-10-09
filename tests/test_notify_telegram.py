@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 import requests
+import urllib3
 
 from src.serving import notify_telegram
 from src.serving.notify_telegram import (
@@ -214,13 +215,39 @@ class TestSendTelegram:
         assert ok
         assert len(transport.posts) == 2
 
-    def test_connect_timeout_twice_gives_up(self):
+    def test_connect_timeout_gives_up_after_backoff(self, no_sleep):
+        waits = notify_telegram.NETWORK_RETRY_WAITS_SECONDS
         transport = FakeTransport(
-            outcomes=[requests.exceptions.ConnectTimeout(), requests.exceptions.ConnectTimeout()]
+            outcomes=[requests.exceptions.ConnectTimeout() for _ in range(len(waits) + 1)]
         )
         ok = send_telegram(["a"], token="T", chat_id="C", transport=transport)
         assert not ok
-        assert len(transport.posts) == 2
+        assert len(transport.posts) == len(waits) + 1
+        assert no_sleep == list(waits)
+
+    def test_dns_failure_retried_until_network_returns(self, no_sleep):
+        # the 2026-10-09 failure: woke from sleep with DNS not yet up
+        dns = urllib3.exceptions.NameResolutionError(
+            "api.telegram.org", None, OSError("nodename nor servname provided")
+        )
+        err = requests.exceptions.ConnectionError(
+            urllib3.exceptions.MaxRetryError(None, "/botT/sendMessage", reason=dns)
+        )
+        transport = FakeTransport(outcomes=[err, err, 200])
+        ok = send_telegram(["a"], token="T", chat_id="C", transport=transport)
+        assert ok
+        assert len(transport.posts) == 3
+        assert no_sleep == list(notify_telegram.NETWORK_RETRY_WAITS_SECONDS[:2])
+
+    def test_dropped_connection_not_retried(self):
+        # connected, then dropped: Telegram may have processed it
+        err = requests.exceptions.ConnectionError(
+            "('Connection aborted.', RemoteDisconnected('Remote end closed connection'))"
+        )
+        transport = FakeTransport(outcomes=[err, 200])
+        ok = send_telegram(["a"], token="T", chat_id="C", transport=transport)
+        assert not ok
+        assert len(transport.posts) == 1
 
     def test_read_timeout_not_retried(self):
         # the request may already have been processed; resending would
