@@ -31,6 +31,7 @@ def tracked(tmp_path, monkeypatch):
         "recommend_all",
         lambda picks: calls["order"].append("recommend") or ([{"rec": 1}] * len(picks), []),
     )
+    monkeypatch.setattr(daily_job, "persist", lambda recs: calls["order"].append("persist"))
     monkeypatch.setattr(
         daily_job,
         "notify",
@@ -80,7 +81,7 @@ class TestLockAndLogs:
 class TestRunDailyJob:
     def test_happy_path_order_and_exit_zero(self, tracked):
         assert run_daily_job() == 0
-        assert tracked["order"] == ["refresh", "capture", "extract", "recommend", "notify"]
+        assert tracked["order"] == ["refresh", "capture", "extract", "recommend", "persist", "notify"]
         assert tracked["notices"] == []
 
     def test_lock_held_exits_quietly_without_running(self, tracked, monkeypatch, tmp_path):
@@ -131,6 +132,15 @@ class TestRunDailyJob:
         assert run_daily_job() == 1
         assert "notify" not in tracked["order"]
         assert any("FAILED to recommend" in n for n in tracked["notices"])
+
+    def test_persist_failure_still_sends_with_note_and_exits_zero(self, tracked, monkeypatch):
+        def broken(recs):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(daily_job, "persist", broken)
+        assert run_daily_job() == 0
+        assert tracked["order"][-1] == "notify"
+        assert len(tracked["notices"]) == 1 and "NOT saved" in tracked["notices"][0]
 
     def test_send_failed_exits_one(self, tracked, monkeypatch):
         monkeypatch.setattr(daily_job, "notify", lambda recs: SendStatus.FAILED)

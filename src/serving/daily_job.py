@@ -1,8 +1,8 @@
 """
 The daily end-to-end job launchd invokes at 16:00 Israel time: data
 refresh -> Winner capture -> vision extraction -> recommendations ->
-Telegram. Chains the already-built pieces; every design decision here
-comes from the serving scope docs (docs/features/serving/
+prediction log -> Telegram. Chains the already-built pieces; every
+design decision here comes from the serving scope docs (docs/features/serving/
 daily_scheduling_scope.md and siblings).
 
 Operational contract:
@@ -150,6 +150,12 @@ def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:
     return recs, errors
 
 
+def persist(recs: list[dict]) -> None:
+    from src.serving.prediction_log import save_predictions
+
+    save_predictions(recs)
+
+
 def notify(recs: list[dict]):
     from src.serving.notify_telegram import send_recommendations
 
@@ -212,9 +218,20 @@ def _run(force: bool) -> int:
             f"Daily job: all {len(picks)} game(s) FAILED to recommend. Check logs/.", ok=False
         )
 
+    # Before notify, so a crash in the send can't lose the record — but a
+    # storage failure must never cost the day's message either.
+    persist_error = None
+    try:
+        persist(recs)
+    except Exception as e:
+        logger.error(f"saving predictions failed: {e}")
+        persist_error = e
+
     status = notify(recs)
     if errors:
         notice(f"Daily job note: {len(errors)} game(s) skipped — {'; '.join(errors)}")
+    if persist_error is not None:
+        notice(f"Daily job note: today's predictions were NOT saved to the DB: {persist_error}")
     if status is SendStatus.FAILED:
         logger.error("Telegram send failed — recommendations are in the log above")
         return 1
