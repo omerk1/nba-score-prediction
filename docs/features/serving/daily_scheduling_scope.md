@@ -91,6 +91,14 @@ second invocation exits immediately with a log line.
   (shows last exit status). Optional hardening: the wrapper catches any
   stage failure and sends the error itself to the same Telegram chat, so
   failures are a message rather than silence.
+- Prediction record: every delivered recommendation is appended to
+  `outputs/predictions_log.csv` (`src/serving/prediction_log.py`) before
+  the Telegram send. It holds the headline numbers as columns, the model's
+  `train_date`, and the full recommendation as JSON. Append-only: a
+  `--force` re-run adds rows rather than replacing them (`created_at` tells
+  them apart). If the save fails, the message still goes out, followed by a
+  notice. Git-tracked (whitelisted in `.gitignore`) because, unlike the
+  sqlite caches, it can't be rebuilt; the job doesn't commit it.
 
 ## Install / uninstall
 
