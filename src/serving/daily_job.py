@@ -27,11 +27,14 @@ Operational contract:
   `force=True` (CLI --force) bypasses the marker for deliberate
   re-runs. The marker records the date the run STARTED: a run that
   straddles midnight must not mark the next day done and skip its real
-  16:00 run.
+  16:00 run. A run started before 08:00 counts toward the previous day's
+  slate (whose games run until early morning), so a manual recovery run
+  after midnight doesn't mark the coming day done either.
 - A scheduled run (CLI --scheduled, passed only by the launchd agent)
   that starts outside its 16:00-22:00 window — the lid-closed Mac slept
   through the 16:00 event and launchd fired it at some later wake — or
-  is still refreshing data at 22:00, sends a "missed" notice instead of
+  only reaches the refresh or recommendation checkpoints after 22:00,
+  sends a "missed" notice (unless that day already succeeded) instead of
   delivering a slate hours late (or a day late, under the wrong date).
   Manual runs are never gated.
 
@@ -58,11 +61,16 @@ LOG_RETENTION_DAYS = 30
 ERR_LOG_NAME = "launchd_daily_job.err.log"
 ERR_LOG_MAX_BYTES = 5_000_000
 _LOG_NAME = re.compile(r"^daily_job_(\d{4}-\d{2}-\d{2})\.log$")
-# Scheduled-run window (local time). Starts at the launchd fire time;
-# 22:00 still leaves hours before the earliest regular tip-offs (~02:00
-# Israel time) while catching a run launchd fired at a late wake.
+# Scheduled-run window (local time). SCHEDULED_START must match the
+# plist's StartCalendarInterval in scripts/install_launchd.sh. 22:00
+# still leaves hours before the earliest regular tip-offs (~02:00 Israel
+# time) while catching a run launchd fired at a late wake.
 SCHEDULED_START = datetime.time(16, 0)
 SCHEDULED_DEADLINE = datetime.time(22, 0)
+# A slate's games run until ~07:00 Israel time the next morning, so a run
+# started before this belongs to the previous day's slate (marker and
+# prediction-log date), not the calendar day it started on.
+SLATE_ROLLOVER = datetime.time(8, 0)
 
 
 def acquire_lock(lock_path: Path = LOCK_PATH):
@@ -127,6 +135,12 @@ def _mark_success(run_date: datetime.date) -> None:
     SUCCESS_MARKER.write_text(run_date.isoformat())
 
 
+def _slate_date(started: datetime.datetime) -> datetime.date:
+    if started.time() < SLATE_ROLLOVER:
+        return started.date() - datetime.timedelta(days=1)
+    return started.date()
+
+
 def _missed_day(started: datetime.datetime) -> datetime.date | None:
     """The day whose scheduled run this start time missed, or None when
     it's inside the window. Before 16:00 means launchd is firing
@@ -140,6 +154,14 @@ def _missed_day(started: datetime.datetime) -> datetime.date | None:
 
 def _past_deadline(run_date: datetime.date) -> bool:
     return _now() > datetime.datetime.combine(run_date, SCHEDULED_DEADLINE)
+
+
+def _missed_mid_run(run_date: datetime.date, stage: str) -> int:
+    return _notice_exit(
+        f"Daily job: the {run_date.isoformat()} run was MISSED — {stage} only finished at "
+        f"{_now():%Y-%m-%d %H:%M} (Mac slept mid-run?). No recommendations.",
+        ok=False,
+    )
 
 
 # --- steps, as module attributes so tests monkeypatch the seams ---
@@ -180,10 +202,10 @@ def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:
     return recs, errors
 
 
-def persist(recs: list[dict]) -> None:
+def persist(recs: list[dict], run_date: datetime.date) -> None:
     from src.serving.prediction_log import save_predictions
 
-    save_predictions(recs)
+    save_predictions(recs, game_date=run_date)
 
 
 def notify(recs: list[dict]):
@@ -210,12 +232,17 @@ def _notice_exit(text: str, ok: bool) -> int:
 
 
 def _run(force: bool, scheduled: bool) -> int:
-    prune_old_logs(LOG_DIR)
     started = _now()
-    run_date = started.date()
+    run_date = _slate_date(started)
+    prune_old_logs(LOG_DIR, today=started.date())
 
     if scheduled:
         missed = _missed_day(started)
+        if missed is not None and _already_succeeded(missed):
+            # The coalesced event firing late after a manual run already
+            # delivered that day's slate — nothing was missed.
+            logger.info(f"{missed.isoformat()} already succeeded (marker) — late firing, skipping")
+            return 0
         if missed is not None:
             return _notice_exit(
                 f"Daily job: the {missed.isoformat()} run was MISSED — it only started at "
@@ -238,11 +265,7 @@ def _run(force: bool, scheduled: bool) -> int:
         )
 
     if scheduled and _past_deadline(run_date):
-        return _notice_exit(
-            f"Daily job: the {run_date.isoformat()} run was MISSED — data refresh only "
-            f"finished at {_now():%Y-%m-%d %H:%M} (Mac slept mid-run?). No recommendations.",
-            ok=False,
-        )
+        return _missed_mid_run(run_date, "data refresh")
 
     try:
         screenshot = capture()
@@ -266,11 +289,16 @@ def _run(force: bool, scheduled: bool) -> int:
             f"Daily job: all {len(picks)} game(s) FAILED to recommend. Check logs/.", ok=False
         )
 
+    # Second gate: capture and extraction can stall too (a re-sleep, a
+    # hung screenshot), and a slate sent after tip-off is worse than none.
+    if scheduled and _past_deadline(run_date):
+        return _missed_mid_run(run_date, "recommendations")
+
     # Before notify, so a crash in the send can't lose the record — but a
     # storage failure must never cost the day's message either.
     persist_error = None
     try:
-        persist(recs)
+        persist(recs, run_date)
     except Exception as e:
         logger.error(f"saving predictions failed: {e}")
         persist_error = e

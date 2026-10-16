@@ -31,7 +31,13 @@ def tracked(tmp_path, monkeypatch):
         "recommend_all",
         lambda picks: calls["order"].append("recommend") or ([{"rec": 1}] * len(picks), []),
     )
-    monkeypatch.setattr(daily_job, "persist", lambda recs: calls["order"].append("persist"))
+    calls["persisted_dates"] = []
+    monkeypatch.setattr(
+        daily_job,
+        "persist",
+        lambda recs, run_date: calls["order"].append("persist")
+        or calls["persisted_dates"].append(run_date),
+    )
     monkeypatch.setattr(
         daily_job,
         "notify",
@@ -134,7 +140,7 @@ class TestRunDailyJob:
         assert any("FAILED to recommend" in n for n in tracked["notices"])
 
     def test_persist_failure_still_sends_with_note_and_exits_zero(self, tracked, monkeypatch):
-        def broken(recs):
+        def broken(recs, run_date):
             raise OSError("disk full")
 
         monkeypatch.setattr(daily_job, "persist", broken)
@@ -278,4 +284,38 @@ class TestScheduledWindowAndMarkerDate:
         monkeypatch.setattr(daily_job, "refresh_data", slow_refresh)
         assert run_daily_job(scheduled=True) == 1
         assert tracked["order"] == ["refresh"]
+        assert "MISSED" in tracked["notices"][0] and "2026-10-15" in tracked["notices"][0]
+
+    def test_late_firing_after_successful_manual_run_is_quiet(self, tracked, clock):
+        clock["t"] = datetime.datetime(2026, 10, 15, 17, 30)
+        assert run_daily_job() == 0  # manual run delivers the slate
+        tracked["order"].clear()
+        for late in (datetime.datetime(2026, 10, 15, 23, 55), datetime.datetime(2026, 10, 16, 3, 0)):
+            clock["t"] = late
+            assert run_daily_job(scheduled=True) == 0
+        assert tracked["order"] == []
+        assert tracked["notices"] == []
+
+    def test_manual_run_after_midnight_counts_toward_previous_slate(self, tracked, clock):
+        clock["t"] = datetime.datetime(2026, 10, 16, 0, 20)
+        assert run_daily_job() == 0
+        assert daily_job.SUCCESS_MARKER.read_text() == "2026-10-15"
+        assert tracked["persisted_dates"] == [datetime.date(2026, 10, 15)]
+
+        clock["t"] = datetime.datetime(2026, 10, 16, 16, 0, 5)
+        tracked["order"].clear()
+        assert run_daily_job(scheduled=True) == 0
+        assert tracked["order"][-1] == "notify"  # the 16th still runs
+
+    def test_scheduled_stall_after_refresh_reports_missed_before_sending(
+        self, tracked, clock, monkeypatch
+    ):
+        def stalled_capture():
+            tracked["order"].append("capture")
+            clock["t"] = datetime.datetime(2026, 10, 16, 3, 30)
+            return Path("shot.png")
+
+        monkeypatch.setattr(daily_job, "capture", stalled_capture)
+        assert run_daily_job(scheduled=True) == 1
+        assert "persist" not in tracked["order"] and "notify" not in tracked["order"]
         assert "MISSED" in tracked["notices"][0] and "2026-10-15" in tracked["notices"][0]
