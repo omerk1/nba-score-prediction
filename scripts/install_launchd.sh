@@ -40,6 +40,9 @@ mkdir -p "$REPO_ROOT/logs" "$HOME/Library/LaunchAgents"
 # wake is only a ~45s dark wake, and without an assertion the Mac
 # re-sleeps mid-run, stalling network calls for tens of minutes and
 # waking later with DNS down. -s (system sleep) is honored on AC only.
+# The 16:00 below must match SCHEDULED_START in src/serving/daily_job.py.
+# --scheduled makes a run launchd fires late (at a wake long after 16:00)
+# report the day as missed rather than deliver a stale slate.
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -51,7 +54,7 @@ cat > "$PLIST" <<EOF
     <array>
         <string>/bin/zsh</string>
         <string>-c</string>
-        <string>exec /usr/bin/caffeinate -i -s "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/daily_job.py" >> "$REPO_ROOT/logs/daily_job_\$(date +%Y-%m-%d).log" 2>&1</string>
+        <string>exec /usr/bin/caffeinate -i -s "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/daily_job.py" --scheduled >> "$REPO_ROOT/logs/daily_job_\$(date +%Y-%m-%d).log" 2>&1</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$REPO_ROOT</string>
@@ -80,5 +83,6 @@ echo
 echo "To wake the Mac before the run (once, needs sudo; lid-closed wake needs AC power):"
 echo "  sudo pmset repeat wakeorpoweron MTWRFSU 15:55:00"
 echo
-echo "Test the job now without waiting for 16:00:"
-echo "  launchctl kickstart $GUI_DOMAIN/$LABEL"
+echo "Test the job now without waiting for 16:00 (a manual run, not gated by the"
+echo "16:00-22:00 window; launchctl kickstart outside that window only reports MISSED):"
+echo "  $REPO_ROOT/venv/bin/python3 $REPO_ROOT/scripts/daily_job.py --force"

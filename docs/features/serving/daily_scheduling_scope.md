@@ -55,6 +55,22 @@ invoking the single wrapper entry point. Key plist decisions:
 - Mac **powered off** at 16:00: the event is **not** run retroactively on
   boot — that day's run is simply lost (hence the Telegram dead-man's
   switch below).
+- Lid closed on battery: the 15:55 scheduled wake fires but the Mac
+  re-sleeps within seconds (clamshell sleep overrides `caffeinate`), so
+  the run fires at some later wake — on 2026-10-15 it started at 23:55 and
+  crawled through brief no-network wakes until the lid opened the next
+  afternoon. The agent passes `--scheduled`; a scheduled run that starts
+  outside 16:00–22:00, or reaches the post-refresh or pre-send checkpoint
+  after 22:00, sends a "MISSED" notice naming the day instead of
+  delivering a late slate. It stays silent if that day already succeeded
+  (e.g. a manual run). Manual runs are not gated. Weekend/holiday
+  afternoon games can tip off before 22:00; there's no per-game tip-off
+  filter yet.
+- The success marker (and the prediction log's `game_date`) records the
+  run's slate date: its start date, or the previous day if it started
+  before 08:00, when that slate's games are still being played. A run
+  straddling midnight, or a manual recovery run after it, can't mark the
+  next day done and skip its 16:00 run.
 
 ## pmset scheduled wake
 
