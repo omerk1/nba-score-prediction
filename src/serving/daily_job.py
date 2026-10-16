@@ -25,7 +25,15 @@ Operational contract:
   coalesced 16:00 firing AFTER a manual run already finished — which
   would otherwise re-run the pipeline and duplicate the day's slate.
   `force=True` (CLI --force) bypasses the marker for deliberate
-  re-runs.
+  re-runs. The marker records the date the run STARTED: a run that
+  straddles midnight must not mark the next day done and skip its real
+  16:00 run.
+- A scheduled run (CLI --scheduled, passed only by the launchd agent)
+  that starts outside its 16:00-22:00 window — the lid-closed Mac slept
+  through the 16:00 event and launchd fired it at some later wake — or
+  is still refreshing data at 22:00, sends a "missed" notice instead of
+  delivering a slate hours late (or a day late, under the wrong date).
+  Manual runs are never gated.
 
 Step imports are deferred to call time, same pattern (and same .env
 ordering reason) as daily_update.
@@ -50,6 +58,11 @@ LOG_RETENTION_DAYS = 30
 ERR_LOG_NAME = "launchd_daily_job.err.log"
 ERR_LOG_MAX_BYTES = 5_000_000
 _LOG_NAME = re.compile(r"^daily_job_(\d{4}-\d{2}-\d{2})\.log$")
+# Scheduled-run window (local time). Starts at the launchd fire time;
+# 22:00 still leaves hours before the earliest regular tip-offs (~02:00
+# Israel time) while catching a run launchd fired at a late wake.
+SCHEDULED_START = datetime.time(16, 0)
+SCHEDULED_DEADLINE = datetime.time(22, 0)
 
 
 def acquire_lock(lock_path: Path = LOCK_PATH):
@@ -98,18 +111,35 @@ def prune_old_logs(
     return removed
 
 
-def _already_succeeded_today(today=None) -> bool:
-    today = today or datetime.date.today()
+def _now() -> datetime.datetime:
+    return datetime.datetime.now()
+
+
+def _already_succeeded(run_date: datetime.date) -> bool:
     try:
-        return SUCCESS_MARKER.read_text().strip() == today.isoformat()
+        return SUCCESS_MARKER.read_text().strip() == run_date.isoformat()
     except (OSError, ValueError):
         return False
 
 
-def _mark_success(today=None) -> None:
-    today = today or datetime.date.today()
+def _mark_success(run_date: datetime.date) -> None:
     SUCCESS_MARKER.parent.mkdir(parents=True, exist_ok=True)
-    SUCCESS_MARKER.write_text(today.isoformat())
+    SUCCESS_MARKER.write_text(run_date.isoformat())
+
+
+def _missed_day(started: datetime.datetime) -> datetime.date | None:
+    """The day whose scheduled run this start time missed, or None when
+    it's inside the window. Before 16:00 means launchd is firing
+    yesterday's event at a wake after midnight."""
+    if started.time() < SCHEDULED_START:
+        return started.date() - datetime.timedelta(days=1)
+    if started.time() > SCHEDULED_DEADLINE:
+        return started.date()
+    return None
+
+
+def _past_deadline(run_date: datetime.date) -> bool:
+    return _now() > datetime.datetime.combine(run_date, SCHEDULED_DEADLINE)
 
 
 # --- steps, as module attributes so tests monkeypatch the seams ---
@@ -179,10 +209,21 @@ def _notice_exit(text: str, ok: bool) -> int:
     return 0 if ok else 1
 
 
-def _run(force: bool) -> int:
+def _run(force: bool, scheduled: bool) -> int:
     prune_old_logs(LOG_DIR)
+    started = _now()
+    run_date = started.date()
 
-    if not force and _already_succeeded_today():
+    if scheduled:
+        missed = _missed_day(started)
+        if missed is not None:
+            return _notice_exit(
+                f"Daily job: the {missed.isoformat()} run was MISSED — it only started at "
+                f"{started:%Y-%m-%d %H:%M} (Mac asleep at 16:00?). No recommendations.",
+                ok=False,
+            )
+
+    if not force and _already_succeeded(run_date):
         # launchd's coalesced 16:00 event firing after a manual (or
         # earlier) run already delivered today's slate — don't re-run
         # the pipeline and duplicate the message.
@@ -193,6 +234,13 @@ def _run(force: bool) -> int:
         return _notice_exit(
             "Daily job: data refresh or freshness gate FAILED — no "
             "recommendations today (stale features). Check logs/.",
+            ok=False,
+        )
+
+    if scheduled and _past_deadline(run_date):
+        return _notice_exit(
+            f"Daily job: the {run_date.isoformat()} run was MISSED — data refresh only "
+            f"finished at {_now():%Y-%m-%d %H:%M} (Mac slept mid-run?). No recommendations.",
             ok=False,
         )
 
@@ -209,7 +257,7 @@ def _run(force: bool) -> int:
     if not picks:
         rc = _notice_exit("Daily job: no NBA games on Winner today.", ok=True)
         if rc == 0:
-            _mark_success()
+            _mark_success(run_date)
         return rc
 
     recs, errors = recommend_all(picks)
@@ -235,17 +283,17 @@ def _run(force: bool) -> int:
     if status is SendStatus.FAILED:
         logger.error("Telegram send failed — recommendations are in the log above")
         return 1
-    _mark_success()
+    _mark_success(run_date)
     return 0
 
 
-def run_daily_job(force: bool = False) -> int:
+def run_daily_job(force: bool = False, scheduled: bool = False) -> int:
     lock = acquire_lock(LOCK_PATH)
     if lock is None:
         logger.info("another daily job run holds the lock — exiting quietly")
         return 0
     try:
-        return _run(force)
+        return _run(force, scheduled)
     except Exception as e:
         # The dead-man's-switch contract covers crashes too: anything a
         # step raises that the per-stage handlers didn't anticipate

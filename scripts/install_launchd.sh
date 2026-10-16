@@ -40,6 +40,8 @@ mkdir -p "$REPO_ROOT/logs" "$HOME/Library/LaunchAgents"
 # wake is only a ~45s dark wake, and without an assertion the Mac
 # re-sleeps mid-run, stalling network calls for tens of minutes and
 # waking later with DNS down. -s (system sleep) is honored on AC only.
+# --scheduled makes a run launchd fires late (at a wake long after 16:00)
+# report the day as missed rather than deliver a stale slate.
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -51,7 +53,7 @@ cat > "$PLIST" <<EOF
     <array>
         <string>/bin/zsh</string>
         <string>-c</string>
-        <string>exec /usr/bin/caffeinate -i -s "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/daily_job.py" >> "$REPO_ROOT/logs/daily_job_\$(date +%Y-%m-%d).log" 2>&1</string>
+        <string>exec /usr/bin/caffeinate -i -s "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/daily_job.py" --scheduled >> "$REPO_ROOT/logs/daily_job_\$(date +%Y-%m-%d).log" 2>&1</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$REPO_ROOT</string>

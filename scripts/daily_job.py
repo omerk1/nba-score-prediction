@@ -6,11 +6,15 @@ src/serving/daily_job.py; install the schedule with
 scripts/install_launchd.sh.
 
 Usage:
-    venv/bin/python3 scripts/daily_job.py [--force]
+    venv/bin/python3 scripts/daily_job.py [--force] [--scheduled]
 
 --force re-runs even if today's run already succeeded (the success
 marker otherwise stops a wake-coalesced launchd event from duplicating
 a slate that a manual run already delivered).
+
+--scheduled is passed only by the launchd agent: a run starting outside
+the 16:00-22:00 window (or still refreshing data at 22:00) reports the
+day as missed instead of delivering a stale slate. Manual runs omit it.
 """
 
 import argparse
@@ -37,5 +41,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the daily recommendations job.")
     parser.add_argument("--force", action="store_true", help="re-run despite today's success marker")
+    parser.add_argument(
+        "--scheduled",
+        action="store_true",
+        help="launchd-triggered run: report a missed day instead of running late",
+    )
     args = parser.parse_args()
-    sys.exit(run_daily_job(force=args.force))
+    sys.exit(run_daily_job(force=args.force, scheduled=args.scheduled))

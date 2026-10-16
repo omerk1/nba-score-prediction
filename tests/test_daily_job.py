@@ -209,3 +209,73 @@ class TestRecommendAll:
         )
         assert recs == [{"ok": 3}]
         assert len(errors) == 1 and "1 vs 2" in errors[0]
+
+
+class TestScheduledWindowAndMarkerDate:
+    @pytest.fixture
+    def clock(self, tracked, monkeypatch):
+        """Settable fake clock for daily_job._now."""
+        now = {"t": datetime.datetime(2026, 10, 15, 16, 0, 5)}
+        monkeypatch.setattr(daily_job, "_now", lambda: now["t"])
+        return now
+
+    def test_marker_records_start_date_for_run_straddling_midnight(
+        self, tracked, clock, monkeypatch
+    ):
+        clock["t"] = datetime.datetime(2026, 10, 15, 23, 50)
+
+        def slow_refresh():
+            tracked["order"].append("refresh")
+            clock["t"] = datetime.datetime(2026, 10, 16, 0, 30)
+            return 0
+
+        monkeypatch.setattr(daily_job, "refresh_data", slow_refresh)
+        assert run_daily_job() == 0
+        assert daily_job.SUCCESS_MARKER.read_text() == "2026-10-15"
+
+        # next day's real run is not mistaken for already done
+        monkeypatch.setattr(daily_job, "refresh_data", lambda: tracked["order"].append("refresh") or 0)
+        clock["t"] = datetime.datetime(2026, 10, 16, 16, 0, 5)
+        tracked["order"].clear()
+        assert run_daily_job(scheduled=True) == 0
+        assert tracked["order"][0] == "refresh"
+
+    def test_scheduled_run_inside_window_runs_normally(self, tracked, clock):
+        assert run_daily_job(scheduled=True) == 0
+        assert tracked["order"][-1] == "notify"
+        assert tracked["notices"] == []
+
+    @pytest.mark.parametrize(
+        "started, missed",
+        [
+            (datetime.datetime(2026, 10, 15, 23, 55), "2026-10-15"),
+            (datetime.datetime(2026, 10, 16, 3, 15), "2026-10-15"),
+        ],
+    )
+    def test_scheduled_run_starting_outside_window_reports_missed(
+        self, tracked, clock, started, missed
+    ):
+        clock["t"] = started
+        assert run_daily_job(scheduled=True) == 1
+        assert tracked["order"] == []
+        assert len(tracked["notices"]) == 1
+        assert "MISSED" in tracked["notices"][0] and missed in tracked["notices"][0]
+        assert not daily_job.SUCCESS_MARKER.exists()
+
+    def test_manual_run_is_never_gated(self, tracked, clock):
+        clock["t"] = datetime.datetime(2026, 10, 15, 23, 55)
+        assert run_daily_job() == 0
+        assert tracked["order"][-1] == "notify"
+
+    def test_scheduled_refresh_finishing_past_deadline_reports_missed(
+        self, tracked, clock, monkeypatch
+    ):
+        def slow_refresh():
+            tracked["order"].append("refresh")
+            clock["t"] = datetime.datetime(2026, 10, 16, 3, 57)
+            return 0
+
+        monkeypatch.setattr(daily_job, "refresh_data", slow_refresh)
+        assert run_daily_job(scheduled=True) == 1
+        assert tracked["order"] == ["refresh"]
+        assert "MISSED" in tracked["notices"][0] and "2026-10-15" in tracked["notices"][0]

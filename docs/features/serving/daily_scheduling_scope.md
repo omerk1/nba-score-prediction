@@ -55,6 +55,16 @@ invoking the single wrapper entry point. Key plist decisions:
 - Mac **powered off** at 16:00: the event is **not** run retroactively on
   boot — that day's run is simply lost (hence the Telegram dead-man's
   switch below).
+- Lid closed on battery: the 15:55 scheduled wake fires but the Mac
+  re-sleeps within seconds (clamshell sleep overrides `caffeinate`), so
+  the run fires at some later wake — on 2026-10-15 it started at 23:55 and
+  crawled through brief no-network wakes until the lid opened the next
+  afternoon. The agent passes `--scheduled`; a scheduled run that starts
+  outside 16:00–22:00, or is still refreshing data at 22:00, sends a
+  "MISSED" notice naming the day instead of delivering a late slate.
+  Manual runs are not gated.
+- The success marker records the run's start date, so a run straddling
+  midnight can't mark the next day done and skip its 16:00 run.
 
 ## pmset scheduled wake
 
