@@ -54,7 +54,7 @@ cat > "$PLIST" <<EOF
     <array>
         <string>/bin/zsh</string>
         <string>-c</string>
-        <string>exec /usr/bin/caffeinate -i -s "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/daily_job.py" --scheduled >> "$REPO_ROOT/logs/daily_job_\$(date +%Y-%m-%d).log" 2>&1</string>
+        <string>exec /usr/bin/caffeinate -i -s "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/daily_job.py" --scheduled >> "$REPO_ROOT/logs/daily_job_\$(date +%Y-%m-%d).log" 2>&amp;1</string>
     </array>
     <key>WorkingDirectory</key>
     <string>$REPO_ROOT</string>
@@ -70,6 +70,16 @@ cat > "$PLIST" <<EOF
 </dict>
 </plist>
 EOF
+
+# The plist is XML: a bare & (e.g. in 2>&1) must be written &amp;. launchd
+# tolerates some malformed plists today, but lint before loading so a
+# template mistake fails here rather than as a silently unloaded agent
+# (the previously loaded agent stays in place).
+if ! plutil -lint "$PLIST" >/dev/null; then
+    plutil -lint "$PLIST" >&2
+    echo "Generated plist is invalid; not reloading $LABEL." >&2
+    exit 1
+fi
 
 launchctl bootout "$GUI_DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$GUI_DOMAIN" "$PLIST"
