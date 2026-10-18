@@ -36,7 +36,11 @@ def metadata(tmp_path, monkeypatch):
 def test_writes_headline_columns_and_full_json(tmp_path):
     log = tmp_path / "sub" / "predictions_log.csv"
 
-    n = save_predictions([_rec(1, 2, total_line=221.5), _rec(3, 4)], game_date=DAY, log_path=log)
+    n = save_predictions(
+        [_rec(1, 2, total_line=221.5, over_odds=1.8, under_odds=1.7), _rec(3, 4)],
+        game_date=DAY,
+        log_path=log,
+    )
 
     assert n == 2
     df = pd.read_csv(log)
@@ -46,6 +50,7 @@ def test_writes_headline_columns_and_full_json(tmp_path):
     assert first["predicted_diff"] == 3.5
     assert first["home_win_probability"] == 0.61
     assert first["total_line"] == 221.5
+    assert (first["over_odds"], first["under_odds"]) == (1.8, 1.7)
     assert pd.isna(second["total_line"])  # market field absent for that pick
     assert first["model_trained_at"] == "2026-09-25 07:08 UTC"
     assert json.loads(first["rec_json"])["margin_heatmap"] == {"3": 0.04, "-2": 0.03}
