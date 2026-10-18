@@ -89,11 +89,11 @@ class TestFormatting:
         assert "Model: Lakers 114.2 – 108.9 Celtics" in block
         assert "Lakers by 5.3 · total 223.1" in block
         assert "Win chance: Lakers 68% · Celtics 32%" in block
-        assert "Lakers to win — model 68% · needs 60% · edge +8.2%" in block
-        assert "Lakers -4.5 — model 55% · needs 53% · edge +2.7%" in block
-        assert "Celtics +4.5 — model 45% · needs 51% · edge \u22126.5%" in block
-        assert "Over 224.5 — model 48% · needs 51% · edge \u22123.2%" in block
-        assert "Under 224.5 — model 52% · needs 52% · edge +0.4%" in block
+        assert "Lakers to win — model chance 68% · break-even 60% · edge +8.2%" in block
+        assert "Lakers -4.5 — model chance 55% · break-even 53% · edge +2.7%" in block
+        assert "Celtics +4.5 — model chance 45% · break-even 51% · edge \u22126.5%" in block
+        assert "Over 224.5 — model chance 48% · break-even 51% · edge \u22123.2%" in block
+        assert "Under 224.5 — model chance 52% · break-even 52% · edge +0.4%" in block
 
     def test_away_favorite_is_named_as_the_leader(self):
         rec = dict(MINIMAL_REC, predicted_diff=-3.2, home_win_probability=0.4)
@@ -102,10 +102,10 @@ class TestFormatting:
     def test_odds_are_shown_next_to_the_pick(self):
         rec = dict(FULL_REC, home_spread_odds=1.85, away_spread_odds=1.75, over_odds=1.8, under_odds=1.7)
         block = format_game_block(rec, TEAM_NAMES)
-        assert "Lakers -4.5 @1.85 — model 55%" in block
-        assert "Celtics +4.5 @1.75 — model 45%" in block
-        assert "Over 224.5 @1.80 — model 48%" in block
-        assert "Under 224.5 @1.70 — model 52%" in block
+        assert "Lakers -4.5 @1.85 — model chance 55%" in block
+        assert "Celtics +4.5 @1.75 — model chance 45%" in block
+        assert "Over 224.5 @1.80 — model chance 48%" in block
+        assert "Under 224.5 @1.70 — model chance 52%" in block
 
     def test_positive_edge_lines_are_checked_and_bolded(self):
         block = format_game_block(FULL_REC, TEAM_NAMES)
@@ -116,7 +116,7 @@ class TestFormatting:
     def test_minimal_rec_has_no_market_lines(self):
         block = format_game_block(MINIMAL_REC, TEAM_NAMES)
         assert "Win chance: Lakers 64%" in block
-        assert "needs" not in block
+        assert "break-even" not in block
         assert "Spread" not in block
         assert "Total" not in block
 
@@ -129,15 +129,15 @@ class TestFormatting:
         rec = dict(MINIMAL_REC, home_spread=-3.0, home_cover_probability=0.52,
                    away_cover_probability=0.48)
         block = format_game_block(rec, TEAM_NAMES)
-        assert "▫️ Lakers -3 — model 52%" in block
-        assert "needs" not in block
+        assert "▫️ Lakers -3 — model chance 52%" in block
+        assert "break-even" not in block
 
     def test_market_prob_without_edge_degrades_to_model_only(self):
         # half-present pair must not raise (TypeError on None edge)
         rec = dict(FULL_REC)
         del rec["home_moneyline_edge"]
         block = format_game_block(rec, TEAM_NAMES)
-        assert "▫️ Lakers to win — model 68%\n" in block
+        assert "▫️ Lakers to win — model chance 68%\n" in block
 
     def test_id_to_name_mapping_lives_in_team_lookup(self):
         # offline static data; also guards the reverse mapping's source

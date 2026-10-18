@@ -57,7 +57,7 @@ def _pct(p: float) -> str:
 
 def _bet_line(pick: str, model_prob: float, odds=None, market_prob=None, edge=None) -> str:
     """One bettable side: what to bet, the price, the model's chance and
-    the chance the price needs (1/odds — the break-even), then the edge
+    the break-even chance the price requires (1/odds), then the edge
     between them. A positive edge gets a check mark and bold: that's the
     side the model thinks the price undervalues. Missing odds degrade to
     the model chance alone (recommend_game sets odds, market probability
@@ -65,9 +65,10 @@ def _bet_line(pick: str, model_prob: float, odds=None, market_prob=None, edge=No
     text = pick
     if odds is not None:
         text += f" @{odds:.2f}"
-    text += f" — model {model_prob:.0%}"
+    text += f" — model chance {model_prob:.0%}"
     if market_prob is not None and edge is not None:
-        text += f" · needs {market_prob:.0%} · edge {edge * 100:+.1f}%".replace("-", "\u2212")
+        edge_text = f"{edge * 100:+.1f}%".replace("-", "\u2212")
+        text += f" · break-even {market_prob:.0%} · edge {edge_text}"
         if edge > 0:
             return f"✅ <b>{text}</b>"
     return f"▫️ {text}"
