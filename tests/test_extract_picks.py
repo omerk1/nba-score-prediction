@@ -236,3 +236,12 @@ class TestMatchToSlate:
 
     def test_empty_schedule_drops_everything(self):
         assert EP.match_to_slate([{"home_team_id": 10, "away_team_id": 20}], []) == []
+
+
+def test_unmatched_games_lists_scheduled_games_without_a_pick():
+    games = [
+        {"home_team_id": 10, "away_team_id": 20, "game_date": "2026-10-20"},
+        {"home_team_id": 30, "away_team_id": 40, "game_date": "2026-10-20"},
+    ]
+    picks = [{"home_team_id": 20, "away_team_id": 10}]
+    assert EP.unmatched_games(picks, games) == [games[1]]

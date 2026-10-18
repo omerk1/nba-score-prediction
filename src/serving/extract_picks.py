@@ -56,6 +56,14 @@ def _swap_home_away(pick: dict) -> dict:
     return swapped
 
 
+def unmatched_games(picks: list[dict], games: list[dict]) -> list[dict]:
+    """Scheduled games with no pick: a game the NBA schedule has in the
+    window that Winner's page didn't yield (a team name the parser missed,
+    a page change) -- otherwise it just silently shrinks the slate."""
+    have = {frozenset((p["home_team_id"], p["away_team_id"])) for p in picks}
+    return [g for g in games if frozenset((g["home_team_id"], g["away_team_id"])) not in have]
+
+
 def match_to_slate(picks: list[dict], games: list[dict]) -> list[dict]:
     """Keeps only picks matching a real scheduled game, with home/away and
     game_date taken from the schedule. Anything else is dropped: the vision
