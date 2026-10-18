@@ -86,9 +86,7 @@ def acquire_lock(lock_path: Path = LOCK_PATH):
         return None
 
 
-def prune_old_logs(
-    log_dir: Path = LOG_DIR, retention_days: int = LOG_RETENTION_DAYS, today=None
-) -> int:
+def prune_old_logs(log_dir: Path = LOG_DIR, retention_days: int = LOG_RETENTION_DAYS, today=None) -> int:
     """The launchd plist writes one dated log per run day; nothing else
     rotates them (the scheduling scope's no-sudo alternative to
     newsyslog), so the job prunes its own. A name that matches the
@@ -181,8 +179,11 @@ def capture() -> Path:
 
 def extract(screenshot_path: Path) -> list[dict]:
     from src.serving.extract_picks import extract_picks_from_screenshot
+    from src.serving.schedule_lookup import upcoming_games
 
-    return extract_picks_from_screenshot(str(screenshot_path))
+    # Winner lists games days ahead (and the vision model can invent
+    # some): only games the NBA schedule has tipping off in the next 24h.
+    return extract_picks_from_screenshot(str(screenshot_path), games=upcoming_games())
 
 
 def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:
@@ -194,7 +195,7 @@ def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:
     recs, errors = [], []
     for pick in picks:
         try:
-            recs.append(recommend_pick(pick, resources))
+            recs.append(recommend_pick(pick, resources, game_date=pick.get("game_date")))
         except Exception as e:
             label = f"{pick.get('home_team_id', '?')} vs {pick.get('away_team_id', '?')}"
             logger.error(f"recommendation failed for {label}: {e}")
@@ -278,7 +279,7 @@ def _run(force: bool, scheduled: bool) -> int:
         return _notice_exit(f"Daily job: extraction FAILED on {screenshot}: {e}", ok=False)
 
     if not picks:
-        rc = _notice_exit("Daily job: no NBA games on Winner today.", ok=True)
+        rc = _notice_exit("Daily job: no NBA games in the next 24h that are on Winner.", ok=True)
         if rc == 0:
             _mark_success(run_date)
         return rc
