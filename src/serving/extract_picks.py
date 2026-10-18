@@ -56,6 +56,25 @@ def _swap_home_away(pick: dict) -> dict:
     return swapped
 
 
+def match_to_slate(picks: list[dict], games: list[dict]) -> list[dict]:
+    """Keeps only picks matching a real scheduled game, with home/away and
+    game_date taken from the schedule. Anything else is dropped: the vision
+    model has been seen inventing NBA games when the page shows none."""
+    by_teams = {frozenset((g["home_team_id"], g["away_team_id"])): g for g in games}
+    matched = []
+    for pick in picks:
+        game = by_teams.get(frozenset((pick["home_team_id"], pick["away_team_id"])))
+        if game is None:
+            logger.warning(
+                f"Dropping pick not on the upcoming schedule: {pick['home_team_id']} vs {pick['away_team_id']}"
+            )
+            continue
+        if game["home_team_id"] != pick["home_team_id"]:
+            pick = _swap_home_away(pick)
+        matched.append({**pick, "game_date": game["game_date"]})
+    return matched
+
+
 def _resolve_pick_home_away(pick: dict, game_date: str) -> dict:
     """Overrides the model's home/away guess with the NBA's own published
     schedule when available (see schedule_lookup.py's docstring for why the
@@ -100,6 +119,9 @@ shown, rather than guessing a value:
 - total_line: the over/under total points line, if shown.
 - over_odds, under_odds: decimal odds for over/under, if shown.
 
+Only extract games that are literally printed in the image. Never infer, complete or invent a game \
+from your knowledge of the NBA schedule; if the page shows no NBA section, return an empty array.
+
 Return ONLY a JSON array, one object per NBA game. If no NBA game is visible, return an empty array."""
 
 
@@ -110,7 +132,11 @@ def _gemini_client():
 
 
 def extract_picks_from_screenshot(
-    image_path: str, model: str = "gemini-2.5-flash", client=None, game_date: str | None = None
+    image_path: str,
+    model: str = "gemini-2.5-flash",
+    client=None,
+    game_date: str | None = None,
+    games: list[dict] | None = None,
 ) -> list[dict]:
     """Reads image_path, returns a list of pick dicts (schema above, plus
     home_team_id/away_team_id resolved from the nickname). Every returned
@@ -122,6 +148,10 @@ def extract_picks_from_screenshot(
     published schedule for game_date (default: today) and corrected if the
     model's own guess disagreed -- see schedule_lookup.py's docstring for
     why the model's guess alone isn't trusted.
+
+    `games` (schedule_lookup.upcoming_games' shape): when given, picks are
+    restricted to those real games and oriented/dated from them, replacing
+    the per-pick game_date lookup.
 
     `client`: injectable for tests (anything exposing
     `.models.generate_content(...) -> object with .text`, the same surface
@@ -152,6 +182,10 @@ def extract_picks_from_screenshot(
         ),
     )
 
+    # The raw reply is the only record of what the model claimed to see;
+    # without it a bad slate can't be told apart from a bad screenshot.
+    logger.info(f"Gemini raw response ({model}): {response.text!r}")
+
     try:
         raw_picks = json.loads(response.text)
     except (json.JSONDecodeError, TypeError) as e:
@@ -170,6 +204,9 @@ def extract_picks_from_screenshot(
             **{k: v for k, v in raw.items() if k not in ("home_team_nickname", "away_team_nickname")},
         }
         picks.append(pick)
+
+    if games is not None:
+        return match_to_slate(picks, games)
 
     resolved_date = game_date or date.today().isoformat()
     return [_resolve_pick_home_away(p, resolved_date) for p in picks]

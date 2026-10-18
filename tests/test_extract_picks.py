@@ -218,3 +218,21 @@ class TestSwapHomeAway:
         swapped = _swap_home_away(pick)
         assert swapped["total_line"] == 220.5
         assert swapped["push_odds"] == 9.0
+
+
+class TestMatchToSlate:
+    GAMES = [{"home_team_id": 10, "away_team_id": 20, "game_date": "2026-10-20"}]
+
+    def test_drops_invented_games_and_dates_the_rest(self):
+        picks = [{"home_team_id": 10, "away_team_id": 20}, {"home_team_id": 30, "away_team_id": 40}]
+        out = EP.match_to_slate(picks, self.GAMES)
+        assert out == [{"home_team_id": 10, "away_team_id": 20, "game_date": "2026-10-20"}]
+
+    def test_orients_home_away_from_schedule(self):
+        out = EP.match_to_slate(
+            [{"home_team_id": 20, "away_team_id": 10, "home_spread": -3.5}], self.GAMES
+        )
+        assert out[0]["home_team_id"] == 10 and out[0]["away_spread"] == -3.5
+
+    def test_empty_schedule_drops_everything(self):
+        assert EP.match_to_slate([{"home_team_id": 10, "away_team_id": 20}], []) == []

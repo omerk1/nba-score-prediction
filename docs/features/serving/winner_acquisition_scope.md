@@ -191,3 +191,25 @@ accepted at project start — recorded here, not re-litigated.
   alongside the PNG in v1 — the vision route is verified live, so the
   HTML would be dead weight unless the parser fallback is ever actually
   needed.)
+
+## Update 2026-10-18: page text instead of a screenshot
+
+The screenshot + vision-model route invented a full NBA slate on a day the
+page showed no NBA games (temperature 0, so it reproduced on every run).
+The daily job now reads the page text directly: sidebar filters ->
+USA -> NBA, then per date tab (today and tomorrow, Israel dates) each of
+two market chips selected alone ("reset filter" first — the chips are
+toggles): point spread and over/under total, both including overtime.
+`src/serving/winner_lines.py` parses the text; picks are then restricted
+to games the NBA schedule has tipping off in the next 24h
+(`schedule_lookup.upcoming_games`), which also sets home/away.
+
+- No Gemini call in the daily job; `extract_picks.py` remains for the
+  screenshot CLI.
+- Lines are posted incrementally: a game can have a total before a
+  spread (or neither yet); picks carry whichever markets exist.
+- An NBA team name missing from `HEBREW_TEAM_NICKNAMES` fails the run
+  (notice names it) rather than silently dropping a game. The Cavaliers
+  and Nuggets spellings are unverified — neither had appeared on the page.
+- Debugging artifact: `outputs/winner_captures/winner_lines_<date>.json`
+  (page text per tab/market), same retention as the old screenshots.
