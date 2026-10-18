@@ -1,6 +1,6 @@
 """
 The daily end-to-end job launchd invokes at 16:00 Israel time: data
-refresh -> Winner capture -> vision extraction -> recommendations ->
+refresh -> Winner lines capture -> parse + schedule gate -> recommendations ->
 prediction log -> Telegram. Chains the already-built pieces; every
 design decision here comes from the serving scope docs (docs/features/serving/
 daily_scheduling_scope.md and siblings).
@@ -172,18 +172,19 @@ def refresh_data() -> int:
 
 
 def capture() -> Path:
-    from src.serving.capture_winner import capture_nba_page
+    from src.serving.capture_winner import capture_nba_lines
 
-    return capture_nba_page()
+    return capture_nba_lines()
 
 
-def extract(screenshot_path: Path) -> list[dict]:
-    from src.serving.extract_picks import extract_picks_from_screenshot
+def extract(snapshot_path: Path) -> list[dict]:
+    from src.serving.extract_picks import match_to_slate
     from src.serving.schedule_lookup import upcoming_games
+    from src.serving.winner_lines import picks_from_snapshot
 
-    # Winner lists games days ahead (and the vision model can invent
-    # some): only games the NBA schedule has tipping off in the next 24h.
-    return extract_picks_from_screenshot(str(screenshot_path), games=upcoming_games())
+    # Winner lists games days ahead: only games the NBA schedule has
+    # tipping off in the next 24h. The schedule also sets home/away.
+    return match_to_slate(picks_from_snapshot(snapshot_path), upcoming_games())
 
 
 def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:

@@ -28,6 +28,7 @@ render is written next to the dated path with a `.failed` suffix.
 """
 
 import datetime
+import json
 import logging
 import re
 import time
@@ -52,7 +53,22 @@ VIEWPORT = {"width": 1440, "height": 2400}
 # capture hanging.
 MAX_CAPTURE_HEIGHT_PX = 16_000
 
-_CAPTURE_NAME = re.compile(r"^winner_nba_(\d{4}-\d{2}-\d{2})(\.failed)?\.png$")
+_CAPTURE_NAME = re.compile(r"^winner_(?:nba|lines)_(\d{4}-\d{2}-\d{2})(\.failed)?\.(?:png|json)$")
+
+# The lines-page text capture: the sidebar filters narrow the page to the
+# NBA, then for each date tab each wanted market chip is selected alone
+# (the chips are toggles, so "reset filter" comes first) and the list's
+# text is recorded.
+LINES_MARKET_CHIPS = [
+    "הימור יתרון - כולל הארכות אם יהיו",
+    "מעל/מתחת נקודות - כולל הארכות אם יהיו",
+]
+RESET_FILTER_TEXT = "אפס סינון"
+ACTION_TIMEOUT_MS = 15_000
+UI_SETTLE_SECONDS = 3.0
+# Winner's date tabs are Israel dates; a 24h window from the 16:00 run
+# reaches into tomorrow's tab (the ~02:00 tip-offs).
+LINES_TAB_DAYS = 2
 
 
 def dated_capture_path(output_dir: Path = DEFAULT_OUTPUT_DIR, today=None) -> Path:
@@ -223,3 +239,86 @@ def capture_nba_page(
                 logger.warning(f"capture succeeded but pruning failed (ignored): {e}")
         return output_path
     raise RuntimeError(f"Winner capture failed after 2 attempts: {last_err}") from last_err
+
+
+def dated_lines_path(output_dir: Path = DEFAULT_OUTPUT_DIR, today=None) -> Path:
+    today = today or datetime.date.today()
+    return Path(output_dir) / f"winner_lines_{today.isoformat()}.json"
+
+
+def _tab_pattern(day: datetime.date):
+    # Tabs read like "ג 20.10"; the day may or may not be zero-padded.
+    return re.compile(rf"(^|\s)0?{day.day}\.0?{day.month}$")
+
+
+def _scrape_lines(page, today: datetime.date, url: str = WINNER_BASKETBALL_URL) -> list[dict]:
+    """Drives a page-like object through the NBA filters and returns one
+    {"tab", "market", "text"} view per date tab and market chip. A date
+    with no tab (no games posted yet) is skipped, not an error."""
+    page.set_default_timeout(ACTION_TIMEOUT_MS)
+    page.goto(url, timeout=PAGE_LOAD_TIMEOUT_MS, wait_until="domcontentloaded")
+    time.sleep(RENDER_SETTLE_SECONDS)
+    page.locator("text=ארצות הברית >> visible=true").first.click()
+    time.sleep(UI_SETTLE_SECONDS)
+    page.locator("text=NBA >> visible=true").first.click()
+    time.sleep(UI_SETTLE_SECONDS)
+
+    main = page.locator("main")
+    views = []
+    for offset in range(LINES_TAB_DAYS):
+        day = today + datetime.timedelta(days=offset)
+        tab = main.get_by_text(_tab_pattern(day))
+        if tab.count() == 0:
+            logger.info(f"no date tab for {day:%d.%m}; skipping")
+            continue
+        tab.first.click()
+        time.sleep(UI_SETTLE_SECONDS)
+        for chip in LINES_MARKET_CHIPS:
+            main.get_by_text(RESET_FILTER_TEXT).first.click()
+            time.sleep(UI_SETTLE_SECONDS)
+            main.get_by_text(chip, exact=True).first.click()
+            time.sleep(UI_SETTLE_SECONDS)
+            views.append({"tab": f"{day:%d.%m}", "market": chip, "text": main.inner_text()})
+    return views
+
+
+def capture_nba_lines(output_path: Path = None, page_factory=None, today=None) -> Path:
+    """Captures the NBA spread and total lines for today and tomorrow's
+    tabs as page text in a dated JSON snapshot (parsed by
+    winner_lines.picks_from_snapshot). Same retry, failure-screenshot and
+    retention behavior as capture_nba_page."""
+    today = today or datetime.date.today()
+    if output_path is None:
+        output_path = dated_lines_path(DEFAULT_OUTPUT_DIR, today)
+        prune_dir = DEFAULT_OUTPUT_DIR
+    else:
+        prune_dir = None
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    factory = page_factory or _playwright_page
+
+    last_err = None
+    for attempt in (1, 2):
+        try:
+            with factory() as page:
+                try:
+                    views = _scrape_lines(page, today)
+                except Exception:
+                    try:
+                        page.set_viewport_size(VIEWPORT)
+                        page.screenshot(path=str(failure_path(output_path.with_suffix(".png"))), timeout=SCREENSHOT_TIMEOUT_MS)
+                    except Exception:
+                        pass
+                    raise
+        except Exception as e:
+            last_err = e
+            logger.warning(f"lines capture attempt {attempt} failed: {e}")
+            continue
+        output_path.write_text(json.dumps({"captured_for": today.isoformat(), "views": views}, ensure_ascii=False, indent=1))
+        failure_path(output_path.with_suffix(".png")).unlink(missing_ok=True)
+        if prune_dir is not None:
+            try:
+                prune_old_captures(prune_dir)
+            except Exception as e:
+                logger.warning(f"capture succeeded but pruning failed (ignored): {e}")
+        return output_path
+    raise RuntimeError(f"Winner lines capture failed after 2 attempts: {last_err}") from last_err

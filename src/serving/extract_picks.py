@@ -56,7 +56,7 @@ def _swap_home_away(pick: dict) -> dict:
     return swapped
 
 
-def _match_to_slate(picks: list[dict], games: list[dict]) -> list[dict]:
+def match_to_slate(picks: list[dict], games: list[dict]) -> list[dict]:
     """Keeps only picks matching a real scheduled game, with home/away and
     game_date taken from the schedule. Anything else is dropped: the vision
     model has been seen inventing NBA games when the page shows none."""
@@ -206,7 +206,7 @@ def extract_picks_from_screenshot(
         picks.append(pick)
 
     if games is not None:
-        return _match_to_slate(picks, games)
+        return match_to_slate(picks, games)
 
     resolved_date = game_date or date.today().isoformat()
     return [_resolve_pick_home_away(p, resolved_date) for p in picks]
