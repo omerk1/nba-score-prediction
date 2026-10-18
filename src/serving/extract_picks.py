@@ -132,7 +132,10 @@ def _gemini_client():
 
 
 def extract_picks_from_screenshot(
-    image_path: str, model: str = "gemini-2.5-flash", client=None, game_date: str | None = None,
+    image_path: str,
+    model: str = "gemini-2.5-flash",
+    client=None,
+    game_date: str | None = None,
     games: list[dict] | None = None,
 ) -> list[dict]:
     """Reads image_path, returns a list of pick dicts (schema above, plus
@@ -178,6 +181,10 @@ def extract_picks_from_screenshot(
             temperature=0.0,
         ),
     )
+
+    # The raw reply is the only record of what the model claimed to see;
+    # without it a bad slate can't be told apart from a bad screenshot.
+    logger.info(f"Gemini raw response ({model}): {response.text!r}")
 
     try:
         raw_picks = json.loads(response.text)
