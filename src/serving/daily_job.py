@@ -187,6 +187,27 @@ def extract(snapshot_path: Path) -> list[dict]:
     return match_to_slate(picks_from_snapshot(snapshot_path), upcoming_games())
 
 
+def missing_on_winner(picks: list[dict]) -> list[str]:
+    """Labels of games the NBA schedule has in the next 24h that yielded
+    no pick. Best effort: a note must never cost the day's slate, so a
+    schedule failure here yields no note."""
+    from src.serving.extract_picks import unmatched_games
+    from src.serving.schedule_lookup import upcoming_games
+    from src.serving.team_lookup import build_team_id_to_name
+
+    try:
+        missing = unmatched_games(picks, upcoming_games())
+    except Exception as e:
+        logger.warning(f"could not check for games missing on Winner: {e}")
+        return []
+    names = build_team_id_to_name()
+    return [f"{names[g['away_team_id']]} @ {names[g['home_team_id']]}" for g in missing]
+
+
+def _missing_note(picks: list[dict], missing: list[str]) -> str:
+    return f"{len(missing)} of {len(picks) + len(missing)} scheduled game(s) not found on Winner: {', '.join(missing)}"
+
+
 def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:
     """Per-pick isolation: early-season games without enough history (or
     any one bad extraction) must not take down the rest of the slate."""
@@ -279,8 +300,13 @@ def _run(force: bool, scheduled: bool) -> int:
     except Exception as e:
         return _notice_exit(f"Daily job: extraction FAILED on {screenshot}: {e}", ok=False)
 
+    missing = missing_on_winner(picks)
+
     if not picks:
-        rc = _notice_exit("Daily job: no NBA games in the next 24h that are on Winner.", ok=True)
+        text = "Daily job: no NBA games in the next 24h that are on Winner."
+        if missing:
+            text = f"Daily job: {_missing_note(picks, missing)}."
+        rc = _notice_exit(text, ok=True)
         if rc == 0:
             _mark_success(run_date)
         return rc
@@ -306,6 +332,8 @@ def _run(force: bool, scheduled: bool) -> int:
         persist_error = e
 
     status = notify(recs)
+    if missing:
+        notice(f"Daily job note: {_missing_note(picks, missing)}")
     if errors:
         notice(f"Daily job note: {len(errors)} game(s) skipped — {'; '.join(errors)}")
     if persist_error is not None:

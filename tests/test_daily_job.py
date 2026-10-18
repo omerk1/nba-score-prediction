@@ -26,6 +26,7 @@ def tracked(tmp_path, monkeypatch):
     monkeypatch.setattr(
         daily_job, "extract", lambda p: calls["order"].append("extract") or [PICK, PICK]
     )
+    monkeypatch.setattr(daily_job, "missing_on_winner", lambda picks: [])
     monkeypatch.setattr(
         daily_job,
         "recommend_all",
@@ -124,6 +125,18 @@ class TestRunDailyJob:
         assert run_daily_job() == 0
         assert any("no NBA games" in n for n in tracked["notices"])
         assert "recommend" not in tracked["order"]
+
+    def test_game_missing_on_winner_adds_note_but_still_sends(self, tracked, monkeypatch):
+        monkeypatch.setattr(daily_job, "missing_on_winner", lambda picks: ["BOS @ DET"])
+        assert run_daily_job() == 0
+        assert "notify" in tracked["order"]
+        assert any("1 of 3 scheduled game(s) not found on Winner: BOS @ DET" in n for n in tracked["notices"])
+
+    def test_scheduled_games_all_missing_names_them_in_the_empty_notice(self, tracked, monkeypatch):
+        monkeypatch.setattr(daily_job, "extract", lambda p: [])
+        monkeypatch.setattr(daily_job, "missing_on_winner", lambda picks: ["BOS @ DET"])
+        assert run_daily_job() == 0
+        assert any("1 of 1 scheduled game(s) not found on Winner" in n for n in tracked["notices"])
 
     def test_partial_recommend_failures_still_send_with_note(self, tracked, monkeypatch):
         monkeypatch.setattr(
