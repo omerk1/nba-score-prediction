@@ -37,7 +37,8 @@ TELEGRAM_MESSAGE_LIMIT = 4096
 MAX_RATE_LIMIT_WAIT_SECONDS = 30
 # ~5.5 min of total backoff for sends that never left the machine
 NETWORK_RETRY_WAITS_SECONDS = (5, 15, 30, 60, 120, 120)
-_BLOCK_SEPARATOR = "\n\n"
+# A visible rule, not a blank line: blocks have blank lines between their own sections.
+_BLOCK_SEPARATOR = "\n\n──────────\n\n"
 
 
 class SendStatus(str, Enum):
@@ -54,21 +55,22 @@ def _pct(p: float) -> str:
     return f"{p:.1%}"
 
 
-def _market_line(label: str, model_prob: float, market_prob=None, edge=None, odds=None) -> str:
-    """One market row: model probability, plus market/edge when both were
-    derived (recommend_game sets them together, but guard anyway — a
-    half-present pair must degrade to the model-only row, not crash the
-    send). A positive-edge row is bolded — that's the line worth acting on.
-    `odds` (decimal, as Winner prints them) is shown right after the model
-    probability so the row can be compared to the page directly."""
-    text = f"{label}: {_pct(model_prob)}"
+def _bet_line(pick: str, model_prob: float, odds=None, market_prob=None, edge=None) -> str:
+    """One bettable side: what to bet, the price, the model's chance and
+    the chance the price needs (1/odds — the break-even), then the edge
+    between them. A positive edge gets a check mark and bold: that's the
+    side the model thinks the price undervalues. Missing odds degrade to
+    the model chance alone (recommend_game sets odds, market probability
+    and edge together; a half-present set must not crash the send)."""
+    text = pick
     if odds is not None:
-        text += f" | odds {odds:.2f}"
+        text += f" @{odds:.2f}"
+    text += f" — model {model_prob:.0%}"
     if market_prob is not None and edge is not None:
-        text += f" | mkt {_pct(market_prob)} | edge {edge:+.1%}"
+        text += f" · needs {market_prob:.0%} · edge {edge * 100:+.1f}%".replace("-", "\u2212")
         if edge > 0:
-            text = f"<b>{text}</b>"
-    return text
+            return f"✅ <b>{text}</b>"
+    return f"▫️ {text}"
 
 
 def format_game_block(rec: dict, team_names: dict) -> str:
@@ -77,72 +79,84 @@ def format_game_block(rec: dict, team_names: dict) -> str:
     come from an external source (nba_api), however tame in practice."""
     home = html.escape(str(team_names.get(rec["home_team_id"], rec["home_team_id"])))
     away = html.escape(str(team_names.get(rec["away_team_id"], rec["away_team_id"])))
+    diff = rec["predicted_diff"]
+    leader = f"{home} by {diff:.1f}" if diff >= 0 else f"{away} by {-diff:.1f}"
+    home_win = rec["home_win_probability"]
 
     lines = [
         f"<b>{home} vs {away}</b> (home vs away)",
-        f"Predicted: {rec['predicted_home_score']} - {rec['predicted_away_score']}"
-        f" (diff {rec['predicted_diff']:+.1f}, total {rec['predicted_total']:.1f})",
-        f"Home win: {_pct(rec['home_win_probability'])}",
+        f"Model: {home} {rec['predicted_home_score']} – {rec['predicted_away_score']} {away}",
+        f"{leader} · total {rec['predicted_total']:.1f}",
+        f"Win chance: {home} {home_win:.0%} · {away} {1 - home_win:.0%}",
     ]
 
+    moneyline = []
     if "home_moneyline_market_probability" in rec:
-        lines.append(
-            _market_line(
-                "ML home",
+        moneyline.append(
+            _bet_line(
+                f"{home} to win",
                 rec["home_win_probability"],
+                rec.get("home_moneyline_odds"),
                 rec["home_moneyline_market_probability"],
                 rec.get("home_moneyline_edge"),
-                rec.get("home_moneyline_odds"),
             )
         )
     if "away_moneyline_market_probability" in rec:
-        lines.append(
-            _market_line(
-                "ML away",
+        moneyline.append(
+            _bet_line(
+                f"{away} to win",
                 rec["away_win_probability"],
+                rec.get("away_moneyline_odds"),
                 rec["away_moneyline_market_probability"],
                 rec.get("away_moneyline_edge"),
-                rec.get("away_moneyline_odds"),
             )
         )
+    if moneyline:
+        lines += ["", "<b>Moneyline</b>", *moneyline]
+
     if "home_spread" in rec:
-        lines.append(
-            _market_line(
-                f"Spread {rec['home_spread']:+g} home cover",
+        lines += [
+            "",
+            "<b>Spread</b>",
+            _bet_line(
+                f"{home} {rec['home_spread']:+g}",
                 rec["home_cover_probability"],
+                rec.get("home_spread_odds"),
                 rec.get("home_spread_market_probability"),
                 rec.get("home_spread_edge"),
-                rec.get("home_spread_odds"),
-            )
-        )
+            ),
+        ]
         if "away_spread_market_probability" in rec:
             lines.append(
-                _market_line(
-                    f"Away {-rec['home_spread']:+g} cover",
+                _bet_line(
+                    f"{away} {-rec['home_spread']:+g}",
                     rec["away_cover_probability"],
+                    rec.get("away_spread_odds"),
                     rec["away_spread_market_probability"],
                     rec.get("away_spread_edge"),
-                    rec.get("away_spread_odds"),
                 )
             )
+
     if "total_line" in rec:
-        lines.append(
-            _market_line(
-                f"Total {rec['total_line']:g} over",
+        lines += [
+            "",
+            "<b>Total points</b>",
+            _bet_line(
+                f"Over {rec['total_line']:g}",
                 rec["over_probability"],
+                rec.get("over_odds"),
                 rec.get("over_market_probability"),
                 rec.get("over_edge"),
-                rec.get("over_odds"),
-            )
-        )
+            ),
+        ]
         if "under_market_probability" in rec:
             lines.append(
-                _market_line(
+                _bet_line(
                     f"Under {rec['total_line']:g}",
                     rec["under_probability"],
+                    rec.get("under_odds"),
                     rec["under_market_probability"],
                     rec.get("under_edge"),
-                    rec.get("under_odds"),
                 )
             )
     return "\n".join(lines)
