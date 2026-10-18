@@ -91,7 +91,16 @@ class TestFormatting:
         assert "ML home: 68.2% | mkt 60.0% | edge +8.2%" in block
         assert "Spread -4.5 home cover: 55.3% | mkt 52.6% | edge +2.7%" in block
         assert "Total 224.5 over: 48.1% | mkt 51.3% | edge -3.2%" in block
-        assert "Under: 51.9% | mkt 51.5% | edge +0.4%" in block
+        assert "Under 224.5: 51.9% | mkt 51.5% | edge +0.4%" in block
+        assert "Away +4.5 cover" in block
+
+    def test_odds_are_shown_next_to_the_model_probability(self):
+        rec = dict(FULL_REC, home_spread_odds=1.85, away_spread_odds=1.75, over_odds=1.8, under_odds=1.7)
+        block = format_game_block(rec, TEAM_NAMES)
+        assert "Spread -4.5 home cover: 55.3% | odds 1.85 | mkt 52.6%" in block
+        assert "Away +4.5 cover: 44.7% | odds 1.75" in block
+        assert "Total 224.5 over: 48.1% | odds 1.80" in block
+        assert "Under 224.5: 51.9% | odds 1.70" in block
 
     def test_positive_edge_lines_are_bolded(self):
         block = format_game_block(FULL_REC, TEAM_NAMES)

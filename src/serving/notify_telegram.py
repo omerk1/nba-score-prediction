@@ -54,12 +54,16 @@ def _pct(p: float) -> str:
     return f"{p:.1%}"
 
 
-def _market_line(label: str, model_prob: float, market_prob=None, edge=None) -> str:
+def _market_line(label: str, model_prob: float, market_prob=None, edge=None, odds=None) -> str:
     """One market row: model probability, plus market/edge when both were
     derived (recommend_game sets them together, but guard anyway — a
     half-present pair must degrade to the model-only row, not crash the
-    send). A positive-edge row is bolded — that's the line worth acting on."""
+    send). A positive-edge row is bolded — that's the line worth acting on.
+    `odds` (decimal, as Winner prints them) is shown right after the model
+    probability so the row can be compared to the page directly."""
     text = f"{label}: {_pct(model_prob)}"
+    if odds is not None:
+        text += f" | odds {odds:.2f}"
     if market_prob is not None and edge is not None:
         text += f" | mkt {_pct(market_prob)} | edge {edge:+.1%}"
         if edge > 0:
@@ -88,6 +92,7 @@ def format_game_block(rec: dict, team_names: dict) -> str:
                 rec["home_win_probability"],
                 rec["home_moneyline_market_probability"],
                 rec.get("home_moneyline_edge"),
+                rec.get("home_moneyline_odds"),
             )
         )
     if "away_moneyline_market_probability" in rec:
@@ -97,6 +102,7 @@ def format_game_block(rec: dict, team_names: dict) -> str:
                 rec["away_win_probability"],
                 rec["away_moneyline_market_probability"],
                 rec.get("away_moneyline_edge"),
+                rec.get("away_moneyline_odds"),
             )
         )
     if "home_spread" in rec:
@@ -106,15 +112,17 @@ def format_game_block(rec: dict, team_names: dict) -> str:
                 rec["home_cover_probability"],
                 rec.get("home_spread_market_probability"),
                 rec.get("home_spread_edge"),
+                rec.get("home_spread_odds"),
             )
         )
         if "away_spread_market_probability" in rec:
             lines.append(
                 _market_line(
-                    "Away cover",
+                    f"Away {-rec['home_spread']:+g} cover",
                     rec["away_cover_probability"],
                     rec["away_spread_market_probability"],
                     rec.get("away_spread_edge"),
+                    rec.get("away_spread_odds"),
                 )
             )
     if "total_line" in rec:
@@ -124,15 +132,17 @@ def format_game_block(rec: dict, team_names: dict) -> str:
                 rec["over_probability"],
                 rec.get("over_market_probability"),
                 rec.get("over_edge"),
+                rec.get("over_odds"),
             )
         )
         if "under_market_probability" in rec:
             lines.append(
                 _market_line(
-                    "Under",
+                    f"Under {rec['total_line']:g}",
                     rec["under_probability"],
                     rec["under_market_probability"],
                     rec.get("under_edge"),
+                    rec.get("under_odds"),
                 )
             )
     return "\n".join(lines)

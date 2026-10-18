@@ -34,8 +34,12 @@ REC_COLUMNS = (
     "predicted_total",
     "home_win_probability",
     "home_spread",
+    "home_spread_odds",
+    "away_spread_odds",
     "home_cover_probability",
     "total_line",
+    "over_odds",
+    "under_odds",
     "over_probability",
 )
 

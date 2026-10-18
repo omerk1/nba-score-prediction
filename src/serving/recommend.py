@@ -134,6 +134,7 @@ def recommend_game(
     }
 
     if home_moneyline_odds is not None:
+        result["home_moneyline_odds"] = home_moneyline_odds
         result["home_moneyline_market_probability"] = decimal_odds_to_probability(home_moneyline_odds)
         result["home_moneyline_edge"] = (
             result["home_win_probability"] - result["home_moneyline_market_probability"]
@@ -141,6 +142,7 @@ def recommend_game(
     if away_moneyline_odds is not None:
         away_win_prob = 1 - result["home_win_probability"]
         result["away_win_probability"] = away_win_prob
+        result["away_moneyline_odds"] = away_moneyline_odds
         result["away_moneyline_market_probability"] = decimal_odds_to_probability(away_moneyline_odds)
         result["away_moneyline_edge"] = away_win_prob - result["away_moneyline_market_probability"]
 
@@ -152,9 +154,11 @@ def recommend_game(
         result["home_cover_probability"] = home_cover_prob
         result["away_cover_probability"] = 1 - home_cover_prob
         if home_spread_odds is not None:
+            result["home_spread_odds"] = home_spread_odds
             result["home_spread_market_probability"] = decimal_odds_to_probability(home_spread_odds)
             result["home_spread_edge"] = home_cover_prob - result["home_spread_market_probability"]
         if away_spread_odds is not None:
+            result["away_spread_odds"] = away_spread_odds
             result["away_spread_market_probability"] = decimal_odds_to_probability(away_spread_odds)
             result["away_spread_edge"] = (
                 result["away_cover_probability"] - result["away_spread_market_probability"]
@@ -168,9 +172,11 @@ def recommend_game(
         result["over_probability"] = over_prob
         result["under_probability"] = 1 - over_prob
         if over_odds is not None:
+            result["over_odds"] = over_odds
             result["over_market_probability"] = decimal_odds_to_probability(over_odds)
             result["over_edge"] = over_prob - result["over_market_probability"]
         if under_odds is not None:
+            result["under_odds"] = under_odds
             result["under_market_probability"] = decimal_odds_to_probability(under_odds)
             result["under_edge"] = result["under_probability"] - result["under_market_probability"]
 
