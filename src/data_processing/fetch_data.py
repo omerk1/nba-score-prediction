@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from nba_api.stats.endpoints import LeagueGameLog, ScoreboardV2
+from nba_api.stats.endpoints import LeagueGameLog, ScoreboardV3
 
 from src.utils.config_loader import load_config
 
@@ -74,12 +74,18 @@ CREATE TABLE IF NOT EXISTS game (
 # scripts/migrate_shot_volume_columns.py to ALTER TABLE an already-existing `game`
 # table that predates these columns.
 SHOT_VOLUME_COLUMNS: list[tuple[str, str]] = [
-    ("fgm_home", "INTEGER"), ("fga_home", "INTEGER"),
-    ("fg3m_home", "INTEGER"), ("fg3a_home", "INTEGER"),
-    ("ftm_home", "INTEGER"), ("fta_home", "INTEGER"),
-    ("fgm_away", "INTEGER"), ("fga_away", "INTEGER"),
-    ("fg3m_away", "INTEGER"), ("fg3a_away", "INTEGER"),
-    ("ftm_away", "INTEGER"), ("fta_away", "INTEGER"),
+    ("fgm_home", "INTEGER"),
+    ("fga_home", "INTEGER"),
+    ("fg3m_home", "INTEGER"),
+    ("fg3a_home", "INTEGER"),
+    ("ftm_home", "INTEGER"),
+    ("fta_home", "INTEGER"),
+    ("fgm_away", "INTEGER"),
+    ("fga_away", "INTEGER"),
+    ("fg3m_away", "INTEGER"),
+    ("fg3a_away", "INTEGER"),
+    ("ftm_away", "INTEGER"),
+    ("fta_away", "INTEGER"),
 ]
 
 
@@ -118,41 +124,43 @@ def _fetch_season(season: str, season_type: str) -> pd.DataFrame:
     away = df[df["MATCHUP"].str.contains("@")].copy()
     merged = home.merge(away, on="GAME_ID", suffixes=("_home", "_away"))
 
-    return pd.DataFrame({
-        "game_id":      merged["GAME_ID"],
-        "game_date":    merged["GAME_DATE_home"],
-        "season_id":    merged["SEASON_ID_home"],
-        "season_type":  season_type,
-        "team_id_home": merged["TEAM_ID_home"],
-        "team_id_away": merged["TEAM_ID_away"],
-        "pts_home":     merged["PTS_home"],
-        "pts_away":     merged["PTS_away"],
-        "wl_home":      merged["WL_home"],
-        "fg_pct_home":  merged["FG_PCT_home"],
-        "ft_pct_home":  merged["FT_PCT_home"],
-        "fg3_pct_home": merged["FG3_PCT_home"],
-        "ast_home":     merged["AST_home"],
-        "reb_home":     merged["REB_home"],
-        "fg_pct_away":  merged["FG_PCT_away"],
-        "ft_pct_away":  merged["FT_PCT_away"],
-        "fg3_pct_away": merged["FG3_PCT_away"],
-        "ast_away":     merged["AST_away"],
-        "reb_away":     merged["REB_away"],
-        # Makes/attempts: needed downstream for volume-weighted rolling shooting %,
-        # since averaging per-game percentages directly is statistically wrong.
-        "fgm_home":     merged["FGM_home"],
-        "fga_home":     merged["FGA_home"],
-        "fg3m_home":    merged["FG3M_home"],
-        "fg3a_home":    merged["FG3A_home"],
-        "ftm_home":     merged["FTM_home"],
-        "fta_home":     merged["FTA_home"],
-        "fgm_away":     merged["FGM_away"],
-        "fga_away":     merged["FGA_away"],
-        "fg3m_away":    merged["FG3M_away"],
-        "fg3a_away":    merged["FG3A_away"],
-        "ftm_away":     merged["FTM_away"],
-        "fta_away":     merged["FTA_away"],
-    })
+    return pd.DataFrame(
+        {
+            "game_id": merged["GAME_ID"],
+            "game_date": merged["GAME_DATE_home"],
+            "season_id": merged["SEASON_ID_home"],
+            "season_type": season_type,
+            "team_id_home": merged["TEAM_ID_home"],
+            "team_id_away": merged["TEAM_ID_away"],
+            "pts_home": merged["PTS_home"],
+            "pts_away": merged["PTS_away"],
+            "wl_home": merged["WL_home"],
+            "fg_pct_home": merged["FG_PCT_home"],
+            "ft_pct_home": merged["FT_PCT_home"],
+            "fg3_pct_home": merged["FG3_PCT_home"],
+            "ast_home": merged["AST_home"],
+            "reb_home": merged["REB_home"],
+            "fg_pct_away": merged["FG_PCT_away"],
+            "ft_pct_away": merged["FT_PCT_away"],
+            "fg3_pct_away": merged["FG3_PCT_away"],
+            "ast_away": merged["AST_away"],
+            "reb_away": merged["REB_away"],
+            # Makes/attempts: needed downstream for volume-weighted rolling shooting %,
+            # since averaging per-game percentages directly is statistically wrong.
+            "fgm_home": merged["FGM_home"],
+            "fga_home": merged["FGA_home"],
+            "fg3m_home": merged["FG3M_home"],
+            "fg3a_home": merged["FG3A_home"],
+            "ftm_home": merged["FTM_home"],
+            "fta_home": merged["FTA_home"],
+            "fgm_away": merged["FGM_away"],
+            "fga_away": merged["FGA_away"],
+            "fg3m_away": merged["FG3M_away"],
+            "fg3a_away": merged["FG3A_away"],
+            "ftm_away": merged["FTM_away"],
+            "fta_away": merged["FTA_away"],
+        }
+    )
 
 
 def _insert_games(conn: sqlite3.Connection, df: pd.DataFrame) -> int:
@@ -172,8 +180,10 @@ def fetch_upcoming_games(target_date: Optional[str] = None) -> pd.DataFrame:
     if target_date is None:
         target_date = datetime.date.today().isoformat()
 
-    scoreboard = ScoreboardV2(game_date=target_date).game_header.get_data_frame()
-    if scoreboard.empty:
+    # ScoreboardV2 now returns an empty body (JSONDecodeError) from
+    # stats.nba.com; V3 is the supported replacement.
+    games = ScoreboardV3(game_date=target_date, timeout=30).get_dict()["scoreboard"]["games"]
+    if not games:
         # keep the declared columns so consumers can filter without
         # special-casing the empty day
         return pd.DataFrame(
@@ -187,14 +197,16 @@ def fetch_upcoming_games(target_date: Optional[str] = None) -> pd.DataFrame:
             ]
         )
 
-    return pd.DataFrame({
-        "game_id":      scoreboard["GAME_ID"],
-        "game_date":    target_date,
-        "season_id":    scoreboard.get("SEASON", pd.NA),
-        "season_type":  scoreboard.get("LIVE_PERIOD_TIME_BCAST", pd.NA),  # placeholder
-        "team_id_home": scoreboard["HOME_TEAM_ID"],
-        "team_id_away": scoreboard["VISITOR_TEAM_ID"],
-    })
+    return pd.DataFrame(
+        {
+            "game_id": [g["gameId"] for g in games],
+            "game_date": target_date,
+            "season_id": pd.NA,
+            "season_type": pd.NA,
+            "team_id_home": [g["homeTeam"]["teamId"] for g in games],
+            "team_id_away": [g["awayTeam"]["teamId"] for g in games],
+        }
+    )
 
 
 def main():
