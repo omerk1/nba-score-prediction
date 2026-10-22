@@ -32,6 +32,10 @@ from src.utils.config_loader import load_config
 
 logger = logging.getLogger(__name__)
 
+# Window (games) of the team scoring average shown to the LLM scorer. It
+# lived in features.rolling_window, a config field that no longer exists.
+LLM_TEAM_AVG_WINDOW = 10
+
 
 def _resolve_team_id(abbreviation: str) -> int | None:
     """Map team abbreviation to NBA team_id via nba_api static data."""
@@ -300,24 +304,19 @@ def _process_team(
 
     season_start = _season_start(cfg.data_paths.raw_db, game_date)
     importance_map = _get_importance_map(db_path, team_id, game_date, season_start)
-    out_names = [p["player_name"] for p in players if p.get("status") == "Out"]
-    games_out_map = _get_games_out_map(db_path, game_date, team_id, out_names)
 
     player_stats = _get_player_stats(db_path, team_id, game_date, season_start) if scorer == "llm" else {}
     team_avg = (
-        _get_team_avg_score(cfg.data_paths.raw_db, team_id, game_date, cfg.features.rolling_window)
+        _get_team_avg_score(cfg.data_paths.raw_db, team_id, game_date, LLM_TEAM_AVG_WINDOW)
         if scorer == "llm"
         else None
     )
 
     impact = _score_team(scorer, team_name, game_date, players, importance_map, cfg, player_stats, team_avg)
-    decay = _absence_decay(players, importance_map, games_out_map, cfg.features.rolling_window)
-    impact = dict(impact)
-    impact["impact_score"] = round(impact["impact_score"] * decay, 2)
 
     _upsert_injury_feature(db_path, game_date, team_id, scorer, impact)
     logger.debug(
-        f"  {team_name} [{scorer}]: impact={impact['impact_score']:.2f} | "
+        f"  {team_name} [{scorer}]: deficit={impact['team_deficit']:.4f} | "
         f"out={impact['n_out']} | questionable={impact['n_questionable']}"
     )
 
@@ -340,12 +339,20 @@ def run_nightly(game_date: date | None = None) -> None:
     for e in entries:
         by_team.setdefault(e["team_abbreviation"], []).append(e)
 
+    stored = 0
     for abbr, players in by_team.items():
         team_id = _resolve_team_id(abbr)
         if not team_id:
-            logger.warning(f"Unknown team abbreviation: {abbr}")
+            logger.warning(f"Unknown team abbreviation: {abbr!r}")
             continue
         _process_team(db_path, team_id, abbr, game_date_str, players, "espn")
+        stored += 1
+    # A feed-format change once dropped every row while the step still
+    # reported ok; entries fetched but no team stored must fail the step.
+    if entries and not stored:
+        raise RuntimeError(
+            f"ESPN returned {len(entries)} injury entries but none mapped to a team — feed format changed?"
+        )
 
 
 def run_historical(start_date: date, end_date: date) -> None:
