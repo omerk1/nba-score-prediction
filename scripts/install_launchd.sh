@@ -20,12 +20,16 @@ case "$REPO_ROOT" in
 esac
 LABEL="com.omerkoren.nba-daily-recommendations"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+MORNING_LABEL="com.omerkoren.nba-morning-report"
+MORNING_PLIST="$HOME/Library/LaunchAgents/$MORNING_LABEL.plist"
 GUI_DOMAIN="gui/$(id -u)"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
     launchctl bootout "$GUI_DOMAIN/$LABEL" 2>/dev/null || true
     rm -f "$PLIST"
-    echo "Uninstalled $LABEL."
+    launchctl bootout "$GUI_DOMAIN/$MORNING_LABEL" 2>/dev/null || true
+    rm -f "$MORNING_PLIST"
+    echo "Uninstalled $LABEL and $MORNING_LABEL."
     echo "To also clear the wake schedule: sudo pmset repeat cancel"
     exit 0
 fi
@@ -85,6 +89,45 @@ launchctl bootout "$GUI_DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$GUI_DOMAIN" "$PLIST"
 echo "Installed $LABEL (daily 16:00 local). Status:"
 launchctl print "$GUI_DOMAIN/$LABEL" | grep -E "state|path|last exit" || true
+
+# Morning performance report (scripts/morning_report.py) at 10:00 local:
+# final scores are in by then for the previous US game night. No wake
+# schedule — if the Mac is asleep, launchd runs it at the next wake.
+cat > "$MORNING_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$MORNING_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-c</string>
+        <string>exec /usr/bin/caffeinate -i "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/morning_report.py" >> "$REPO_ROOT/logs/morning_report_\$(date +%Y-%m-%d).log" 2>&amp;1</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$REPO_ROOT</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardErrorPath</key>
+    <string>$REPO_ROOT/logs/launchd_morning_report.err.log</string>
+</dict>
+</plist>
+EOF
+if ! plutil -lint "$MORNING_PLIST" >/dev/null; then
+    plutil -lint "$MORNING_PLIST" >&2
+    echo "Generated morning plist is invalid; not reloading $MORNING_LABEL." >&2
+    exit 1
+fi
+launchctl bootout "$GUI_DOMAIN/$MORNING_LABEL" 2>/dev/null || true
+launchctl bootstrap "$GUI_DOMAIN" "$MORNING_PLIST"
+echo "Installed $MORNING_LABEL (daily 10:00 local)."
 
 echo
 echo "Current wake schedule (pmset holds ONE repeating schedule system-wide):"

@@ -85,6 +85,10 @@ def grade(log: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
                     "edge": rec[edge_key],
                     "outcome": outcome,
                     "profit": profit,
+                    "pred_diff": rec["predicted_diff"],
+                    "pred_total": rec["predicted_total"],
+                    "actual_diff": final["pts_home"] - final["pts_away"],
+                    "actual_total": final["pts_home"] + final["pts_away"],
                     "pred_diff_error": rec["predicted_diff"] - (final["pts_home"] - final["pts_away"]),
                     "pred_total_error": rec["predicted_total"] - (final["pts_home"] + final["pts_away"]),
                 }
