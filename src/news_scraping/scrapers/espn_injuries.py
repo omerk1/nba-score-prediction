@@ -8,6 +8,7 @@ For historical backfill use nba_injury_pdf.py instead.
 import logging
 
 import requests
+from nba_api.stats.static import teams as nba_teams
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,18 @@ _URL = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/injuries"
 _HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 _TRACKED_STATUSES = {"Out", "Doubtful", "Questionable", "Day-To-Day"}
+
+_ABBR_BY_FULL_NAME = {t["full_name"]: t["abbreviation"] for t in nba_teams.get_teams()}
+_ABBR_BY_FULL_NAME["LA Clippers"] = "LAC"  # ESPN's spelling; nba_api says "Los Angeles Clippers"
+
+
+def _team_abbreviation(team_entry: dict) -> str:
+    """ESPN used to send team.abbreviation; the feed now carries only
+    displayName ("Atlanta Hawks"), which left every row with an empty
+    abbreviation and silently dropped all live injuries. Prefer the
+    abbreviation when present, else map the full name."""
+    abbr = team_entry.get("team", {}).get("abbreviation", "")
+    return abbr or _ABBR_BY_FULL_NAME.get(team_entry.get("displayName", ""), "")
 
 
 def fetch_current_injuries() -> list[dict]:
@@ -29,7 +42,7 @@ def fetch_current_injuries() -> list[dict]:
 
     results = []
     for team_entry in data.get("injuries", []):
-        abbr = team_entry.get("team", {}).get("abbreviation", "")
+        abbr = _team_abbreviation(team_entry)
         for injury in team_entry.get("injuries", []):
             status = injury.get("status", "")
             if status not in _TRACKED_STATUSES:
