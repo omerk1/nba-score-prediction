@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from src.serving import daily_job
-from src.serving.daily_job import acquire_lock, prune_old_logs, run_daily_job
+from src.serving.daily_job import acquire_lock, prune_old_logs, prune_old_slates, run_daily_job
 from src.serving.notify_telegram import SendStatus
 
 TODAY = datetime.date(2026, 10, 6)
@@ -332,3 +332,19 @@ class TestScheduledWindowAndMarkerDate:
         assert run_daily_job(scheduled=True) == 1
         assert "persist" not in tracked["order"] and "notify" not in tracked["order"]
         assert "MISSED" in tracked["notices"][0] and "2026-10-15" in tracked["notices"][0]
+
+
+def test_prune_old_slates_removes_only_pages_past_retention(tmp_path):
+    import os
+
+    now = 1_800_000_000.0
+    old, fresh, other = tmp_path / "Mon_Sep_01.html", tmp_path / "Wed_Oct_21.html", tmp_path / "keep.txt"
+    for f, age_days in ((old, 31), (fresh, 5), (other, 90)):
+        f.write_text("x")
+        os.utime(f, (now - age_days * 86400, now - age_days * 86400))
+    assert prune_old_slates(tmp_path, retention_days=30, now=now) == 1
+    assert not old.exists() and fresh.exists() and other.exists()
+
+
+def test_prune_old_slates_missing_dir_is_noop(tmp_path):
+    assert prune_old_slates(tmp_path / "nope") == 0

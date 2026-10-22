@@ -46,6 +46,7 @@ import datetime
 import fcntl
 import logging
 import re
+import time
 from pathlib import Path
 
 from src.serving.notify_telegram import SendStatus
@@ -56,6 +57,7 @@ LOCK_PATH = Path("outputs/daily_job.lock")
 SUCCESS_MARKER = Path("outputs/daily_job_last_success")
 LOG_DIR = Path("logs")
 LOG_RETENTION_DAYS = 30
+SLATE_DIR = Path("outputs/slates")
 # The launchd StandardErrorPath fallback (pre-redirect failures) is the
 # one log the dated-prune below can't rotate; cap it by size instead.
 ERR_LOG_NAME = "launchd_daily_job.err.log"
@@ -84,6 +86,27 @@ def acquire_lock(lock_path: Path = LOCK_PATH):
     except OSError:
         handle.close()
         return None
+
+
+def prune_old_slates(
+    slate_dir: Path = SLATE_DIR, retention_days: int = LOG_RETENTION_DAYS, now: float | None = None
+) -> int:
+    """Generated slate/morning pages are only a convenience copy (Telegram
+    keeps the real one), so drop pages older than the retention window.
+    By file age, not name: slate pages are named like 'Wed_Oct_21.html',
+    without a year. Housekeeping must never take the job down."""
+    if not slate_dir.exists():
+        return 0
+    cutoff = (now if now is not None else time.time()) - retention_days * 86400
+    removed = 0
+    for f in slate_dir.glob("*.html"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+                removed += 1
+        except OSError as e:
+            logger.warning(f"could not prune {f}: {e}")
+    return removed
 
 
 def prune_old_logs(log_dir: Path = LOG_DIR, retention_days: int = LOG_RETENTION_DAYS, today=None) -> int:
@@ -265,6 +288,7 @@ def _run(force: bool, scheduled: bool) -> int:
     started = _now()
     run_date = _slate_date(started)
     prune_old_logs(LOG_DIR, today=started.date())
+    prune_old_slates()
 
     if scheduled:
         missed = _missed_day(started)
