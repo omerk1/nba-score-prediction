@@ -28,6 +28,7 @@ from enum import Enum
 import requests
 import urllib3
 
+from src.serving.recommended_bets import STRONG_EDGE, recommended_bets
 from src.serving.team_lookup import build_team_id_to_name
 from src.utils.config_loader import load_config
 
@@ -219,12 +220,17 @@ def _never_sent(e: Exception) -> bool:
     return False
 
 
-def _post_message(transport, url: str, payload: dict, timeout_seconds: int, token: str) -> bool:
+def _post_message(
+    transport, url: str, payload: dict, timeout_seconds: int, token: str, files: dict | None = None
+) -> bool:
     network_waits = iter(NETWORK_RETRY_WAITS_SECONDS)
     rate_limited = False
     while True:
         try:
-            response = transport.post(url, json=payload, timeout=timeout_seconds)
+            if files:
+                response = transport.post(url, data=payload, files=files, timeout=timeout_seconds)
+            else:
+                response = transport.post(url, json=payload, timeout=timeout_seconds)
         except Exception as e:
             # Pre-connect failures are retried with backoff: right after a
             # scheduled wake the network (DNS especially) can lag by
@@ -351,3 +357,95 @@ def send_recommendations(recs: list[dict], config=None) -> SendStatus:
         timeout_seconds=tg.timeout_seconds,
     )
     return SendStatus.SENT if ok else SendStatus.FAILED
+
+
+def format_recommended_summary(recs: list[dict], run_label: str, min_edge: float, top: int = 5) -> str:
+    """Caption for the HTML page (Telegram captions cap at 1024 chars): the
+    headline and the best few bets; the page holds everything."""
+    team_names = build_team_id_to_name()
+    bets = sorted(
+        (b for rec in recs for b in recommended_bets(rec, min_edge, team_names)),
+        key=lambda b: b["edge"],
+        reverse=True,
+    )
+    strong = sum(b["edge"] >= STRONG_EDGE for b in bets)
+    lines = [
+        f"<b>NBA picks · {html.escape(run_label)}</b>",
+        f"{len(recs)} games · {len(bets)} recommended bets ({strong} strong, edge ≥ {STRONG_EDGE:.0%})",
+        "",
+    ]
+    for b in bets[:top]:
+        odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
+        lines.append(
+            f"{'✅' if b['edge'] >= STRONG_EDGE else '▫️'} <b>{html.escape(b['pick'])}{odds}</b> "
+            f"({html.escape(b['game'])}) edge {b['edge'] * 100:+.1f}%"
+        )
+    if len(bets) > top:
+        lines.append(f"…and {len(bets) - top} more in the page")
+    if not bets:
+        lines.append("No side has a positive edge today.")
+    return "\n".join(lines)[:1000]
+
+
+def send_document(
+    path, caption: str, token: str, chat_id: str, timeout_seconds: int = 10, transport=None
+) -> bool:
+    """Uploads a file to the chat (sendDocument). Same retry/redaction
+    rules as send_telegram; the bytes are read once so a retry can resend."""
+    from pathlib import Path
+
+    path = Path(path)
+    transport = transport or requests
+    url = f"https://api.telegram.org/bot{token}/sendDocument"
+    payload = {"chat_id": chat_id, "caption": caption, "parse_mode": "HTML"}
+    files = {"document": (path.name, path.read_bytes(), "text/html")}
+    return _post_message(transport, url, payload, max(timeout_seconds, 60), token, files=files)
+
+
+def send_html_report(path, caption: str, config=None) -> SendStatus:
+    """Config gate + secrets, then one sendDocument with a caption — the
+    whole message is a single Telegram post. Never raises."""
+    resolved = _resolve_send_config(config)
+    if isinstance(resolved, SendStatus):
+        return resolved
+    tg, token, chat_id = resolved
+    try:
+        ok = send_document(path, caption, token, chat_id, tg.timeout_seconds)
+    except Exception as e:
+        logger.error(f"report send failed: {_redact(str(e), token)}")
+        ok = False
+    return SendStatus.SENT if ok else SendStatus.FAILED
+
+
+def send_slate(
+    recs: list[dict], run_label: str, config=None, reports_dir="outputs/slates", injuries=None
+) -> SendStatus:
+    """Daily delivery as ONE Telegram message: the HTML page (recommended
+    bets first, per-game drill-down below) with a short caption. If building
+    or sending the page fails, falls back to the full text messages so the
+    slate is never lost to the nicer format. Never raises."""
+    from pathlib import Path
+
+    from src.serving.slate_html import render_slate_html
+
+    resolved = _resolve_send_config(config)
+    if isinstance(resolved, SendStatus):
+        return resolved
+    tg, token, chat_id = resolved
+    if not recs:
+        logger.info("No recommendations to send")
+        return SendStatus.SKIPPED
+    min_edge = (config or load_config()).notifications.recommend_min_edge
+
+    try:
+        slug = re.sub(r"\W+", "_", run_label)
+        path = Path(reports_dir) / f"{slug}.html"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(render_slate_html(recs, build_team_id_to_name(), run_label, min_edge, injuries), encoding="utf-8")
+        caption = format_recommended_summary(recs, run_label, min_edge)
+        if send_html_report(path, caption, config) is SendStatus.SENT:
+            return SendStatus.SENT
+        logger.error("HTML slate send failed — sending the full text slate instead")
+    except Exception as e:
+        logger.error(f"slate HTML failed ({_redact(str(e), token)}) — sending the full text slate")
+    return send_recommendations(recs, config)

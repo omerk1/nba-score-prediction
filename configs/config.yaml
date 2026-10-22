@@ -477,3 +477,4 @@ notifications:
     # (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID) live in .env, never here.
     enabled: true
     timeout_seconds: 10
+  recommend_min_edge: 0.0    # model edge over break-even that must be exceeded for a "recommended bet" (0 = any positive edge; >=5% is flagged strong)

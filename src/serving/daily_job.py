@@ -231,10 +231,17 @@ def persist(recs: list[dict], run_date: datetime.date) -> None:
     save_predictions(recs, game_date=run_date)
 
 
-def notify(recs: list[dict]):
-    from src.serving.notify_telegram import send_recommendations
+def notify(recs: list[dict], run_date: datetime.date):
+    from src.serving.notify_telegram import send_slate
 
-    return send_recommendations(recs)
+    from src.serving.injury_lookup import injuries_for_date
+
+    try:
+        injuries = injuries_for_date(run_date)
+    except Exception as e:  # display-only: never cost the slate
+        logger.warning(f"could not load injuries for the slate page: {e}")
+        injuries = None
+    return send_slate(recs, run_date.strftime("%a %b %d"), injuries=injuries)
 
 
 def notice(text: str):
@@ -331,7 +338,7 @@ def _run(force: bool, scheduled: bool) -> int:
         logger.error(f"saving predictions failed: {e}")
         persist_error = e
 
-    status = notify(recs)
+    status = notify(recs, run_date)
     if missing:
         notice(f"Daily job note: {_missing_note(picks, missing)}")
     if errors:

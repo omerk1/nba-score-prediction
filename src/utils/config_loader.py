@@ -334,6 +334,9 @@ class TelegramNotifyConfig(BaseModel):
 
 class NotificationsConfig(BaseModel):
     telegram: Optional[TelegramNotifyConfig] = None
+    # A side is a "recommended bet" when the model's edge over the price's
+    # break-even probability is above this (src/serving/recommended_bets.py).
+    recommend_min_edge: float = 0.0
 
 
 class Config(BaseModel):
