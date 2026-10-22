@@ -16,23 +16,14 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.serving.recommended_bets import SIDES as _SIDES
+
 GAMES_DB = Path("data/raw/nba_api.sqlite")
 LOG_PATH = Path("outputs/predictions_log.csv")
 # The log's game_date is the run's slate day; the NBA game lands that day
 # (US time) or, for a run after midnight, the day after.
 RESULT_WINDOW_DAYS = 2
 EDGE_BUCKETS = [-1.0, -0.10, -0.05, 0.0, 0.03, 0.06, 0.10, 1.0]
-
-# (market, side, rec_json probability key, odds key, market-probability key, edge key)
-_SIDES = [
-    ("spread", "home", "home_cover_probability", "home_spread_odds", "home_spread_market_probability", "home_spread_edge"),
-    ("spread", "away", "away_cover_probability", "away_spread_odds", "away_spread_market_probability", "away_spread_edge"),
-    ("total", "over", "over_probability", "over_odds", "over_market_probability", "over_edge"),
-    ("total", "under", "under_probability", "under_odds", "under_market_probability", "under_edge"),
-    ("moneyline", "home", "home_win_probability", "home_moneyline_odds", "home_moneyline_market_probability", "home_moneyline_edge"),
-    ("moneyline", "away", "away_win_probability", "away_moneyline_odds", "away_moneyline_market_probability", "away_moneyline_edge"),
-]
-
 
 def load_results(db_path: Path = GAMES_DB) -> pd.DataFrame:
     with sqlite3.connect(db_path) as conn:

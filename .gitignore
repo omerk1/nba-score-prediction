@@ -190,3 +190,6 @@ outputs/winner_captures/
 # (src/serving/daily_job.py), created at runtime.
 outputs/daily_job.lock
 outputs/daily_job_last_success
+
+# Generated daily slate pages (src/serving/notify_telegram.py send_slate)
+outputs/slates/

@@ -42,7 +42,7 @@ def tracked(tmp_path, monkeypatch):
     monkeypatch.setattr(
         daily_job,
         "notify",
-        lambda recs: calls["order"].append("notify") or SendStatus.SENT,
+        lambda recs, run_date: calls["order"].append("notify") or SendStatus.SENT,
     )
     monkeypatch.setattr(
         daily_job, "notice", lambda text: calls["notices"].append(text) or SendStatus.SENT
@@ -162,11 +162,11 @@ class TestRunDailyJob:
         assert len(tracked["notices"]) == 1 and "NOT saved" in tracked["notices"][0]
 
     def test_send_failed_exits_one(self, tracked, monkeypatch):
-        monkeypatch.setattr(daily_job, "notify", lambda recs: SendStatus.FAILED)
+        monkeypatch.setattr(daily_job, "notify", lambda recs, run_date: SendStatus.FAILED)
         assert run_daily_job() == 1
 
     def test_send_skipped_disabled_channel_exits_zero(self, tracked, monkeypatch):
-        monkeypatch.setattr(daily_job, "notify", lambda recs: SendStatus.SKIPPED)
+        monkeypatch.setattr(daily_job, "notify", lambda recs, run_date: SendStatus.SKIPPED)
         assert run_daily_job() == 0
 
     def test_unexpected_crash_sends_notice_and_exits_one(self, tracked, monkeypatch):
@@ -196,7 +196,7 @@ class TestRunDailyJob:
         assert len(tracked["order"]) == 2 * len(first_run)
 
     def test_failed_send_does_not_write_success_marker(self, tracked, monkeypatch):
-        monkeypatch.setattr(daily_job, "notify", lambda recs: SendStatus.FAILED)
+        monkeypatch.setattr(daily_job, "notify", lambda recs, run_date: SendStatus.FAILED)
         assert run_daily_job() == 1
         assert not (daily_job.SUCCESS_MARKER).exists()
 
