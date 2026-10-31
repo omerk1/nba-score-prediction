@@ -3,7 +3,7 @@ Validation deliverable for the season motivation / seeding-incentive features
 (see docs/SEASON_MOTIVATION_LOG.md).
 
 Produces:
-  1. outputs/season_motivation_results.csv -- the most recent 50 real (Regular
+  1. outputs/feature_validation/season_motivation/season_motivation_results.csv -- the most recent 50 real (Regular
      Season) games with the new features alongside actual margins.
   2. Sanity checks printed to stdout: no NaN, motivation_score in [0,1],
      clinch values non-negative.
@@ -27,7 +27,7 @@ from src.utils.config_loader import load_config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
 logger = logging.getLogger(__name__)
 
-RESULTS_PATH = Path("outputs/season_motivation_results.csv")
+RESULTS_PATH = Path("outputs/feature_validation/season_motivation/season_motivation_results.csv")
 MOTIVATION_COLS = [
     "home_team_motivation_score", "home_team_games_to_clinch_ceiling", "home_team_games_to_clinch_floor",
     "away_team_motivation_score", "away_team_games_to_clinch_ceiling", "away_team_games_to_clinch_floor",

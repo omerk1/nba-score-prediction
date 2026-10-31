@@ -30,7 +30,7 @@ from src.utils.config_loader import load_config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
 logger = logging.getLogger(__name__)
 
-OUT_PATH = Path("outputs/pbp_persistence_screen.csv")
+OUT_PATH = Path("outputs/feature_validation/pbp/pbp_persistence_screen.csv")
 
 STATS = [
     # baselines

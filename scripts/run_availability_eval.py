@@ -11,7 +11,7 @@ default 2025-06-01, after the default LLM's training cutoff). Only post_cutoff
 is trusted for an LLM; the named-vs-anonymized gap on pre_cutoff is the
 memorization check.
 
-Output: one row per (estimator, slice) appended to outputs/availability_eval.csv,
+Output: one row per (estimator, slice) appended to outputs/feature_validation/availability/availability_eval.csv,
 plus a reliability table per estimator on the pooled slice printed to stdout.
 
 Usage:
@@ -43,7 +43,7 @@ from src.availability.retrieval import build_context, load_games, load_importanc
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-OUT_CSV = Path("outputs/availability_eval.csv")
+OUT_CSV = Path("outputs/feature_validation/availability/availability_eval.csv")
 
 # Fixed column order for the append-only log. New fields go at the END and get a
 # default, so old rows stay readable and pandas never sees a ragged file.

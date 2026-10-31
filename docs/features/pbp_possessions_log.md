@@ -53,7 +53,7 @@ backfill the remaining seasons for the survivors.
 ## 2026-09-17 — First aggregates + persistence screen (2024-25 only)
 
 `src/pbp/aggregates.py` (33 candidates), `scripts/pbp_persistence_screen.py`,
-results in `outputs/pbp_persistence_screen.csv`. Each team's season is split
+results in `outputs/feature_validation/pbp/pbp_persistence_screen.csv`. Each team's season is split
 into consecutive N-game blocks; every aggregate is a pooled ratio over that
 block's possessions (summed numerator / summed denominator, never a mean of
 per-game ratios). `r_self` = pooled correlation between block b and b+1;

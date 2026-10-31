@@ -71,7 +71,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(me
 logger = logging.getLogger(__name__)
 
 SLEEP_SECONDS = 0.7  # matches box_scores.py / fetch_data.py's rate-limit convention
-BACKFILL_LOG_PATH = Path("outputs/on_off_backfill_log.csv")
+BACKFILL_LOG_PATH = Path("outputs/feature_validation/on_off_splits/on_off_backfill_log.csv")
 BACKFILL_LOG_COLUMNS = [
     "timestamp", "team_id", "split_type", "opponent_team_id", "as_of_date",
     "season", "status", "n_players", "elapsed_seconds",

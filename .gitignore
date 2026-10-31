@@ -19,7 +19,7 @@ data/processed/*
 # Keep the full per-run feature-importance tables (small, one row per feature)
 # so the ablation record has durable evidence of where each run's features
 # ranked, same rationale as !outputs/experiments.csv above.
-!outputs/full_feature_importance_*.csv
+!outputs/feature_importance/full_feature_importance_*.csv
 
 # Keep the market-benchmark cross-run history (scripts/market_benchmark.py) --
 # one small row appended per run, same rationale as !outputs/experiments.csv
@@ -35,7 +35,7 @@ data/processed/*
 # Play-by-play possession-aggregate persistence screen: one small row per
 # candidate stat per block size, the durable evidence behind which aggregates
 # went on to a CV ablation, same rationale as !outputs/experiments.csv above.
-!outputs/pbp_persistence_screen.csv
+!outputs/feature_validation/pbp/pbp_persistence_screen.csv
 
 # CV harness noise floor (scripts/measure_cv_noise_floor.py): one small row per
 # fold per measured config, recording how much val_score moves when nothing
@@ -63,29 +63,29 @@ data/processed/*
 # Player on/off splits: backfill progress log (one row per API call, durable
 # evidence of what was fetched/skipped/empty -- same rationale as
 # !outputs/experiments.csv) and the validation sample output, both small.
-!outputs/on_off_backfill_log.csv
-!outputs/on_off_splits_results.csv
+!outputs/feature_validation/on_off_splits/on_off_backfill_log.csv
+!outputs/feature_validation/on_off_splits/on_off_splits_results.csv
 
 # Dedicated iteration scratch file for the backfill-completion round (step 1
 # of on/off-splits' iterative-improvement plan) -- keeps this round's
 # baseline-vs-treatment comparison out of the shared outputs/experiments.csv
 # (per the coordinator's instruction) while still being durable, committed
 # evidence, same rationale as !outputs/experiments.csv above.
-!outputs/on_off_splits_iteration_scratch.csv
+!outputs/feature_validation/on_off_splits/on_off_splits_iteration_scratch.csv
 
 # Season motivation: validation sample output and iteration scratch file, same
 # rationale as the on/off-splits pair above.
-!outputs/season_motivation_results.csv
-!outputs/season_motivation_iteration_scratch.csv
+!outputs/feature_validation/season_motivation/season_motivation_results.csv
+!outputs/feature_validation/season_motivation/season_motivation_iteration_scratch.csv
 
 # Availability estimator intrinsic eval (scripts/run_availability_eval.py): one
 # small row per (estimator, slice) per run, same rationale as the pairs above.
-!outputs/availability_eval.csv
+!outputs/feature_validation/availability/availability_eval.csv
 
 # LLM score-adjustment diagnostic: one summary row per run, same rationale
 # as the market-benchmark summaries above. The per-game dump
 # (outputs/score_adjustment_games_<tag>.csv) stays ignored.
-!outputs/score_adjustment_test.csv
+!outputs/feature_validation/score_adjustment/score_adjustment_test.csv
 
 # CLAUDE.md's "Leaderboards & research sessions" rules: research/autonomous
 # sessions log every run to results/sessions/<session_id>.csv before
