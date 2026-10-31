@@ -97,7 +97,7 @@ what makes the comparison honest: the LLM and the baseline see the same facts.
 ## 7. Evaluation
 
 **Intrinsic** (`scripts/run_availability_eval.py`, writes
-`outputs/availability_eval.csv`, one row per method × slice):
+`outputs/feature_validation/availability/availability_eval.csv`, one row per method × slice):
 
 - Brier, log-loss, AUC for `p_play`; reliability curve in deciles.
 - MAE of `expected_minutes_share` among players who played.
@@ -156,7 +156,7 @@ tests/test_availability_prompt.py      # anonymized prompt contains no names/dat
 Branch `feature/availability-agent`. Built: `scripts/backfill_player_game_logs.py`
 (140k player-game rows, 2021-22 to 2025-26, 10 API calls), `src/availability/`
 (`labels`, `names`, `retrieval`, `baselines`, `db`), `scripts/run_availability_eval.py`
-(writes `outputs/availability_eval.csv`), `tests/test_availability.py`, and the
+(writes `outputs/feature_validation/availability/availability_eval.csv`), `tests/test_availability.py`, and the
 `availability_agent` config section (disabled).
 
 **Finding that changed the design**: `player_injuries.game_date` is the PDF

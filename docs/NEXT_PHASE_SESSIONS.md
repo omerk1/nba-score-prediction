@@ -260,7 +260,7 @@ worth keeping in future sessions of this kind.
 Adjusts later steps: none — A4 is closed, rejected. The other 14 VIF-flagged-but-untested
 columns (style_fingerprint `offensive_rating`/`defensive_rating`, raw `elo_features`
 levels, `opponent_quality_features` `L20`, venue-scoped `win_pct_L10`/`fg_pct_L10`) are
-left flagged in `outputs/full_feature_vif_a4_diag.csv` for a future session's own
+left flagged in `outputs/feature_validation/diagnostics/full_feature_vif_a4_diag.csv` for a future session's own
 judgment call — none is queued. Track C (new orthogonal data) is next per the original
 ordering, pending a separate human decision; the live feature set stays exactly at
 `b2_elo_momentum`'s 148 columns.

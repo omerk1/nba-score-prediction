@@ -237,11 +237,12 @@ def _run_single_split(config, args) -> None:
     # per-feature importance artifacts don't survive once the worktree is cleaned
     # up -- only the top-20 above survived, print-only. Save the FULL table (every
     # feature, not just any one experimental module's) to a non-gitignored path
-    # (see the matching !outputs/full_feature_importance_*.csv exception in
+    # (see the matching !outputs/feature_importance/full_feature_importance_*.csv exception in
     # .gitignore) so the coordinator can see where H2H/Elo/rolling-stats/etc. rank
     # alongside any new experimental features across runs.
     full_importance_df = predictor.get_feature_importance(top_n=len(feature_cols))
-    full_importance_path = Path(f"outputs/full_feature_importance_{args.run_name}.csv")
+    full_importance_path = Path(f"outputs/feature_importance/full_feature_importance_{args.run_name}.csv")
+    full_importance_path.parent.mkdir(parents=True, exist_ok=True)
     full_importance_df.to_csv(full_importance_path, index=False)
     logger.info(
         f"Full feature importance ({len(full_importance_df)} features) saved -> {full_importance_path}"

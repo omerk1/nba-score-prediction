@@ -50,7 +50,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 _TEAM_ABBR = {t["id"]: t["abbreviation"] for t in nba_teams.get_teams()}
-OUT_CSV = Path("outputs/score_adjustment_test.csv")
+OUT_CSV = Path("outputs/feature_validation/score_adjustment/score_adjustment_test.csv")
 
 SYSTEM = (
     "You are adjusting a gradient-boosted NBA model's predicted point differential "

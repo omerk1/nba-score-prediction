@@ -3,7 +3,7 @@ Validation deliverable for the player on/off splits feature (see
 docs/on_off_splits_log.md).
 
 Produces:
-  1. outputs/on_off_splits_results.csv -- the most recent 50 real (Regular
+  1. outputs/feature_validation/on_off_splits/on_off_splits_results.csv -- the most recent 50 real (Regular
      Season) games with the new on/off features alongside actual margins.
   2. Sanity checks printed to stdout: NaN rate on games with sufficient
      history, and a flag on any per-player on_off_plus_minus beyond +/-20
@@ -32,7 +32,7 @@ from src.utils.config_loader import load_config
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-8s %(message)s")
 logger = logging.getLogger(__name__)
 
-RESULTS_PATH = Path("outputs/on_off_splits_results.csv")
+RESULTS_PATH = Path("outputs/feature_validation/on_off_splits/on_off_splits_results.csv")
 ON_OFF_COLS = [
     "home_team_missing_player_on_off_impact", "home_team_n_missing_total", "home_team_n_missing_resolved_on_off",
     "away_team_missing_player_on_off_impact", "away_team_n_missing_total", "away_team_n_missing_resolved_on_off",

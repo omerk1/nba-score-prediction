@@ -128,7 +128,7 @@ on_off_splits:
 - Checkpoint mode (default): fetches `overall`/`home`/`away` splits for every team
   at a weekly cadence within each requested season. Resumable — skips
   `(team_id, split_type, as_of_date)` keys already in the cache unless `--force`.
-  Every call logged to `outputs/on_off_backfill_log.csv` (timestamp, team, split,
+  Every call logged to `outputs/feature_validation/on_off_splits/on_off_backfill_log.csv` (timestamp, team, split,
   as-of-date, status, player count, elapsed time) — full run history preserved.
 - Lazy vs-opponent mode (`--vs-opponent --recent-games N`): only fetches the
   specific opponent pairing that actually occurred, for the N most recent real
@@ -162,7 +162,7 @@ not carried forward from either phase-1's or the coordinator's own quick estimat
 - A dedicated timed probe (24 weekly checkpoints, one team, real API calls, 0.7s
   throttle): **mean API latency 1.04s/call**, **effective 1.74s/call wall-clock**
   including throttle sleep.
-- The real backfill run's own log (`outputs/on_off_backfill_log.csv`, 883 calls,
+- The real backfill run's own log (`outputs/feature_validation/on_off_splits/on_off_backfill_log.csv`, 883 calls,
   710 `ok` + 173 legitimately-`empty` — e.g. a team that hadn't played yet by a
   season-opening checkpoint) measured **mean API latency 1.04s/call** (identical to
   the probe) and **~1.95s/call wall-clock** end-to-end (883 calls across ~28.7
@@ -224,7 +224,7 @@ is still pending a longer backfill run.
 
 ## 5. Validation Results
 
-### Sample output (`scripts/validate_on_off_splits.py` → `outputs/on_off_splits_results.csv`)
+### Sample output (`scripts/validate_on_off_splits.py` → `outputs/feature_validation/on_off_splits/on_off_splits_results.csv`)
 
 Last 50 real (Regular Season) games as of this run (2026-04-07 through
 2026-04-12 — the end of the configured test season), with the new on/off features
@@ -300,7 +300,7 @@ re-logging `elo_v2` itself as a duplicate row.
 loss either.** Every delta is within noise range for a ~1,225-game val/test set.
 None of the 7 new columns appear in the top-20 feature-importance list for the
 treatment run; checking the full importance table
-(`outputs/full_feature_importance_on_off_splits_treatment.csv`) directly, they rank
+(`outputs/feature_importance/full_feature_importance_on_off_splits_treatment.csv`) directly, they rank
 67th, 91st, 106th, 114th, 120th, 122nd, and 132nd (dead last) of 132 features. This
 is consistent with, and largely explained by, the coverage gap in §4: with only
 11.0% of games having a genuinely fresh on/off value (most of the rest either zero
@@ -439,7 +439,7 @@ important to resolve before this branch is considered ready to merge into `main`
 
 This section documents a later iteration round, run after the FINAL SUMMARY above,
 addressing recommended-next-step #1 (complete the backfill) from a dedicated
-`outputs/on_off_splits_iteration_scratch.csv` comparison (see that round's own
+`outputs/feature_validation/on_off_splits/on_off_splits_iteration_scratch.csv` comparison (see that round's own
 scratch log for the raw before/after rows; not folded into the shared
 `outputs/experiments.csv` since it's an intermediate step, not the final decision).
 
@@ -449,7 +449,7 @@ The prior pass left `2024-25` (the validation season) at 0/25 planned weekly
 checkpoints and `2023-24`/`2025-26` partially done. This round ran the checkpoint
 backfill to completion for all three of those seasons (25/25 weekly checkpoints
 each) plus a vs-opponent lazy backfill covering the val/test window. Result:
-`outputs/on_off_backfill_log.csv` grew to 11,822 rows (2339 + 2250 + 2333 checkpoint
+`outputs/feature_validation/on_off_splits/on_off_backfill_log.csv` grew to 11,822 rows (2339 + 2250 + 2333 checkpoint
 rows across the three seasons, plus 4,900 vs-opponent rows: 3,168 `ok` / 1,732
 legitimately-`empty`).
 
@@ -483,7 +483,7 @@ Directionally more encouraging than the partial-backfill result (val and test no
 agree on the sign of diff_mae, win_acc, and brier movement, whereas the partial-
 backfill run had val and test disagreeing on win_acc), but `total_mae` is still
 mixed (val worse, test better), and per
-`outputs/full_feature_importance_on_off_splits_full_backfill_treatment.csv` the
+`outputs/feature_importance/full_feature_importance_on_off_splits_full_backfill_treatment.csv` the
 7 new columns still rank in the bottom third: 78th, 89th, 101st, 111th, 119th,
 125th, and 128th of 132 features (vs. 67th-132nd at partial coverage) — a modest
 improvement in ranking, but not a demonstration of strong signal. **Still not a
@@ -541,7 +541,7 @@ correlated with the machine's network going down overnight; the run resumed on
 its own once connectivity returned, no data lost or corrupted). This closes the
 last real coverage gap: the checkpoint backfill (`overall`/`home`/`away`) now
 spans all 8 seasons the model's training/val/test window touches (2018-19
-through 2025-26, 25/25 weekly checkpoints each). `outputs/on_off_backfill_log.csv`
+through 2025-26, 25/25 weekly checkpoints each). `outputs/feature_validation/on_off_splits/on_off_backfill_log.csv`
 now has 24,423 rows total.
 
 ### 8.2 Updated single-split MAE comparison (full training-window coverage)
