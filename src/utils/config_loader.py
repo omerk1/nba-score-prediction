@@ -178,6 +178,10 @@ class InjuryFeaturesConfig(BaseModel):
     # the champion was trained on features built without it, so flipping this
     # needs a CV ablation first.
     importance_prior_stats_fallback: bool = False
+    # Read training-time injury_features from this sqlite instead of `db_path`
+    # (same table/schema), e.g. a copy rescored by scripts/rescore_injury_features.py.
+    # None = use db_path. Ignored when use_corrected_dates is true.
+    features_db_path: Optional[str] = None
     dated_db_path: str = "data/raw/injury_dates.sqlite"
 
 
