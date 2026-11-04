@@ -156,6 +156,31 @@ Disagreement analysis: on games where the model and market disagree, the market 
 
 ---
 
+## 2026-11-04 — Live strong bets, and recalibrating the spread/total cover probabilities
+
+**Question**: the daily slate's strong bets (edge ≥ 5%) went 29-28 live (57 bets, −10.3% ROI at real odds). Is that bad luck, does edge size rank bets at all, and does recalibrating the cover/over probabilities (never done before; the 2026-08-18 entries covered only moneyline `model_p_home`) leave any strong bets standing?
+
+**Method**: fold5 held-out per-game join regenerated with the current model (`market_benchmark.py`, 1,217 games with lines). Live edges rebuilt historically with the live job's own construction, `norm.cdf((pred − line)/σ)`, σ = 13.5 (spread) / 19.5 (total), which reproduces logged live probabilities to within 1.6 points, at flat 1.80 odds (break-even 55.6%). Recalibration: `scripts/prototype_edge_recalibration.py`, fit on games before 2026-02-01 and evaluated after, plus the reverse.
+
+**Finding — edge carries no information, and calibrated probabilities collapse to ~50%**:
+
+| Rebuilt strong bets | n | W-L | Hit | Model claimed | ROI |
+|---|---:|---:|---:|---:|---:|
+| All | 815 | 405-410 | 49.7% | 66.8% | −10.6% |
+| Spread | 436 | 207-229 | 47.5% | 67.2% | −14.5% |
+| Total | 379 | 198-181 | 52.2% | 66.4% | −6.0% |
+
+- Edge vs. win, Spearman: −0.01 over all 4,868 priced sides, +0.01 among strong bets, −0.04 live. Gap vs. outcome residual correlation: −0.02 (spread), +0.01 (total).
+- The model is informative but strictly inside the line: corr with actual margin 0.46 vs. market 0.53, total 0.26 vs. 0.37.
+- Concentrated failures: overs on lines ≤ 225 (136 bets, 44.9%, −19%), from the model's totals being compressed toward the league mean (sd 5.3 vs. 7.6 for lines). Spread strong bets are 96% underdogs. Only pocket near break-even: unders on 235+ lines (99 bets, 57.6%, +3.6%). One season, not trusted.
+- Out-of-sample recalibration: the coin-flip (market-price) reference has the best log loss and Brier in 3 of the 4 market × split cells. The exception is raw totals on the late half (log loss 0.6913 vs. 0.6931), which reverses on the early half (0.7317).
+- Spread: logistic slope on z is +0.10 / −0.38 across the two splits, so the gap is unstable around zero. Recalibrated strong bets drop from 203/233 to 0–2 (logistic) and 38/0 (isotonic).
+- Total: the slope flips sign (−0.54 / +0.78). Raw strong bets went 59.4% late but 47.3% early, so the split result doesn't replicate.
+
+**Implication**: the live 29-28 is not bad luck. Spread edges are an artefact of an overconfident probability construction applied to a prediction with no information beyond the line. Recalibration doesn't rescue them; it correctly reduces them to no bet. Totals are unresolved (sign-unstable on one season), not an edge. Serving action is a separate decision, not taken here: drop or relabel spread strong bets on the slate, and consider showing market-shrunk rather than raw probabilities. A seventh edge mechanism tested (recalibrated cover probabilities) is negative, consistent with the six above.
+
+---
+
 ## Pending
 
 - None currently open. The venue-thinness/pick'em-competitiveness item (flagged pending as of the 2026-08-17 entry) is now resolved — see the 2026-08-26 recheck above: it did not replicate on a same-population comparison against the current model. The model's-own-confidence item (2026-09-15) is also resolved, negatively, on first pass.
