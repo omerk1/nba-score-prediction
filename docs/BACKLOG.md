@@ -159,7 +159,7 @@ treatment under `--protocol cv`) plus a champion re-check before
 
 EWM margin/points (halflife 7 games) + season-to-date margin, aimed at stale
 early-season L20 windows. Worse on folds 4-5 (+0.0035/+0.0031), no early-season
-gain. Code not merged (local branch `feature/recency-weighted-form`); write-up in
+gain. Code on unmerged branch `feature/recency-weighted-form`; write-up in
 `docs/EXPERIMENTS.md` (`recency_form`).
 
 ---
