@@ -134,5 +134,9 @@ def test_weight_zero_prices_at_the_line_and_kills_the_edge(_no_features):
     assert cal["home_cover_probability"] == pytest.approx(0.5, abs=0.03)
     assert cal["home_spread_edge"] < 0 and cal["over_edge"] < 0
     assert cal["spread_gap_weight"] == 0.0 and raw["spread_gap_weight"] == 1.0
+    # The model's own unshrunk edges are kept for tracking.
+    assert cal["home_spread_edge_raw"] == pytest.approx(raw["home_spread_edge"])
+    assert cal["over_edge_raw"] == pytest.approx(raw["over_edge"])
+    assert cal["home_cover_probability_raw"] == pytest.approx(raw["home_cover_probability"])
     # The point prediction itself is untouched; only its pricing changes.
     assert cal["predicted_diff"] == raw["predicted_diff"] == 12.0

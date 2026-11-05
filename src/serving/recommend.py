@@ -159,20 +159,28 @@ def recommend_game(
             resources.diff_residuals,
             resources.diff_bandwidth,
         )
+        # The unshrunk price, kept so the model's own picks stay gradable
+        # whatever the slate recommends.
+        raw_home_cover = cover_probability(
+            diff_pred, -home_spread, resources.diff_residuals, resources.diff_bandwidth
+        )
         result["home_spread"] = home_spread
         result["spread_gap_weight"] = weight
         result["home_cover_probability"] = home_cover_prob
         result["away_cover_probability"] = 1 - home_cover_prob
+        result["home_cover_probability_raw"] = raw_home_cover
         if home_spread_odds is not None:
             result["home_spread_odds"] = home_spread_odds
             result["home_spread_market_probability"] = decimal_odds_to_probability(home_spread_odds)
             result["home_spread_edge"] = home_cover_prob - result["home_spread_market_probability"]
+            result["home_spread_edge_raw"] = raw_home_cover - result["home_spread_market_probability"]
         if away_spread_odds is not None:
             result["away_spread_odds"] = away_spread_odds
             result["away_spread_market_probability"] = decimal_odds_to_probability(away_spread_odds)
             result["away_spread_edge"] = (
                 result["away_cover_probability"] - result["away_spread_market_probability"]
             )
+            result["away_spread_edge_raw"] = (1 - raw_home_cover) - result["away_spread_market_probability"]
 
     if total_line is not None:
         weight = resources.gap_weights.get("total", 1.0)
@@ -182,18 +190,22 @@ def recommend_game(
             resources.total_residuals,
             resources.total_bandwidth,
         )
+        raw_over = cover_probability(total_pred, total_line, resources.total_residuals, resources.total_bandwidth)
         result["total_line"] = total_line
         result["total_gap_weight"] = weight
         result["over_probability"] = over_prob
         result["under_probability"] = 1 - over_prob
+        result["over_probability_raw"] = raw_over
         if over_odds is not None:
             result["over_odds"] = over_odds
             result["over_market_probability"] = decimal_odds_to_probability(over_odds)
             result["over_edge"] = over_prob - result["over_market_probability"]
+            result["over_edge_raw"] = raw_over - result["over_market_probability"]
         if under_odds is not None:
             result["under_odds"] = under_odds
             result["under_market_probability"] = decimal_odds_to_probability(under_odds)
             result["under_edge"] = result["under_probability"] - result["under_market_probability"]
+            result["under_edge_raw"] = (1 - raw_over) - result["under_market_probability"]
 
     margins, probs = margin_pmf(
         diff_pred, resources.diff_residuals, resources.diff_bandwidth, lo=-heatmap_range, hi=heatmap_range

@@ -9,6 +9,7 @@
 - The point prediction, margin heatmap and moneyline probability are unchanged; only spread/total cover probabilities and their edges move. The logged `predicted_diff`/`predicted_total` stay raw, so the weight is always learned from unshrunk predictions.
 - A retrained model starts at weight 0 (filtered on `model_trained_at`). A calibration failure prices at the line, never at the raw prediction.
 - Morning report: new "Is the model beating the line?" section with the slope ± se, games counted, and the weight the slate prices at.
+- Tracking stays on the model, not the slate: each rec also logs the unshrunk `*_probability_raw` / `*_edge_raw`, and the morning report's record covers the model's own picks (raw edge ≥ 5%), continuous with every row logged before this change (32-39, −14.5u over 98 games at launch). A second row shows what the calibrated slate recommended.
 
 **State at launch (2026-11-05)**: weight 0 for both markets.
 
