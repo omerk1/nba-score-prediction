@@ -98,7 +98,10 @@ def save_predictions(
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with open(log_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS)
+        # LF, not the csv module's default CRLF: the file is git-tracked and
+        # .gitattributes stores text as LF, so CRLF rows would leave it
+        # permanently "modified" in git status even with no new rows.
+        writer = csv.DictWriter(f, fieldnames=COLUMNS, lineterminator="\n")
         if write_header:
             writer.writeheader()
         writer.writerows(rows)
