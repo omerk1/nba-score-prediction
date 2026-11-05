@@ -155,6 +155,16 @@ treatment under `--protocol cv`) plus a champion re-check before
 
 ---
 
+## Roster continuity (rejected 2026-11-05)
+
+Share of last season's top-8 rotation still playing, from `player_importance`
+snapshots. Strong team-season signal in a model-free pre-check (t=+4.7 beyond
+early-season form), but worse on folds 4-5 in both variants (all season, and
+early-season diff only). Code not merged (branch `feature/roster-continuity`);
+write-up in `docs/EXPERIMENTS.md` (`roster_continuity`).
+
+---
+
 ## Recency-weighted team form (rejected 2026-11-05)
 
 EWM margin/points (halflife 7 games) + season-to-date margin, aimed at stale

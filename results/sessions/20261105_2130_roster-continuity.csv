@@ -1,0 +1,4 @@
+timestamp,run_name,val_score_mean,val_score_per_fold,test_score_mean,protocol,session_id,notes
+2026-11-05 19:50 UTC,roster_continuity_off_last2,1.3449,"1.3372,1.3526",1.3399,cv,20261105_2130_roster-continuity,roster_continuity.enabled=false; folds=fold4+fold5
+2026-11-05 19:50 UTC,roster_continuity_all6_last2,1.3500,"1.3432,1.3568",1.3426,cv,20261105_2130_roster-continuity,roster_continuity.enabled=true; top_n=8; all 6 columns all season; folds=fold4+fold5
+2026-11-05 20:30 UTC,roster_continuity_early20_diff_last2,1.3485,"1.3383,1.3586",1.3406,cv,20261105_2130_roster-continuity,roster_continuity.enabled=true; top_n=8; max_season_games=20; diff_only=true; folds=fold4+fold5
