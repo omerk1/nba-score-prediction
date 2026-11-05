@@ -171,6 +171,17 @@ class InjuryFeaturesConfig(BaseModel):
     # false: current champion behavior is exactly unchanged until this clears
     # the CV ablation.
     use_corrected_dates: bool = False
+    # Injured players with no current-season player_importance row (out since
+    # before the season, or traded in and not yet played) currently score 0
+    # importance, so a roster missing its stars shows zero injury deficit. When
+    # true, they are scored from their latest earlier snapshot. Default false:
+    # the champion was trained on features built without it, so flipping this
+    # needs a CV ablation first.
+    importance_prior_stats_fallback: bool = False
+    # Read training-time injury_features from this sqlite instead of `db_path`
+    # (same table/schema), e.g. a copy rescored by scripts/rescore_injury_features.py.
+    # None = use db_path. Ignored when use_corrected_dates is true.
+    features_db_path: Optional[str] = None
     dated_db_path: str = "data/raw/injury_dates.sqlite"
 
 

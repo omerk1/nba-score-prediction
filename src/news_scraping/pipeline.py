@@ -118,11 +118,23 @@ def _get_player_stats(db_path: str, team_id: int, game_date: str, season_start: 
     return {r["player_name"]: {"ppg": r["pts_per_game"], "usg": r["usage_rate"]} for r in rows}
 
 
-def _get_importance_map(db_path: str, team_id: int, game_date: str, season_start: str) -> dict[str, float]:
+def _get_importance_map(
+    db_path: str,
+    team_id: int,
+    game_date: str,
+    season_start: str,
+    fallback_names: list[str] | None = None,
+) -> dict[str, float]:
     """Compute importance scores on the fly from raw stats for each player on the team.
 
     Reads the latest snapshot within the current season before game_date, then applies
     the weighted formula using current config weights — so changing weights requires no re-fetch.
+
+    `fallback_names`: players with no current-season row for this team (injured since
+    before the season, or newly traded in and not yet played). Each is scored from their
+    most recent earlier snapshot under any team, normalised by this team's current roster
+    totals. Only used when `injury_features.importance_prior_stats_fallback` is true;
+    default behaviour (those players score 0) is unchanged.
     """
     cfg = load_config()
     w = cfg.injury_features.importance_weights
@@ -144,8 +156,8 @@ def _get_importance_map(db_path: str, team_id: int, game_date: str, season_start
     total_pts: float = sum(r["pts_per_game"] for r in rows) or 1.0
     max_usg: float = max(r["usage_rate"] for r in rows) or 1.0
 
-    return {
-        r["player_name"]: min(
+    def _score(r) -> float:
+        return min(
             max(
                 (r["minutes_per_game"] / total_minutes) * w.minutes_share
                 + (r["usage_rate"] / max_usg) * w.usage_rate
@@ -154,8 +166,24 @@ def _get_importance_map(db_path: str, team_id: int, game_date: str, season_start
             ),
             1.0,
         )
-        for r in rows
-    }
+
+    result = {r["player_name"]: _score(r) for r in rows}
+
+    if fallback_names and cfg.injury_features.importance_prior_stats_fallback:
+        for name in fallback_names:
+            if name in result:
+                continue
+            with get_conn(db_path) as conn:
+                prior = conn.execute(
+                    """SELECT player_name, minutes_per_game, pts_per_game, usage_rate
+                       FROM player_importance
+                       WHERE player_name = ? AND as_of_date < ?
+                       ORDER BY as_of_date DESC LIMIT 1""",
+                    (name, game_date),
+                ).fetchone()
+            if prior is not None:
+                result[name] = _score(prior)
+    return result
 
 
 def _store_player_injuries(
@@ -303,7 +331,10 @@ def _process_team(
         return
 
     season_start = _season_start(cfg.data_paths.raw_db, game_date)
-    importance_map = _get_importance_map(db_path, team_id, game_date, season_start)
+    importance_map = _get_importance_map(
+        db_path, team_id, game_date, season_start,
+        fallback_names=[p["player_name"] for p in players],
+    )
 
     player_stats = _get_player_stats(db_path, team_id, game_date, season_start) if scorer == "llm" else {}
     team_avg = (

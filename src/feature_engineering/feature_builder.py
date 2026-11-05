@@ -773,7 +773,11 @@ class FeatureBuilder:
         # block (the join, native_nan handling, has_injury_data) is unchanged
         # either way -- only the source table and column differ.
         use_dated = getattr(cfg.injury_features, "use_corrected_dates", False)
-        db_path = cfg.injury_features.dated_db_path if use_dated else cfg.injury_features.db_path
+        db_path = (
+            cfg.injury_features.dated_db_path
+            if use_dated
+            else (cfg.injury_features.features_db_path or cfg.injury_features.db_path)
+        )
         table = "injury_features_dated" if use_dated else "injury_features"
         scorer = "formula_dated" if use_dated else cfg.injury_features.scorer
 
