@@ -66,6 +66,23 @@ def test_reruns_append_never_replace(tmp_path):
     assert (df["game_date"] == "2026-10-14").all()
 
 
+def test_rows_use_lf_line_endings(tmp_path):
+    log = tmp_path / "predictions_log.csv"
+    save_predictions([_rec(1, 2), _rec(3, 4)], game_date=DAY, log_path=log)
+    raw = log.read_bytes()
+    assert b"\r" not in raw and raw.count(b"\n") == 3  # header + 2 rows
+
+
+def test_appends_to_a_log_written_with_crlf(tmp_path):
+    # Logs written before the LF switch end in CRLF; appending must still work.
+    log = tmp_path / "predictions_log.csv"
+    save_predictions([_rec(1, 2, diff=3.5)], game_date=DAY, log_path=log)
+    log.write_bytes(log.read_bytes().replace(b"\n", b"\r\n"))
+    save_predictions([_rec(1, 2, diff=-1.0)], game_date=DAY, log_path=log)
+    assert pd.read_csv(log)["predicted_diff"].tolist() == [3.5, -1.0]
+    assert log.read_bytes().endswith(b"\n") and not log.read_bytes().endswith(b"\r\n")
+
+
 def test_mismatched_header_refuses_to_append(tmp_path):
     log = tmp_path / "predictions_log.csv"
     log.write_text("game_date,something_else\n2026-10-13,1\n")
