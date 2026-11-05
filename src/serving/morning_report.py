@@ -39,14 +39,14 @@ def _pct(x: float) -> str:
     return "—" if pd.isna(x) else f"{x:+.0%}"
 
 
-def _line_rows(weights: dict[str, GapWeight], min_games: int) -> str:
+def _line_rows(weights: dict[str, GapWeight], min_games: int, calibration_on: bool) -> str:
     rows = []
     for market, w in weights.items():
         if pd.isna(w.slope):
             came_true = f"needs {min_games} games"
         else:
             came_true = f"{_pct(w.slope)} ± {w.se:.0%}"
-        priced = "none (priced at the line)" if w.weight == 0 else f"{w.weight:.0%}"
+        priced = f"{w.weight:.0%}" if calibration_on else f"off ({w.weight:.0%})"
         rows.append(
             f'<tr><td>{market.title()}</td><td class="n">{w.n}</td>'
             f'<td class="n">{came_true}</td><td class="n">{priced}</td></tr>'
@@ -55,7 +55,11 @@ def _line_rows(weights: dict[str, GapWeight], min_games: int) -> str:
 
 
 def build_report(
-    log: pd.DataFrame, results: pd.DataFrame, min_games: int = 50, z: float = 1.0
+    log: pd.DataFrame,
+    results: pd.DataFrame,
+    min_games: int = 50,
+    z: float = 1.0,
+    calibration_on: bool = False,
 ) -> tuple[str, str] | None:
     """(caption, html page), or None when nothing is graded yet."""
     bets = grade(log, results)
@@ -65,7 +69,7 @@ def build_report(
     games = bets.drop_duplicates(["game_date", "home_team_id", "away_team_id"])
     day = games["game_date"].max()
     recommended = bets[bets["raw_edge"] >= STRONG_EDGE]
-    on_slate = bets[bets["edge"] >= STRONG_EDGE]  # what the calibrated slate called strong
+    on_slate = bets[bets["edge"] >= STRONG_EDGE]  # differs from the above only with calibration on
 
     def team(i):
         return html.escape(str(names.get(i, i)))
@@ -110,17 +114,23 @@ def build_report(
         f'<tr><td>Typical miss on the winning margin</td><td class="n">{mae_diff:.1f} pts</td></tr>'
         f'<tr><td>Typical miss on total points</td><td class="n">{mae_total:.1f} pts</td></tr>'
         f'<tr><td>Model picks (raw edge ≥ 5%)</td><td class="n">{all_rec} · {all_ret}</td></tr>'
-        f'<tr><td>Recommended on the slate (calibrated edge ≥ 5%)</td><td class="n">{slate_rec} · {slate_ret}</td></tr></table>'
+        + (
+            f'<tr><td>Recommended on the slate (calibrated edge ≥ 5%)</td><td class="n">{slate_rec} · {slate_ret}</td></tr>'
+            if calibration_on
+            else ""
+        )
+        + "</table>"
         '<p class="mute">A record is wins-losses(-pushes). Return = profit from staking 1 unit (u) on every bet, '
         "as % per bet and total units.</p></div>"
         "<h2>Is the model beating the line?</h2>"
         '<div class="card"><table><tr><th>Market</th><th class="n">Games</th>'
-        '<th class="n">Disagreement that came true</th><th class="n">Priced on the slate</th></tr>'
-        f"{_line_rows(weights, min_games)}</table>"
+        '<th class="n">Disagreement that came true</th><th class="n">Calibrated weight</th></tr>'
+        f"{_line_rows(weights, min_games, calibration_on)}</table>"
         '<p class="mute">When the model disagrees with the betting line, how much of that gap showed up in the '
         "final score: 100% means the model was right, 0% means the line already knew everything the model did. "
-        "The slate only prices the part the record supports (the low end of this estimate), so edges appear "
-        "once this is clearly above 0. Counts only games from the current model.</p></div>"
+        "If this stays near 0, the model's edges are mostly noise; clearly above 0 means they're real. "
+        "Calibrated weight = the low end of this estimate, what edge calibration would price at "
+        "(off unless enabled in config). Counts only games from the current model.</p></div>"
         "</main></body></html>"
     )
     caption = (
@@ -143,7 +153,7 @@ def run(out_dir="outputs/slates") -> tuple[str, str] | str:
     from src.utils.config_loader import load_config
 
     cfg = load_config().notifications.edge_calibration
-    built = build_report(pd.read_csv(LOG_PATH), load_results(), cfg.min_games, cfg.z)
+    built = build_report(pd.read_csv(LOG_PATH), load_results(), cfg.min_games, cfg.z, cfg.enabled)
     if built is None:
         return "Morning report: no logged predictions have final scores yet."
     caption, page = built

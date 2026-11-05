@@ -233,12 +233,25 @@ class TestRecommendAll:
         assert len(errors) == 1 and "1 vs 2" in errors[0]
         assert resources.gap_weights == {"spread": 0.0, "total": 0.3}
 
+    @staticmethod
+    def _calibration(monkeypatch, enabled):
+        import src.utils.config_loader as config_loader
+
+        config = config_loader.load_config()
+        config.notifications.edge_calibration.enabled = enabled
+        monkeypatch.setattr(config_loader, "load_config", lambda: config)
+
+    def test_gap_weights_off_prices_the_raw_prediction(self, monkeypatch):
+        self._calibration(monkeypatch, enabled=False)
+        assert daily_job.gap_weights() == {}
+
     def test_gap_weights_fall_back_to_the_line_on_failure(self, monkeypatch):
         import src.serving.grade_predictions as grade_predictions
 
         def boom():
             raise RuntimeError("db unavailable")
 
+        self._calibration(monkeypatch, enabled=True)
         monkeypatch.setattr(grade_predictions, "load_results", boom)
         assert daily_job.gap_weights() == {"spread": 0.0, "total": 0.0}
 
