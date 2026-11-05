@@ -83,8 +83,16 @@ def grade(log: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
                     "model_prob": rec[p_key],
                     "odds": odds,
                     "edge": rec[edge_key],
+                    # The model's own unshrunk edge. Rows logged before edge
+                    # calibration priced the raw prediction, so edge is raw there.
+                    "raw_edge": rec.get(f"{edge_key}_raw", rec[edge_key]),
                     "outcome": outcome,
                     "profit": profit,
+                    # What the result is measured against: the home margin the
+                    # spread implies, the total line, or 0 (moneyline).
+                    "market_line": (
+                        -rec["home_spread"] if market == "spread" else rec["total_line"] if market == "total" else 0.0
+                    ),
                     "pred_diff": rec["predicted_diff"],
                     "pred_total": rec["predicted_total"],
                     "actual_diff": final["pts_home"] - final["pts_away"],

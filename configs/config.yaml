@@ -477,4 +477,14 @@ notifications:
     # (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID) live in .env, never here.
     enabled: true
     timeout_seconds: 10
+  edge_calibration:
+    # Price spread/total sides from line + weight * (prediction - line), the
+    # weight learned from this model's graded games (lower bound of the
+    # gap-vs-result slope; 0 until min_games are graded).
+    # src/serving/edge_calibration.py, evidence in docs/MARKET_EDGE.md.
+    # Off: the slate shows the model's own (raw) edges; the morning report
+    # still shows the learned weight as information.
+    enabled: false
+    min_games: 50
+    z: 1.0
   recommend_min_edge: 0.0    # model edge over break-even that must be exceeded for a "recommended bet" (0 = any positive edge; >=5% is flagged strong)

@@ -42,8 +42,24 @@ def test_report_counts_recommended_win_and_tiers():
 def test_marginal_edge_is_not_tracked():
     rec = {**REC, "under_edge": 0.04}
     caption, page = M.build_report(_log(rec), _results(100, 95))
-    assert "strong bets: —" in caption and "No strong bets" in page
+    assert "model picks: —" in caption and "No model picks" in page
 
 
 def test_report_with_nothing_graded():
     assert M.build_report(_log(REC), _results(100, 95).iloc[0:0]) is None
+
+
+def test_report_shows_whether_the_model_beats_the_line():
+    caption, page = M.build_report(_log(REC), _results(100, 95))
+    assert "Is the model beating the line?" in page
+    assert "needs 50 games" in page and "off (0%)" in page
+    assert "Recommended on the slate" not in page  # same as the model picks when calibration is off
+    assert "Disagreement with the line that came true: spread —, total —" in caption
+
+
+def test_model_picks_are_tracked_on_raw_edge_even_when_the_slate_priced_them_away():
+    # Calibrated edge below the bar (nothing on the slate), raw edge above it.
+    rec = {**REC, "under_edge": -0.05, "under_edge_raw": 0.08}
+    caption, page = M.build_report(_log(rec), _results(100, 95), calibration_on=True)
+    assert "model picks 1-0" in caption
+    assert "Recommended on the slate (calibrated edge ≥ 5%)</td><td class=\"n\">— · no bets" in page
