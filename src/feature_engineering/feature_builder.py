@@ -760,6 +760,21 @@ class FeatureBuilder:
             if col == "GAME_ID":
                 continue
             new_cols[col] = momentum_merged[col].values
+
+        # Computed from all_games (history up to context_end_date), like the
+        # ratings, so rolling windows at a fold boundary see prior games.
+        rcfg = cfg.elo_residual_form
+        if rcfg and rcfg.enabled:
+            from src.feature_engineering.elo import compute_elo_residual_form
+
+            resid_df = compute_elo_residual_form(
+                all_games, elo_df, elo_cfg.home_advantage, rcfg.elo_per_point, rcfg.windows
+            )
+            resid_merged = df[["GAME_ID"]].merge(resid_df, on="GAME_ID", how="left")
+            for col in resid_df.columns:
+                if col == "GAME_ID" or (rcfg.diff_only and not col.startswith("elo_resid_diff_")):
+                    continue
+                new_cols[col] = resid_merged[col].values
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_injury_features(self, df: pd.DataFrame) -> pd.DataFrame:

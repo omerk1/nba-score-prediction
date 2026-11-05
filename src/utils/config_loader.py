@@ -318,6 +318,18 @@ class AvailabilityAgentConfig(BaseModel):
     parallel_workers: int = 10
 
 
+class EloResidualFormConfig(BaseModel):
+    """Per-team mean of (actual margin - Elo-expected margin) over the last
+    `windows` games (`compute_elo_residual_form`): how far a team has been
+    running ahead of or behind its Elo rating. Requires elo_features.
+    Ships disabled pending the CV ablation."""
+
+    enabled: bool = False
+    windows: list[int] = [10]
+    elo_per_point: float = 28.0  # Elo points per point of expected margin (538 convention)
+    diff_only: bool = False  # keep only elo_resid_diff_L{w}, drop the per-team columns
+
+
 class PBPConfig(BaseModel):
     """Play-by-play possession table (src/pbp/). Raw PlayByPlayV3 events and
     the derived per-possession rows live in their own additive sqlite file.
@@ -381,6 +393,7 @@ class Config(BaseModel):
     availability_agent: Optional[AvailabilityAgentConfig] = None
     prediction_intervals: Optional[PredictionIntervalsConfig] = None
     pbp: Optional[PBPConfig] = None
+    elo_residual_form: Optional[EloResidualFormConfig] = None
     cv: Optional[CVConfig] = None
     notifications: Optional[NotificationsConfig] = None
 

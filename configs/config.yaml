@@ -457,6 +457,15 @@ prediction_intervals:
   # Miscoverage rate -> nominal (1-alpha) coverage. 0.1 = 90% intervals.
   alpha: 0.1
 
+elo_residual_form:
+  # Per-team mean of (actual margin - Elo-expected margin) over the last N
+  # games: how far a team has been running ahead of or behind its Elo rating.
+  # Targets the model's held-out errors persisting by team (it keeps
+  # under-rating over-performers). Requires elo_features.
+  enabled: false
+  windows: [10]
+  elo_per_point: 28.0   # Elo points per point of expected margin (538 convention)
+
 pbp:
   # Play-by-play possession table (src/pbp/, scripts/backfill_pbp.py). Raw
   # PlayByPlayV3 events plus one row per possession (team with the ball,

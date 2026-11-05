@@ -172,3 +172,67 @@ def compute_elo_momentum(
         )
 
     return out
+
+
+def compute_elo_residual_form(
+    games_df: pd.DataFrame,
+    elo_ratings: pd.DataFrame,
+    home_advantage: float,
+    elo_per_point: float,
+    windows: list[int],
+) -> pd.DataFrame:
+    """
+    Per-team "beating expectations" form: the mean, over a team's last `w`
+    games, of (actual margin - margin Elo expected before the game).
+
+    Held-out errors of the trained model persist by team: a team the model
+    under-rated over its last 10 games tends to be under-rated in its next
+    one, and the betting line partly misses this too. Elo updates slowly
+    (small k, margin-dampened), so a team running ahead of its rating keeps
+    beating its Elo expectation; this exposes that gap directly instead of
+    leaving it to the raw-margin windows, which mix it with opponent quality.
+
+    Elo-expected home margin = (home_elo + home_advantage - away_elo) /
+    elo_per_point (538's convention: ~28 Elo points per point of margin).
+    Residuals are venue-blind (a team's own games, home and away, in one
+    chronological sequence).
+
+    Leakage: a game's residual uses that game's final score, so it is
+    shift(1)-ed within the team's sequence before the rolling mean; the
+    pre-game Elo ratings themselves are already point-in-time. NaN until a
+    team has `w` prior games.
+
+    Returns one row per GAME_ID: home_team_elo_resid_L{w},
+    away_team_elo_resid_L{w}, elo_resid_diff_L{w} (home - away).
+    """
+    merged = games_df[["GAME_ID", "GAME_DATE", "HOME_TEAM_ID", "AWAY_TEAM_ID", "POINT_DIFF"]].merge(
+        elo_ratings[["GAME_ID", "home_team_elo", "away_team_elo"]], on="GAME_ID"
+    )
+    expected_home = (merged["home_team_elo"] + home_advantage - merged["away_team_elo"]) / elo_per_point
+    home_resid = (merged["POINT_DIFF"] - expected_home).to_numpy()
+
+    sides = [
+        pd.DataFrame(
+            {"GAME_DATE": merged["GAME_DATE"].values, "team_id": merged[team_col].values, "resid": sign * home_resid}
+        )
+        for team_col, sign in (("HOME_TEAM_ID", 1), ("AWAY_TEAM_ID", -1))
+    ]
+    long_df = pd.concat(sides).sort_values(["team_id", "GAME_DATE"], kind="stable").reset_index(drop=True)
+
+    cols = []
+    for w in windows:
+        col = f"elo_resid_L{w}"
+        long_df[col] = long_df.groupby("team_id")["resid"].transform(
+            lambda x, w=w: x.shift(1).rolling(w, min_periods=w).mean()
+        )
+        cols.append(col)
+
+    out = merged[["GAME_ID"]].copy()
+    for team_col, prefix in (("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")):
+        query = merged[["GAME_DATE", team_col]].rename(columns={team_col: "team_id"})
+        m = query.merge(long_df[["GAME_DATE", "team_id"] + cols], on=["GAME_DATE", "team_id"], how="left")
+        for col in cols:
+            out[f"{prefix}_{col}"] = m[col].values
+    for w in windows:
+        out[f"elo_resid_diff_L{w}"] = out[f"home_team_elo_resid_L{w}"] - out[f"away_team_elo_resid_L{w}"]
+    return out
