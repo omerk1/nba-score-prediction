@@ -13,7 +13,7 @@ every CV fold either way). Recomputed fresh from data/features/val_features.csv
 future model refresh can't silently go stale against cached residuals.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +26,7 @@ from src.evaluation.predictive_distribution import (
     win_probability,
 )
 from src.models.score_predictor import ScorePredictor
+from src.serving.edge_calibration import shrink_toward_line
 from src.serving.live_features import build_live_game_features
 from src.utils.config_loader import load_config
 
@@ -37,6 +38,10 @@ class PredictionResources:
     diff_bandwidth: float
     total_residuals: np.ndarray
     total_bandwidth: float
+    # Per-market share of the model-vs-line gap to price ("spread"/"total",
+    # src/serving/edge_calibration.py). A missing market prices the raw
+    # prediction (weight 1).
+    gap_weights: dict[str, float] = field(default_factory=dict)
 
 
 def load_resources(config=None) -> PredictionResources:
@@ -147,10 +152,15 @@ def recommend_game(
         result["away_moneyline_edge"] = away_win_prob - result["away_moneyline_market_probability"]
 
     if home_spread is not None:
+        weight = resources.gap_weights.get("spread", 1.0)
         home_cover_prob = cover_probability(
-            diff_pred, -home_spread, resources.diff_residuals, resources.diff_bandwidth
+            shrink_toward_line(diff_pred, -home_spread, weight),
+            -home_spread,
+            resources.diff_residuals,
+            resources.diff_bandwidth,
         )
         result["home_spread"] = home_spread
+        result["spread_gap_weight"] = weight
         result["home_cover_probability"] = home_cover_prob
         result["away_cover_probability"] = 1 - home_cover_prob
         if home_spread_odds is not None:
@@ -165,10 +175,15 @@ def recommend_game(
             )
 
     if total_line is not None:
+        weight = resources.gap_weights.get("total", 1.0)
         over_prob = cover_probability(
-            total_pred, total_line, resources.total_residuals, resources.total_bandwidth
+            shrink_toward_line(total_pred, total_line, weight),
+            total_line,
+            resources.total_residuals,
+            resources.total_bandwidth,
         )
         result["total_line"] = total_line
+        result["total_gap_weight"] = weight
         result["over_probability"] = over_prob
         result["under_probability"] = 1 - over_prob
         if over_odds is not None:

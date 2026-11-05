@@ -125,7 +125,10 @@ def render_slate_html(
     if marginal:
         picks += f"<h2>Marginal · edge 0–{STRONG_EDGE:.0%}</h2>" + "".join(_bet_card(b, injuries) for b in marginal)
     if not bets:
-        picks = '<div class="card mute">No side has a positive edge today.</div>'
+        picks = (
+            '<div class="card mute">No side has a positive edge today. Edges only count the part of the '
+            "model's disagreement with the line that its graded record supports (see the morning report).</div>"
+        )
     games = "".join(_game_card(r, team_names, min_edge, injuries) for r in recs)
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'

@@ -383,7 +383,7 @@ def format_recommended_summary(recs: list[dict], run_label: str, min_edge: float
     if len(bets) > top:
         lines.append(f"…and {len(bets) - top} more in the page")
     if not bets:
-        lines.append("No side has a positive edge today.")
+        lines.append("No side has a positive edge today (edges need the model's record to beat the line).")
     return "\n".join(lines)[:1000]
 
 

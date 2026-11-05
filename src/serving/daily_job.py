@@ -231,12 +231,39 @@ def _missing_note(picks: list[dict], missing: list[str]) -> str:
     return f"{len(missing)} of {len(picks) + len(missing)} scheduled game(s) not found on Winner: {', '.join(missing)}"
 
 
+def gap_weights() -> dict[str, float]:
+    """Per-market pricing weights learned from the loaded model's graded
+    games (src/serving/edge_calibration.py); empty (raw prediction) when the
+    feature is off. A failure prices at weight 0 (the line): no edges is the
+    safe fallback, overstated ones aren't."""
+    import pandas as pd
+
+    from src.serving.edge_calibration import MARKETS, fit_gap_weights
+    from src.serving.grade_predictions import LOG_PATH, load_results
+    from src.serving.prediction_log import _model_trained_at
+    from src.utils.config_loader import load_config
+
+    cfg = load_config().notifications.edge_calibration
+    if not cfg.enabled:
+        return {}
+    try:
+        log = pd.read_csv(LOG_PATH) if LOG_PATH.exists() else pd.DataFrame()
+        fitted = fit_gap_weights(log, load_results(), _model_trained_at(), cfg.min_games, cfg.z)
+    except Exception as e:
+        logger.error(f"edge calibration failed, pricing at the line: {e}")
+        return {m: 0.0 for m in MARKETS}
+    for m, w in fitted.items():
+        logger.info(f"edge calibration {m}: weight {w.weight:.2f} (slope {w.slope:.2f} ± {w.se:.2f}, n={w.n})")
+    return {m: w.weight for m, w in fitted.items()}
+
+
 def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:
     """Per-pick isolation: early-season games without enough history (or
     any one bad extraction) must not take down the rest of the slate."""
     from src.serving.recommend import load_resources, recommend_pick
 
     resources = load_resources()
+    resources.gap_weights = gap_weights()
     recs, errors = [], []
     for pick in picks:
         try:

@@ -343,8 +343,19 @@ class TelegramNotifyConfig(BaseModel):
     timeout_seconds: int = 10
 
 
+class EdgeCalibrationConfig(BaseModel):
+    """Prices spread/total sides from line + weight * (prediction - line),
+    with the weight learned from graded games of the loaded model
+    (src/serving/edge_calibration.py). Disabled = price the raw prediction."""
+
+    enabled: bool = False
+    min_games: int = 50  # graded games needed before any weight above 0
+    z: float = 1.0  # standard errors below the slope estimate to price at
+
+
 class NotificationsConfig(BaseModel):
     telegram: Optional[TelegramNotifyConfig] = None
+    edge_calibration: EdgeCalibrationConfig = EdgeCalibrationConfig()
     # A side is a "recommended bet" when the model's edge over the price's
     # break-even probability is above this (src/serving/recommended_bets.py).
     recommend_min_edge: float = 0.0

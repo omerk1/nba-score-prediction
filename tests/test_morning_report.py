@@ -47,3 +47,10 @@ def test_marginal_edge_is_not_tracked():
 
 def test_report_with_nothing_graded():
     assert M.build_report(_log(REC), _results(100, 95).iloc[0:0]) is None
+
+
+def test_report_shows_whether_the_model_beats_the_line():
+    caption, page = M.build_report(_log(REC), _results(100, 95))
+    assert "Is the model beating the line?" in page
+    assert "needs 50 games" in page and "none (priced at the line)" in page
+    assert "Disagreement with the line that came true: spread —, total —" in caption

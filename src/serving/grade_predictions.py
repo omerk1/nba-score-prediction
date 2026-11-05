@@ -85,6 +85,11 @@ def grade(log: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
                     "edge": rec[edge_key],
                     "outcome": outcome,
                     "profit": profit,
+                    # What the result is measured against: the home margin the
+                    # spread implies, the total line, or 0 (moneyline).
+                    "market_line": (
+                        -rec["home_spread"] if market == "spread" else rec["total_line"] if market == "total" else 0.0
+                    ),
                     "pred_diff": rec["predicted_diff"],
                     "pred_total": rec["predicted_total"],
                     "actual_diff": final["pts_home"] - final["pts_away"],
