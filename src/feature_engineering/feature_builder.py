@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from src.matchups.config import CACHE_DB, NBA_API_DB
+from src.feature_engineering.roster_continuity import build_continuity_table, lookup_for_games
 from src.pbp.features import build_pbp_rolling_features
 from src.utils.config_loader import InjuryMissingValueStrategy, load_config
 
@@ -119,6 +120,7 @@ class FeatureBuilder:
         df = self._add_style_fingerprint_features(df)
         df = self._add_on_off_splits_features(df)
         df = self._add_pbp_features(df)
+        df = self._add_roster_continuity_features(df)
         df = self._add_season_motivation_features(df, context_end_date)
 
         feature_cols = self._get_feature_columns(df)
@@ -1597,6 +1599,49 @@ class FeatureBuilder:
                     pod_merged["preferred_opponent_delta"].fillna(0.0).values
                 )
 
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_roster_continuity_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        `{home,away}_team_roster_return_{pts,min}` plus their differentials:
+        share of last season's top-N rotation that has played for the team
+        this season (see `src/feature_engineering/roster_continuity.py`).
+
+        Leakage: each game uses the team's latest same-season snapshot dated
+        strictly before GAME_DATE; the prior rotation is entirely last
+        season. NaN before a season's first snapshot (no meaningful default
+        for "not observed yet"; CatBoost handles NaN natively).
+
+        Soft-disabled (warn + skip) when the snapshot DB is missing.
+        """
+        cfg = load_config()
+        rcfg = cfg.roster_continuity
+        if not rcfg or not rcfg.enabled:
+            return df
+
+        db = Path(rcfg.db_path)
+        if not db.exists():
+            logger.warning(f"player_importance DB {db} missing — skipping roster continuity features.")
+            return df
+        with sqlite3.connect(db) as conn:
+            snaps = pd.read_sql(
+                "SELECT player_id, team_id, as_of_date, minutes_per_game, pts_per_game FROM player_importance",
+                conn,
+                parse_dates=["as_of_date"],
+            )
+        table = build_continuity_table(snaps, rcfg.top_n)
+
+        new_cols = {}
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            vals = lookup_for_games(table, df, team_col)
+            new_cols[f"{prefix}_roster_return_pts"] = vals["return_pts"].values
+            new_cols[f"{prefix}_roster_return_min"] = vals["return_min"].values
+        for short in ("pts", "min"):
+            new_cols[f"roster_return_{short}_diff"] = (
+                new_cols[f"home_team_roster_return_{short}"] - new_cols[f"away_team_roster_return_{short}"]
+            )
+        coverage = 1 - pd.isna(new_cols["roster_return_pts_diff"]).mean()
+        logger.info(f"Roster continuity features: top {rcfg.top_n}, {coverage:.1%} of games have both teams covered")
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_pbp_features(self, df: pd.DataFrame) -> pd.DataFrame:

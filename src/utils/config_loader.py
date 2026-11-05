@@ -318,6 +318,19 @@ class AvailabilityAgentConfig(BaseModel):
     parallel_workers: int = 10
 
 
+class RosterContinuityConfig(BaseModel):
+    """Share of last season's top-`top_n` rotation (by minutes) that has
+    played for the team this season, weighted by points and by minutes
+    (`src/feature_engineering/roster_continuity.py`). Targets the blind spot
+    where departures and season-long injuries leave Elo/rolling form
+    describing a roster that no longer plays. Ships disabled pending the CV
+    ablation."""
+
+    enabled: bool = False
+    top_n: int = 8
+    db_path: str = "data/raw/injury_features.sqlite"
+
+
 class PBPConfig(BaseModel):
     """Play-by-play possession table (src/pbp/). Raw PlayByPlayV3 events and
     the derived per-possession rows live in their own additive sqlite file.
@@ -381,6 +394,7 @@ class Config(BaseModel):
     availability_agent: Optional[AvailabilityAgentConfig] = None
     prediction_intervals: Optional[PredictionIntervalsConfig] = None
     pbp: Optional[PBPConfig] = None
+    roster_continuity: Optional[RosterContinuityConfig] = None
     cv: Optional[CVConfig] = None
     notifications: Optional[NotificationsConfig] = None
 

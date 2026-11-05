@@ -18,6 +18,7 @@ from src.feature_engineering.feature_builder import FeatureBuilder
 def _mock_config():
     mock_cfg = MagicMock()
     mock_cfg.elo_features = MagicMock(enabled=False)
+    mock_cfg.roster_continuity = MagicMock(enabled=False)
     mock_cfg.injury_features = MagicMock(enabled=False)
     mock_cfg.style_matchup = MagicMock(enabled=False, raw_features_enabled=False)
     mock_cfg.features.exclude = []

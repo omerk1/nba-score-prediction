@@ -457,6 +457,15 @@ prediction_intervals:
   # Miscoverage rate -> nominal (1-alpha) coverage. 0.1 = 90% intervals.
   alpha: 0.1
 
+roster_continuity:
+  # Share of last season's top-8 rotation (by minutes) that has played for
+  # the team this season, points- and minutes-weighted, from the weekly
+  # player_importance snapshots. Catches departures and season-long injuries
+  # that Elo/rolling form and the injury deficit miss.
+  enabled: false
+  top_n: 8
+  db_path: "data/raw/injury_features.sqlite"
+
 pbp:
   # Play-by-play possession table (src/pbp/, scripts/backfill_pbp.py). Raw
   # PlayByPlayV3 events plus one row per possession (team with the ball,
