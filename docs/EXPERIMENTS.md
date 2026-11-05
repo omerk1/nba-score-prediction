@@ -633,3 +633,13 @@ injury counts to the wrong game entirely.
 - **Result** (val_score, off → on): fold4 1.3372 → 1.3407 (+0.0035), fold5 1.3526 → 1.3557 (+0.0031). Early-season val diff MAE: fold4 10.118 → 10.120, fold5 10.018 → 10.005. Worse on both folds, roughly 1-2 reseed SDs; no early-season gain.
 - **Conclusion**: rejected. L5/L10 and Elo momentum already carry recent form. Code is on the unmerged branch `feature/recency-weighted-form`.
 - **Next**: no halflife sweep or full CV. The Charlotte/Clippers gap is more likely roster/injury information the market prices and the model lacks, or small-sample noise, than window weighting.
+
+## elo_resid_form (session 20261105_0922_elo-resid-form)
+
+- **Hypothesis**: on the held-out 2025-26 season (fold5 test, market-benchmark join), the trained model's margin errors persist by team: a team's mean error over its previous 10 games correlates +0.08 with its next error (n=2,150), and a post-hoc correction fit on the first half cut second-half diff MAE 11.86 → 11.78. The same signal correlates +0.06 with actual − line, so the line partly misses it too. A point-in-time proxy that doesn't use the model's own in-sample errors: per-team mean of (actual − Elo-expected margin) over the last 10 games, expected margin = Elo diff incl. home advantage / 28. Pre-check on that season: +0.105 with model error, +0.061 with actual − line (L5/L20 weaker).
+- **Method**: `elo_residual_form.enabled` (`compute_elo_residual_form`, shift(1) before rolling, computed over full history up to the split's end date), `scripts/run_elo_residual_form_ablation.py`, folds 4-5 screen. Validation seasons (2023-24, 2024-25) don't overlap the season the hypothesis came from.
+- **Result** (val_score, off → on):
+  - Home, away and diff columns (3): fold4 1.3372 → 1.3409 (+0.0037), fold5 1.3526 → 1.3549 (+0.0023). Worse on both folds; total MAE up on both.
+  - Diff column only (1): fold4 1.3372 → 1.3362 (−0.0010), fold5 1.3526 → 1.3524 (−0.0002). Mean −0.0006, inside the reseed noise (fold SD 0.0020 / 0.0042).
+- **Conclusion**: rejected (two variants). The persistence in held-out errors is real but small, and the model doesn't turn it into a measurable gain; existing Elo, Elo momentum and L5/L10 margins already carry most of it. No full CV: even a consistent −0.0006 would sit below the 5-fold noise floor (SD 0.0016). Code is on the unmerged branch `feature/elo-residual-form`.
+- **Next**: a post-hoc correction of the trained model's predictions (where the held-out gain was measured) is a different design, a stacking layer fit on out-of-fold residuals, and would need its own harness support. Not scheduled.

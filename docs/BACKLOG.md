@@ -164,6 +164,16 @@ gain. Code on unmerged branch `feature/recency-weighted-form`; write-up in
 
 ---
 
+## Elo-residual team form (rejected 2026-11-05)
+
+Per-team mean of (actual − Elo-expected margin) over the last 10 games, aimed
+at the model's held-out errors persisting by team. Full version worse on folds
+4-5 (+0.0037/+0.0023); diff-only column flat (−0.0010/−0.0002, inside noise).
+Code on unmerged branch `feature/elo-residual-form`; write-up in
+`docs/EXPERIMENTS.md` (`elo_resid_form`).
+
+---
+
 ## Notes
 
 - **PR #21 merged** — backfill resilience (backfill_player_stats.py retry logic, recover_failed_backfill.py)

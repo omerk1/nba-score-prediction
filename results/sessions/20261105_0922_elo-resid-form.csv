@@ -1,0 +1,5 @@
+timestamp,run_name,val_score_mean,val_score_per_fold,test_score_mean,protocol,session_id,notes
+2026-11-05 07:29 UTC,elo_resid_form_off_last2,1.3449,"1.3372,1.3526",1.3399,cv,20261105_0922_elo-resid-form,"elo_residual_form.enabled=False; windows=[10]; folds=fold4,fold5"
+2026-11-05 07:29 UTC,elo_resid_form_on_L10_last2,1.3479,"1.3409,1.3549",1.3393,cv,20261105_0922_elo-resid-form,"elo_residual_form.enabled=True; windows=[10]; folds=fold4,fold5"
+2026-11-05 07:37 UTC,elo_resid_form_off_last2,1.3449,"1.3372,1.3526",1.3399,cv,20261105_0922_elo-resid-form,"elo_residual_form.enabled=False; windows=[10]; diff_only=True; folds=fold4,fold5"
+2026-11-05 07:37 UTC,elo_resid_form_on_L10_diffonly_last2,1.3443,"1.3362,1.3524",1.3413,cv,20261105_0922_elo-resid-form,"elo_residual_form.enabled=True; windows=[10]; diff_only=True; folds=fold4,fold5"
