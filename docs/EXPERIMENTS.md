@@ -625,3 +625,11 @@ injury counts to the wrong game entirely.
 - **Result** (val_score, off → on): fold3 1.3675 → 1.3686 (+0.0012), fold4 1.3411 → 1.3393 (−0.0018), fold5 1.3501 → 1.3505 (+0.0004). Mean Δ −0.0001, treatment better on 1/3 folds. Well inside the measured noise floor.
 - **Conclusion**: no measurable effect on prediction accuracy. Not adopted; flag stays `false`. The fix is still correct for the deficit value itself, but the model barely uses it, consistent with the earlier injury-feature results.
 - **Next**: no full CV (screen is flat). The Oct 30 Clippers miss was not explained by this bug alone; the model's insensitivity to injury deficit is the larger factor.
+
+## recency_form (session 20261105_0832_recency-form)
+
+- **Hypothesis**: the equal-weight L5/L10/L20 windows run across season boundaries, so early in a season L20 is mostly last season's roster. Live model sat ~8 pts above the market on Charlotte and the Clippers (8 games each, both bad this season after decent last seasons). Adding exponentially weighted margin/points-for/points-against (halflife 7 team-games, decaying across seasons) plus current-season-only margin and games played should fix early-season staleness.
+- **Method**: `recency_form.enabled` (12 new columns), folds 4-5 screen, val diff MAE also split into early season (both teams < 20 games) vs. rest.
+- **Result** (val_score, off → on): fold4 1.3372 → 1.3407 (+0.0035), fold5 1.3526 → 1.3557 (+0.0031). Early-season val diff MAE: fold4 10.118 → 10.120, fold5 10.018 → 10.005. Worse on both folds, roughly 1-2 reseed SDs; no early-season gain.
+- **Conclusion**: rejected. L5/L10 and Elo momentum already carry recent form. Code kept unmerged on branch `feature/recency-weighted-form`.
+- **Next**: no halflife sweep or full CV. The Charlotte/Clippers gap is more likely roster/injury information the market prices and the model lacks, or small-sample noise, than window weighting.

@@ -155,6 +155,15 @@ treatment under `--protocol cv`) plus a champion re-check before
 
 ---
 
+## Recency-weighted team form (rejected 2026-11-05)
+
+EWM margin/points (halflife 7 games) + season-to-date margin, aimed at stale
+early-season L20 windows. Worse on folds 4-5 (+0.0035/+0.0031), no early-season
+gain. Code on unmerged branch `feature/recency-weighted-form`; write-up in
+`docs/EXPERIMENTS.md` (`recency_form`).
+
+---
+
 ## Notes
 
 - **PR #21 merged** — backfill resilience (backfill_player_stats.py retry logic, recover_failed_backfill.py)
