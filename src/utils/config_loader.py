@@ -318,6 +318,22 @@ class AvailabilityAgentConfig(BaseModel):
     parallel_workers: int = 10
 
 
+class RecencyFormConfig(BaseModel):
+    """Recency-weighted team form (`_add_recency_form_features`). The
+    equal-weight L5/L10/L20 windows run straight across season boundaries,
+    so early in a season most of L20 is last season's (possibly very
+    different) roster. Adds exponentially weighted margin/points-for/
+    points-against (halflife in team-games, decaying across seasons rather
+    than resetting) and current-season-only margin with a games-played count
+    so the model can learn how much to trust it. Ships disabled pending the
+    CV ablation."""
+
+    enabled: bool = False
+    halflife_games: float = 7.0
+    # Separate flag so EWM and season-to-date form can be ablated independently.
+    season_to_date_enabled: bool = True
+
+
 class PBPConfig(BaseModel):
     """Play-by-play possession table (src/pbp/). Raw PlayByPlayV3 events and
     the derived per-possession rows live in their own additive sqlite file.
@@ -370,6 +386,7 @@ class Config(BaseModel):
     availability_agent: Optional[AvailabilityAgentConfig] = None
     prediction_intervals: Optional[PredictionIntervalsConfig] = None
     pbp: Optional[PBPConfig] = None
+    recency_form: Optional[RecencyFormConfig] = None
     cv: Optional[CVConfig] = None
     notifications: Optional[NotificationsConfig] = None
 

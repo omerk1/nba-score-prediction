@@ -469,6 +469,16 @@ pbp:
   db_path: "data/raw/pbp.sqlite"
   rolling_window: 10
 
+recency_form:
+  # Recency-weighted team form: exponentially weighted margin/points-for/
+  # points-against (decays across seasons instead of resetting) plus
+  # current-season-only margin and games played. Targets early-season
+  # staleness: the equal-weight L20 windows are mostly last season's games
+  # for the first ~20 games of a new season.
+  enabled: false
+  halflife_games: 7.0
+  season_to_date_enabled: true
+
 notifications:
   telegram:
     # One-way Telegram delivery of daily recommendations

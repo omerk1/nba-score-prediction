@@ -106,6 +106,7 @@ class FeatureBuilder:
 
         df = self._add_basic_features(df)
         df = self._add_rolling_features(df)
+        df = self._add_recency_form_features(df)
         df = self._add_rest_features(df)
         df = self._add_style_features(df)
         df = self._add_opponent_quality_features(df)
@@ -225,6 +226,80 @@ class FeatureBuilder:
 
         df.drop(columns=temp_cols, inplace=True)
 
+        return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
+
+    def _add_recency_form_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Recency-weighted, venue-blind team form. The L5/L10/L20 windows are
+        equal-weight and cross season boundaries, so for the first ~20 games
+        of a season most of L20 is last season's roster. Adds:
+
+        - `{home,away}_team_ewm_{margin,pts_for,pts_against}`: exponentially
+          weighted means (halflife = `recency_form.halflife_games` team-games),
+          continuous across seasons -- old games fade instead of being cut.
+        - `{home,away}_team_season_margin` / `_season_games`: current-season
+          margin to date and games played (0 games -> NaN margin), so the
+          model can learn how far to trust the season-to-date number.
+        - `ewm_margin_diff`, `season_margin_diff` differentials.
+
+        Leakage: every value is `shift(1)` within a team's own chronological
+        game sequence, so a game's own outcome never enters its own features.
+        """
+        cfg = load_config()
+        rcfg = cfg.recency_form
+        if not rcfg or not rcfg.enabled:
+            return df
+
+        sides = []
+        for team_col, pts_for, pts_against, sign in [
+            ("HOME_TEAM_ID", "PTS_home", "PTS_away", 1),
+            ("AWAY_TEAM_ID", "PTS_away", "PTS_home", -1),
+        ]:
+            sides.append(
+                pd.DataFrame(
+                    {
+                        "GAME_DATE": df["GAME_DATE"].values,
+                        "SEASON_ID": df["SEASON_ID"].values,
+                        "team_id": df[team_col].values,
+                        "margin": (df["POINT_DIFF"] * sign).values,
+                        "pts_for": df[pts_for].values,
+                        "pts_against": df[pts_against].values,
+                    }
+                )
+            )
+        long_df = pd.concat(sides).sort_values("GAME_DATE", kind="stable").reset_index(drop=True)
+
+        hl = rcfg.halflife_games
+        ewm_cols = []
+        for stat in ["margin", "pts_for", "pts_against"]:
+            col = f"ewm_{stat}"
+            long_df[col] = long_df.groupby("team_id")[stat].transform(
+                lambda x: x.shift(1).ewm(halflife=hl, min_periods=1).mean()
+            )
+            ewm_cols.append(col)
+
+        season_cols = []
+        if rcfg.season_to_date_enabled:
+            grp = long_df.groupby(["team_id", "SEASON_ID"])["margin"]
+            long_df["season_games"] = grp.cumcount()
+            long_df["season_margin"] = grp.transform(lambda x: x.shift(1).expanding().mean())
+            season_cols = ["season_margin", "season_games"]
+
+        out_cols = ewm_cols + season_cols
+        new_cols = {}
+        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+            query = df[["GAME_DATE", team_col]].rename(columns={team_col: "team_id"})
+            merged = query.merge(
+                long_df[["GAME_DATE", "team_id"] + out_cols], on=["GAME_DATE", "team_id"], how="left"
+            )
+            for col in out_cols:
+                new_cols[f"{prefix}_{col}"] = merged[col].values
+
+        new_cols["ewm_margin_diff"] = new_cols["home_team_ewm_margin"] - new_cols["away_team_ewm_margin"]
+        if season_cols:
+            new_cols["season_margin_diff"] = (
+                new_cols["home_team_season_margin"] - new_cols["away_team_season_margin"]
+            )
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
 
     def _add_rest_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -1647,8 +1722,9 @@ class FeatureBuilder:
         new_cols = {}
         for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
             lookup = pd.DataFrame({"team": df[team_col].values, "GAME_ID": df["GAME_ID"].values})
-            merged = lookup.merge(feats[["team", "GAME_ID", "pbp_net_rtg_luckadj"]],
-                                  on=["team", "GAME_ID"], how="left")
+            merged = lookup.merge(
+                feats[["team", "GAME_ID", "pbp_net_rtg_luckadj"]], on=["team", "GAME_ID"], how="left"
+            )
             new_cols[f"{prefix}_pbp_net_rtg_luckadj"] = merged["pbp_net_rtg_luckadj"].values
 
         new_cols["pbp_net_rtg_luckadj_diff"] = (
