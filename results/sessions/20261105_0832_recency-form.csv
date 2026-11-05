@@ -1,0 +1,3 @@
+timestamp,run_name,val_score_mean,val_score_per_fold,test_score_mean,protocol,session_id,notes
+2026-11-05 06:40 UTC,recency_form_off_last2,1.3449,"1.3372,1.3526",1.3399,cv,20261105_0832_recency-form,recency_form.enabled=false; folds=fold4+fold5
+2026-11-05 06:40 UTC,recency_form_hl7_last2,1.3482,"1.3407,1.3557",1.3394,cv,20261105_0832_recency-form,recency_form.enabled=true; halflife_games=7; season_to_date_enabled=true; folds=fold4+fold5
