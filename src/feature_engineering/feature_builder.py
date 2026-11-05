@@ -1631,15 +1631,34 @@ class FeatureBuilder:
             )
         table = build_continuity_table(snaps, rcfg.top_n)
 
+        season_games = {}
+        if rcfg.max_season_games is not None:
+            # Games each team has already played this season before this one.
+            long_df = pd.concat(
+                [
+                    pd.DataFrame({"_row": df.index, "side": side, "team": df[col], "season": df["SEASON_ID"] % 10000,
+                                  "GAME_DATE": df["GAME_DATE"]})
+                    for side, col in (("home", "HOME_TEAM_ID"), ("away", "AWAY_TEAM_ID"))
+                ]
+            ).sort_values("GAME_DATE", kind="stable")
+            long_df["n"] = long_df.groupby(["team", "season"]).cumcount()
+            for side in ("home", "away"):
+                season_games[side] = long_df[long_df.side == side].set_index("_row")["n"].reindex(df.index).values
+
         new_cols = {}
-        for team_col, prefix in [("HOME_TEAM_ID", "home_team"), ("AWAY_TEAM_ID", "away_team")]:
+        for team_col, prefix, side in [("HOME_TEAM_ID", "home_team", "home"), ("AWAY_TEAM_ID", "away_team", "away")]:
             vals = lookup_for_games(table, df, team_col)
-            new_cols[f"{prefix}_roster_return_pts"] = vals["return_pts"].values
-            new_cols[f"{prefix}_roster_return_min"] = vals["return_min"].values
+            for short in ("pts", "min"):
+                v = vals[f"return_{short}"].values.astype(float)
+                if season_games:
+                    v = np.where(season_games[side] < rcfg.max_season_games, v, np.nan)
+                new_cols[f"{prefix}_roster_return_{short}"] = v
         for short in ("pts", "min"):
             new_cols[f"roster_return_{short}_diff"] = (
                 new_cols[f"home_team_roster_return_{short}"] - new_cols[f"away_team_roster_return_{short}"]
             )
+        if rcfg.diff_only:
+            new_cols = {"roster_return_pts_diff": new_cols["roster_return_pts_diff"]}
         coverage = 1 - pd.isna(new_cols["roster_return_pts_diff"]).mean()
         logger.info(f"Roster continuity features: top {rcfg.top_n}, {coverage:.1%} of games have both teams covered")
         return pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)

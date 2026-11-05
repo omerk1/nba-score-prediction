@@ -329,6 +329,12 @@ class RosterContinuityConfig(BaseModel):
     enabled: bool = False
     top_n: int = 8
     db_path: str = "data/raw/injury_features.sqlite"
+    # Blank out a team's values once it has played this many games this
+    # season (None = keep all season). Rolling form catches up with the
+    # current roster after a few weeks, so the signal is early-season.
+    max_season_games: Optional[int] = None
+    # Emit only roster_return_pts_diff instead of all six columns.
+    diff_only: bool = False
 
 
 class PBPConfig(BaseModel):

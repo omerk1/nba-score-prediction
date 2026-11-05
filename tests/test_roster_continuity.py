@@ -88,3 +88,33 @@ def test_lookup_preserves_row_order_and_playoff_season_id():
     )
     out = lookup_for_games(table, games, "HOME_TEAM_ID")
     assert out.return_pts.tolist() == pytest.approx([0.5, 0.25])
+
+
+def test_hook_early_season_cutoff_and_diff_only(tmp_path):
+    import sqlite3
+    from unittest.mock import MagicMock, patch
+
+    from src.feature_engineering.feature_builder import FeatureBuilder
+
+    db = tmp_path / "imp.sqlite"
+    with sqlite3.connect(db) as conn:
+        s = _snapshots()
+        s["as_of_date"] = s["as_of_date"].dt.strftime("%Y-%m-%d")
+        s.to_sql("player_importance", conn, index=False)
+    games = pd.DataFrame(
+        {
+            "GAME_DATE": pd.to_datetime(["2025-11-04", "2025-11-05", "2025-11-06"]),
+            "SEASON_ID": [22025] * 3,
+            "HOME_TEAM_ID": [T1, T2, T1],
+            "AWAY_TEAM_ID": [T2, T1, T2],
+        }
+    )
+    cfg = MagicMock()
+    cfg.roster_continuity = MagicMock(enabled=True, top_n=3, db_path=str(db), max_season_games=2, diff_only=True)
+    with patch("src.feature_engineering.feature_builder.load_config", return_value=cfg):
+        out = FeatureBuilder(rolling_windows=[3])._add_roster_continuity_features(games.copy())
+    assert [c for c in out.columns if "roster" in c] == ["roster_return_pts_diff"]
+    # T1 0.5, T2 0.0 (as of 2025-11-03); each team's 3rd game is blanked.
+    assert out.roster_return_pts_diff[0] == pytest.approx(0.5)
+    assert out.roster_return_pts_diff[1] == pytest.approx(-0.5)
+    assert np.isnan(out.roster_return_pts_diff[2])

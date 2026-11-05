@@ -643,3 +643,13 @@ injury counts to the wrong game entirely.
   - Diff column only (1): fold4 1.3372 → 1.3362 (−0.0010), fold5 1.3526 → 1.3524 (−0.0002). Mean −0.0006, inside the reseed noise (fold SD 0.0020 / 0.0042).
 - **Conclusion**: rejected (two variants). The persistence in held-out errors is real but small, and the model doesn't turn it into a measurable gain; existing Elo, Elo momentum and L5/L10 margins already carry most of it. No full CV: even a consistent −0.0006 would sit below the 5-fold noise floor (SD 0.0016). Code is on the unmerged branch `feature/elo-residual-form`.
 - **Next**: a post-hoc correction of the trained model's predictions (where the held-out gain was measured) is a different design, a stacking layer fit on out-of-fold residuals, and would need its own harness support. Not scheduled.
+
+## roster_continuity (session 20261105_2130_roster-continuity)
+
+- **Hypothesis**: departures and season-long injuries leave Elo/rolling form describing a roster that no longer plays, and the injury deficit scores those players 0 once they have no current-season stats. Charlotte and the Clippers (model ~8 pts above the market early in 2026-27) had the league's 2nd/3rd lowest continuity (0.36/0.39 vs median 0.67). Feature: share of last season's top-8 rotation (by minutes) that has played for the team this season, points- and minutes-weighted, from the weekly `player_importance` snapshots (latest same-season snapshot strictly before the game).
+- **Model-free pre-check** (`scripts/prototype_roster_continuity_precheck.py`, 210 team-seasons 2019-2025, snapshot ~3 weeks in): predicting margin over the next 30 games, returning share adds R² 0.427 → 0.482 (t=+4.7) on top of last-season margin and first-3-weeks margin; positive in all 7 seasons. Incoming production from other teams adds nothing (t=+0.9).
+- **Result** (folds 4-5 screen, val_score; early = both teams < 20 games):
+  - All 6 columns, all season: fold4 1.3372 → 1.3432 (+0.0060), fold5 1.3526 → 1.3568 (+0.0042). Early val diff MAE 10.118 → 10.164, 10.018 → 9.878.
+  - Points-share diff only, blanked after 20 games: fold4 → 1.3383 (+0.0011), fold5 → 1.3586 (+0.0060). Early val diff MAE 10.118 → 10.118, 10.018 → 10.008.
+- **Conclusion**: rejected (two variants, worse on all 4 fold runs). The team-season signal is real but doesn't carry into game-level accuracy: by the time snapshots exist, Elo and rolling form already price most of it, and the remainder is too small against per-game noise. Code not merged (branch `feature/roster-continuity`).
+- **Next**: no further continuity variants. The early-season Charlotte/Clippers gap to the market stays unexplained by features available here.
