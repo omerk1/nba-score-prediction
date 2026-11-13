@@ -203,6 +203,29 @@ Disagreement analysis: on games where the model and market disagree, the market 
 
 ---
 
+## 2026-11-13 — Polymarket's line as model input: does the model add anything to it?
+
+**Question**: use Polymarket's spread/total line inside the model, either blended with the prediction or as the base the model corrects (target `actual − line`). If the model knows anything the market doesn't, this is where it shows up, and since Winner's line ≈ Polymarket's (entry above), it would be the bet against Winner.
+
+**Method**: `scripts/prototype_pm_line_residual.py`. Polymarket spread/total lines exist only for 2025-26 (2024-25 has moneyline only), so this is a one-season prototype, not CV. Champion trained on fold5 (data through 2024-04), so all of 2025-26 is held out. The season is split at 2026-02-01 (724 / 501 games). Each approach is fit on one half and evaluated on the other, both ways: line alone; champion alone; blend `line + a·(model − line)`; CatBoost residual model (champion features + line + model gap → `actual − line`). Bets where `|pred − line|` ≥ 2 pts, at 1.80 (break-even 55.6%). Lines are closing lines.
+
+**Finding — the best prediction is the line itself; the model adds nothing to it**:
+
+| Eval half | Market | Line MAE | Model MAE | Blend `a` | Residual MAE | Residual corr beyond line | Residual bets ≥ 2 pts |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Late | Spread | 10.80 | 11.84 | +0.09 | 11.06 | −0.09 | 215, 45.1% |
+| Early | Spread | 10.82 | 11.10 | −0.21 | 11.10 | −0.02 | 296, 44.3% |
+| Late | Total | 14.37 | 14.67 | −0.19 | 14.62 | +0.01 | 292, 50.7% |
+| Early | Total | 14.90 | 15.82 | +0.33 | 14.98 | +0.11 | 394, 54.3% |
+
+- The line has the lowest MAE in all four cells. The fitted blend weight is ≈ 0 and flips sign between halves, so the optimal blend is the line.
+- The residual model does worse than the line in every cell. Its only positive cell (totals, early half, +0.11, 54.3%) is below break-even and doesn't replicate in the other direction (+0.01, 50.7%).
+- Raw model totals: 57.1% on the late half but 44.8% on the early half — the same sign flip as the 2026-11-04 entry.
+
+**Implication**: with Polymarket's line as input, the model collapses to the line. As a predictor that's better (spread MAE 10.8 vs. 11.1–11.8), but it creates no bet: the line is ≈ Winner's line, and nothing the model adds survives out of sample. Caveats: one season, ~600 games per half, closing rather than morning lines. Not adopted.
+
+---
+
 ## Pending
 
 - None currently open. The venue-thinness/pick'em-competitiveness item (flagged pending as of the 2026-08-17 entry) is now resolved — see the 2026-08-26 recheck above: it did not replicate on a same-population comparison against the current model. The model's-own-confidence item (2026-09-15) is also resolved, negatively, on first pass.
