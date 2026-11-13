@@ -7,6 +7,7 @@
 ## Done
 
 - **Main spread/total, afternoon capture** — negative (2026-11-13, `docs/MARKET_EDGE.md`). Median gap 0.4 pts, 1 of ~320 game-markets positive (+1%). Winner sets these lines off the sharp market.
+- **Step 2, Winner's other markets** — closed, nothing to test (2026-11-13 live probe of the list page's "Other" filter and a game page). Winner's NBA offer is spread, total, half-time/full-time and the odd player-points matchup. There are no moneyline, first-half, alternate-line or prop markets. The extras carry 60% (HT/FT) and 24% (player matchup) margin, vs. 11% on spread/total, which no price gap can overcome.
 
 ## Steps, in order
 
@@ -14,9 +15,9 @@
 
 - Flip `notifications.edge_calibration.enabled` to `true`. The raw spread/total edges hit 49.7% while claiming 67% (2026-11-04 entry).
 - **Threshold: no change.** An edge is already `p − Winner break-even`, so `recommend_min_edge: 0` still means "beats Winner's margin". With the learned weight near 0, spread/total recommendations mostly disappear. That is the intended result.
-- Moneyline edges aren't calibrated by this. Check how they're doing in the morning report before trusting them.
+- Winner lists no NBA moneyline, so every slate pick is a spread/total. With calibration on, the slate shows no bets until the model earns a positive weight.
 
-### 2. Winner's other markets vs. Polymarket (cheap, ~1 week)
+### 2. Winner's other markets vs. Polymarket — closed (see Done)
 
 Soft books are softest outside their headline lines.
 
