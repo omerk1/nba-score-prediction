@@ -19,15 +19,6 @@
 
 ### 2. Winner's other markets vs. Polymarket — closed (see Done)
 
-Soft books are softest outside their headline lines.
-
-1. List what Winner offers per NBA game: first half, quarters, alternate lines, moneyline, player props.
-2. Keep only markets Polymarket also lists (`sportsMarketType`: `first_half_*`, `points`, `rebounds`, `assists`, …).
-3. Extend `winner_lines.py` to parse them. Capture for ~5 game days.
-4. Rerun `scripts/compare_winner_polymarket_lines.py`, generalised per market.
-
-**Go/no-go**: go if any market type shows EV ≥ +3% on ≥ 10% of game-markets. Otherwise close it.
-
 ### 3. Evening capture after injury news (slow, ~3–4 weeks)
 
 The afternoon capture sees both markets after they've had all day to agree. Gaps, if they exist, open when news breaks and Winner reprices slower than Polymarket.
