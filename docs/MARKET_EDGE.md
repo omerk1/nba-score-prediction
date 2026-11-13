@@ -181,6 +181,28 @@ Disagreement analysis: on games where the model and market disagree, the market 
 
 ---
 
+## 2026-11-13 — Line shopping: is Winner's line ever far enough from Polymarket's to bet?
+
+**Question**: the model doesn't beat the market, but the market itself might beat Winner. If Winner's spread/total lines drift from Polymarket's, a bet priced at Polymarket's fair value could be +EV at Winner's odds, with no model involved.
+
+**Method**: `scripts/compare_winner_polymarket_lines.py`. 165 games in `outputs/predictions_log.csv` (2026-10-20 → 11-12). Every Polymarket spread/total line with ≥ $2k volume was priced at the moment Winner was captured (CLOB price history, last point ≤ capture time), not at tip-off. Each line gives a fair margin/total under a normal model (σ 13.5 / 19.5, as in the live job), and these are volume-weighted over lines priced 0.15–0.85 (median 14 lines per game). Winner's line is then priced against that fair value at Winner's odds. No outcomes are used.
+
+**Finding — Winner tracks Polymarket closely, and its margin swamps every gap**:
+
+| Market | n | Median \|gap\| | p90 | ≥ 2 pts | Median best-side EV | Max EV |
+|---|---:|---:|---:|---:|---:|---:|
+| Spread | 165 | 0.38 | 0.81 | 2 | −8.8% | +1.0% |
+| Total | 154 | 0.40 | 1.00 | 0 | −11.2% | −5.4% |
+
+- Mean gap ≈ 0 for both (−0.07 / +0.04 pts): no systematic shading toward one side.
+- 1 of ~320 game-markets is positive at all (+1.0%). Break-even needs ~2 pts on spreads and ~3 on totals. That happened twice on spreads and never on totals.
+
+**Implication**: Winner sets its lines off the sharp market and earns its margin through the odds (1.70–1.85), not by hanging soft lines. No line-shopping edge, so nothing to add to serving. An eighth edge mechanism tested, negative.
+
+**Side finding**: the Polymarket Data API v1 (`/trades`, used by `src/polymarket_prices/data_api.py`) now returns HTTP 410 ("Data API v1 has been retired", migration to `/v2/`). The season collector can't fetch new trades until it's migrated.
+
+---
+
 ## Pending
 
 - None currently open. The venue-thinness/pick'em-competitiveness item (flagged pending as of the 2026-08-17 entry) is now resolved — see the 2026-08-26 recheck above: it did not replicate on a same-population comparison against the current model. The model's-own-confidence item (2026-09-15) is also resolved, negatively, on first pass.
