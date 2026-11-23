@@ -369,11 +369,16 @@ def format_recommended_summary(recs: list[dict], run_label: str, min_edge: float
         reverse=True,
     )
     strong = sum(b["edge"] >= STRONG_EDGE for b in bets)
+    corrected = corrected_summary(recs, min_edge, team_names)
+    if corrected:
+        top = 3  # room for both models' lists within the caption limit
     lines = [
         f"<b>NBA picks · {html.escape(run_label)}</b>",
         f"{len(recs)} games · {len(bets)} recommended bets ({strong} strong, edge ≥ {STRONG_EDGE:.0%})",
         "",
     ]
+    if corrected:
+        lines.append("<b>Live model</b>")
     for b in bets[:top]:
         odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
         lines.append(
@@ -384,31 +389,34 @@ def format_recommended_summary(recs: list[dict], run_label: str, min_edge: float
         lines.append(f"…and {len(bets) - top} more in the page")
     if not bets:
         lines.append("No side has a positive edge today.")
-    corrected = corrected_summary(recs, min_edge, team_names)
     if corrected:
         lines += ["", corrected]
     return "\n".join(lines)[:1000]
 
 
 def corrected_summary(recs: list[dict], min_edge: float, team_names: dict, top: int = 3) -> str:
-    """One caption block: how the corrected model's strong picks
-    (src/serving/residual_shadow.py) differ from the live ones."""
-    from src.serving.residual_shadow import compare_strong_picks
+    """Caption block: the margin-corrected model's own best bets
+    (src/serving/residual_shadow.py); empty when it didn't run."""
+    from src.serving.residual_shadow import corrected_rec
 
-    cmp = compare_strong_picks(recs, min_edge, team_names)
-    if cmp is None:
+    corrected = [c for c in (corrected_rec(r) for r in recs) if c is not None]
+    if not corrected:
         return ""
-    if not cmp["new"] and not cmp["dropped"]:
-        return "🧪 Corrected model (test): same strong picks"
-    lines = ["🧪 <b>Corrected model (test) would bet:</b>"]
-    for b in (cmp["same"] + cmp["new"])[:top]:
+    bets = sorted(
+        (b for rec in corrected for b in recommended_bets(rec, min_edge, team_names)),
+        key=lambda b: b["edge"],
+        reverse=True,
+    )
+    strong = sum(b["edge"] >= STRONG_EDGE for b in bets)
+    lines = [f"🧪 <b>Corrected model (test)</b>: {len(bets)} bets ({strong} strong)"]
+    for b in bets[:top]:
         odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
-        tag = "new" if b in cmp["new"] else "same"
-        lines.append(f"• {html.escape(b['pick'])}{odds} edge {b['edge'] * 100:+.1f}% ({tag})")
-    if not cmp["same"] and not cmp["new"]:
-        lines.append("• nothing strong")
-    for b in cmp["dropped"][:top]:
-        lines.append(f"✗ drops {html.escape(b['pick'])}")
+        lines.append(
+            f"{'✅' if b['edge'] >= STRONG_EDGE else '▫️'} <b>{html.escape(b['pick'])}{odds}</b> "
+            f"({html.escape(b['game'])}) edge {b['edge'] * 100:+.1f}%"
+        )
+    if len(bets) > top:
+        lines.append(f"…and {len(bets) - top} more in the page")
     return "\n".join(lines)
 
 

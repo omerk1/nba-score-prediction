@@ -210,32 +210,22 @@ def _rec(home_edge, corrected_home_edge, parts=None):
     return rec
 
 
-def test_compare_strong_picks_sorts_same_new_dropped():
-    assert S.compare_strong_picks([_rec(0.08, None)], 0.0, TEAMS) is None
-    same = S.compare_strong_picks([_rec(0.08, 0.07)], 0.0, TEAMS)
-    assert [b["pick"] for b in same["same"]] == ["Home -1.5"] and not same["new"] and not same["dropped"]
-    flipped = S.compare_strong_picks([_rec(0.08, -0.06), _rec(0.08, None)], 0.0, TEAMS)
-    assert [b["pick"] for b in flipped["new"]] == ["Away +1.5"]
-    assert [b["pick"] for b in flipped["dropped"]] == ["Home -1.5"]
-    assert flipped["dropped"][0]["edge_after"] == pytest.approx(-0.06)
-    assert flipped["missing"] == 1
-    assert flipped["new"][0]["reasons"] == ["Home on a back-to-back (−2.0 Away)"]
-
-
-def test_slate_and_caption_show_what_the_corrected_model_would_bet(monkeypatch):
-    from src.serving import notify_telegram as T
-
+def test_slate_shows_two_full_sets_of_bets():
     page = render_slate_html([_rec(0.08, -0.06)], TEAMS, "Mon", 0.0)
-    assert "Corrected model (test) would bet" in page and "drops Home -1.5" in page and "Away +1.5" in page
-    assert "Same strong picks" in render_slate_html([_rec(0.08, 0.07)], TEAMS, "Mon", 0.0)
-    assert "Corrected model" not in render_slate_html([_rec(0.08, None)], TEAMS, "Mon", 0.0)
+    live, corrected = page.split("Corrected model (test) · Strong")
+    assert "Live model · Strong" in live and "Home -1.5" in live
+    assert "Away +1.5" in corrected and "Home -1.5" not in corrected.split("All games")[0]
+    # Off or unavailable today: the page is exactly as before.
+    plain = render_slate_html([_rec(0.08, None)], TEAMS, "Mon", 0.0)
+    assert "Corrected" not in plain and "Live model" not in plain
+    assert "Not available for 1 game(s)" in render_slate_html([_rec(0.08, 0.07), _rec(0.08, None)], TEAMS, "Mon", 0.0)
+
+
+def test_caption_lists_both_models(monkeypatch):
+    from src.serving import notify_telegram as T
 
     monkeypatch.setattr(T, "build_team_id_to_name", lambda: TEAMS)
     caption = T.format_recommended_summary([_rec(0.08, -0.06)], "Mon", 0.0)
-    assert (
-        "Corrected model (test) would bet" in caption
-        and "Away +1.5" in caption
-        and "drops Home -1.5" in caption
-    )
-    assert "same strong picks" in T.format_recommended_summary([_rec(0.08, 0.07)], "Mon", 0.0)
+    live, corrected = caption.split("Corrected model (test)")
+    assert "Live model" in live and "Home -1.5" in live and "Away +1.5" in corrected
     assert "Corrected" not in T.format_recommended_summary([_rec(0.08, None)], "Mon", 0.0)

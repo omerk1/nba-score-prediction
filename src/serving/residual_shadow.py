@@ -4,7 +4,7 @@ next to the live model, so it can be judged on real picks before it changes
 any. Each recommendation gets a `residual_correction` entry: the adjustment
 and its parts, the corrected margin, and the spread/moneyline sides priced
 off it by the same code as the live ones (totals aren't corrected). The slate
-shows what the corrected model would bet; the delivered picks, edge
+shows the corrected model's own full set of bets; the delivered picks, edge
 calibration and grading are unchanged.
 
 Point-in-time: each team's recent error comes from re-predicting this
@@ -31,13 +31,8 @@ from src.models.residual_corrector import (
     latest_team_errors,
     rest_inputs,
 )
-from src.serving.recommended_bets import STRONG_EDGE, recommended_bets
 
 logger = logging.getLogger(__name__)
-
-# A part of the adjustment smaller than this (points) isn't worth naming as a reason.
-REASON_MIN_POINTS = 0.5
-
 
 @dataclass
 class CorrectionResources:
@@ -178,51 +173,3 @@ def corrected_rec(rec: dict) -> dict | None:
     is), or None when this game has no correction."""
     entry = rec.get("residual_correction")
     return None if entry is None else {**rec, **entry}
-
-
-def reasons(rec: dict, home: str, away: str) -> list[str]:
-    """Plain-language parts of the adjustment, largest first."""
-    entry = rec.get("residual_correction") or {}
-    out = []
-    for col, pts in sorted(entry.get("parts", {}).items(), key=lambda kv: -abs(kv[1])):
-        if abs(pts) < REASON_MIN_POINTS:
-            continue
-        x = entry["inputs"][col]
-        if col == "b2b_diff":
-            text = f"{home if x > 0 else away} on a back-to-back"
-        elif col == "dense_diff":
-            text = f"{home if x > 0 else away} played more games in the last 4 nights"
-        elif col == "rest_diff":
-            text = f"{home if x > 0 else away} more rested"
-        else:
-            text = f"model has underrated {home if pts > 0 else away} lately"
-        out.append(f"{text} ({'+' if pts > 0 else '−'}{abs(pts):.1f} {home if pts > 0 else away})")
-    return out
-
-
-def compare_strong_picks(recs: list[dict], min_edge: float, team_names: dict) -> dict | None:
-    """Strong picks of the corrected model against the live ones. None when
-    no game has a correction (off, or unavailable today)."""
-    corrected = [(r, corrected_rec(r)) for r in recs]
-    if all(c is None for _, c in corrected):
-        return None
-    out = {"same": [], "new": [], "dropped": [], "missing": 0}
-    for rec, crec in corrected:
-        if crec is None:
-            out["missing"] += 1
-            continue
-        home = str(team_names.get(rec["home_team_id"], rec["home_team_id"]))
-        away = str(team_names.get(rec["away_team_id"], rec["away_team_id"]))
-        why = reasons(rec, home, away)
-        live = {b["pick"]: b for b in recommended_bets(rec, min_edge, team_names) if b["edge"] >= STRONG_EDGE}
-        all_corr = {b["pick"]: b for b in recommended_bets(crec, -1.0, team_names)}
-        strong_corr = {k: b for k, b in all_corr.items() if b["edge"] >= STRONG_EDGE and b["edge"] > min_edge}
-        for pick, b in strong_corr.items():
-            out["same" if pick in live else "new"].append({**b, "reasons": why})
-        for pick, b in live.items():
-            if pick not in strong_corr:
-                after = all_corr.get(pick, {}).get("edge")
-                out["dropped"].append({**b, "edge_after": after, "reasons": why})
-    for k in ("same", "new", "dropped"):
-        out[k].sort(key=lambda b: b["edge"], reverse=True)
-    return out
