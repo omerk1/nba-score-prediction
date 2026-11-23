@@ -21,12 +21,8 @@ def tracked(tmp_path, monkeypatch):
     monkeypatch.setattr(daily_job, "LOG_DIR", tmp_path / "logs")
     monkeypatch.setattr(daily_job, "SUCCESS_MARKER", tmp_path / "marker")
     monkeypatch.setattr(daily_job, "refresh_data", lambda: calls["order"].append("refresh") or 0)
-    monkeypatch.setattr(
-        daily_job, "capture", lambda: calls["order"].append("capture") or Path("shot.png")
-    )
-    monkeypatch.setattr(
-        daily_job, "extract", lambda p: calls["order"].append("extract") or [PICK, PICK]
-    )
+    monkeypatch.setattr(daily_job, "capture", lambda: calls["order"].append("capture") or Path("shot.png"))
+    monkeypatch.setattr(daily_job, "extract", lambda p: calls["order"].append("extract") or [PICK, PICK])
     monkeypatch.setattr(daily_job, "missing_on_winner", lambda picks: [])
     monkeypatch.setattr(
         daily_job,
@@ -37,16 +33,18 @@ def tracked(tmp_path, monkeypatch):
     monkeypatch.setattr(
         daily_job,
         "persist",
-        lambda recs, run_date: calls["order"].append("persist")
-        or calls["persisted_dates"].append(run_date),
+        lambda recs, run_date: calls["order"].append("persist") or calls["persisted_dates"].append(run_date),
     )
     monkeypatch.setattr(
         daily_job,
         "notify",
         lambda recs, run_date: calls["order"].append("notify") or SendStatus.SENT,
     )
+    monkeypatch.setattr(daily_job, "notice", lambda text: calls["notices"].append(text) or SendStatus.SENT)
+    # Never the real outputs/line_snapshots.csv.
+    calls["snapshots"] = []
     monkeypatch.setattr(
-        daily_job, "notice", lambda text: calls["notices"].append(text) or SendStatus.SENT
+        daily_job, "snapshot", lambda picks, label: calls["snapshots"].append((len(picks), label))
     )
     return calls
 
@@ -91,6 +89,7 @@ class TestRunDailyJob:
         assert run_daily_job() == 0
         assert tracked["order"] == ["refresh", "capture", "extract", "recommend", "persist", "notify"]
         assert tracked["notices"] == []
+        assert tracked["snapshots"] == [(2, "afternoon")]
 
     def test_lock_held_exits_quietly_without_running(self, tracked, monkeypatch, tmp_path):
         held = acquire_lock(tmp_path / "lock")
@@ -140,9 +139,7 @@ class TestRunDailyJob:
         assert any("1 of 1 scheduled game(s) not found on Winner" in n for n in tracked["notices"])
 
     def test_partial_recommend_failures_still_send_with_note(self, tracked, monkeypatch):
-        monkeypatch.setattr(
-            daily_job, "recommend_all", lambda picks: ([{"rec": 1}], ["1 vs 2: no history"])
-        )
+        monkeypatch.setattr(daily_job, "recommend_all", lambda picks: ([{"rec": 1}], ["1 vs 2: no history"]))
         assert run_daily_job() == 0
         assert "notify" in tracked["order"]
         assert any("skipped" in n for n in tracked["notices"])
@@ -264,9 +261,7 @@ class TestScheduledWindowAndMarkerDate:
         monkeypatch.setattr(daily_job, "_now", lambda: now["t"])
         return now
 
-    def test_marker_records_start_date_for_run_straddling_midnight(
-        self, tracked, clock, monkeypatch
-    ):
+    def test_marker_records_start_date_for_run_straddling_midnight(self, tracked, clock, monkeypatch):
         clock["t"] = datetime.datetime(2026, 10, 15, 23, 50)
 
         def slow_refresh():
@@ -297,9 +292,7 @@ class TestScheduledWindowAndMarkerDate:
             (datetime.datetime(2026, 10, 16, 3, 15), "2026-10-15"),
         ],
     )
-    def test_scheduled_run_starting_outside_window_reports_missed(
-        self, tracked, clock, started, missed
-    ):
+    def test_scheduled_run_starting_outside_window_reports_missed(self, tracked, clock, started, missed):
         clock["t"] = started
         assert run_daily_job(scheduled=True) == 1
         assert tracked["order"] == []
@@ -312,9 +305,7 @@ class TestScheduledWindowAndMarkerDate:
         assert run_daily_job() == 0
         assert tracked["order"][-1] == "notify"
 
-    def test_scheduled_refresh_finishing_past_deadline_reports_missed(
-        self, tracked, clock, monkeypatch
-    ):
+    def test_scheduled_refresh_finishing_past_deadline_reports_missed(self, tracked, clock, monkeypatch):
         def slow_refresh():
             tracked["order"].append("refresh")
             clock["t"] = datetime.datetime(2026, 10, 16, 3, 57)
@@ -346,9 +337,7 @@ class TestScheduledWindowAndMarkerDate:
         assert run_daily_job(scheduled=True) == 0
         assert tracked["order"][-1] == "notify"  # the 16th still runs
 
-    def test_scheduled_stall_after_refresh_reports_missed_before_sending(
-        self, tracked, clock, monkeypatch
-    ):
+    def test_scheduled_stall_after_refresh_reports_missed_before_sending(self, tracked, clock, monkeypatch):
         def stalled_capture():
             tracked["order"].append("capture")
             clock["t"] = datetime.datetime(2026, 10, 16, 3, 30)
@@ -374,3 +363,13 @@ def test_prune_old_slates_removes_only_pages_past_retention(tmp_path):
 
 def test_prune_old_slates_missing_dir_is_noop(tmp_path):
     assert prune_old_slates(tmp_path / "nope") == 0
+
+
+def test_snapshot_failure_never_costs_the_slate(monkeypatch, tmp_path):
+    import src.serving.line_snapshots as L
+
+    bad = tmp_path / "snap.csv"
+    bad.write_text("wrong,header\n")
+    monkeypatch.setattr(L, "SNAPSHOT_PATH", bad)
+    daily_job.snapshot([{"home_team_id": 1, "away_team_id": 2}], "afternoon")  # logs, doesn't raise
+    assert bad.read_text() == "wrong,header\n"
