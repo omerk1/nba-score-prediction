@@ -384,7 +384,32 @@ def format_recommended_summary(recs: list[dict], run_label: str, min_edge: float
         lines.append(f"…and {len(bets) - top} more in the page")
     if not bets:
         lines.append("No side has a positive edge today.")
+    corrected = corrected_summary(recs, min_edge, team_names)
+    if corrected:
+        lines += ["", corrected]
     return "\n".join(lines)[:1000]
+
+
+def corrected_summary(recs: list[dict], min_edge: float, team_names: dict, top: int = 3) -> str:
+    """One caption block: how the corrected model's strong picks
+    (src/serving/residual_shadow.py) differ from the live ones."""
+    from src.serving.residual_shadow import compare_strong_picks
+
+    cmp = compare_strong_picks(recs, min_edge, team_names)
+    if cmp is None:
+        return ""
+    if not cmp["new"] and not cmp["dropped"]:
+        return "🧪 Corrected model (test): same strong picks"
+    lines = ["🧪 <b>Corrected model (test) would bet:</b>"]
+    for b in (cmp["same"] + cmp["new"])[:top]:
+        odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
+        tag = "new" if b in cmp["new"] else "same"
+        lines.append(f"• {html.escape(b['pick'])}{odds} edge {b['edge'] * 100:+.1f}% ({tag})")
+    if not cmp["same"] and not cmp["new"]:
+        lines.append("• nothing strong")
+    for b in cmp["dropped"][:top]:
+        lines.append(f"✗ drops {html.escape(b['pick'])}")
+    return "\n".join(lines)
 
 
 def send_document(

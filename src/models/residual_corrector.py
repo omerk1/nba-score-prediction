@@ -26,6 +26,9 @@ import pandas as pd
 
 REST_INPUTS = ["b2b_diff", "rest_diff", "dense_diff"]
 TEAM_ERROR_INPUT = "team_error_diff"
+# Fixed before the screen ran; not tuned.
+ERROR_WINDOW = 10
+ERROR_MIN_GAMES = 3
 
 
 def rest_inputs(df: pd.DataFrame) -> pd.DataFrame:
@@ -40,12 +43,9 @@ def rest_inputs(df: pd.DataFrame) -> pd.DataFrame:
     ).astype(float)
 
 
-def team_error_input(df: pd.DataFrame, pred_diff, window: int = 10, min_games: int = 3) -> np.ndarray:
-    """home team's recent mean error minus away team's, each from its own side.
-
-    `df` needs GAME_DATE, SEASON_ID, HOME_TEAM_ID, AWAY_TEAM_ID and the actual
-    margin POINT_DIFF (used only for games strictly before the row's game).
-    """
+def _team_side_errors(df: pd.DataFrame, pred_diff) -> pd.DataFrame:
+    """One row per team per game, in play order: that team's margin error
+    (actual - predicted) from its own side."""
     err_home = df["POINT_DIFF"].values - np.asarray(pred_diff, dtype=float)
     long_df = pd.concat(
         [
@@ -59,7 +59,16 @@ def team_error_input(df: pd.DataFrame, pred_diff, window: int = 10, min_games: i
     )
     long_df["date"] = np.tile(pd.to_datetime(df["GAME_DATE"]).values, 2)
     long_df["season"] = np.tile(df["SEASON_ID"].values, 2)
-    long_df = long_df.sort_values(["date", "row"], kind="stable")
+    return long_df.sort_values(["date", "row"], kind="stable")
+
+
+def team_error_input(df: pd.DataFrame, pred_diff, window: int = ERROR_WINDOW, min_games: int = ERROR_MIN_GAMES) -> np.ndarray:
+    """home team's recent mean error minus away team's, each from its own side.
+
+    `df` needs GAME_DATE, SEASON_ID, HOME_TEAM_ID, AWAY_TEAM_ID and the actual
+    margin POINT_DIFF (used only for games strictly before the row's game).
+    """
+    long_df = _team_side_errors(df, pred_diff)
     grp = long_df.groupby(["season", "team"])["err"]
     prior_mean = grp.transform(lambda x: x.shift(1).rolling(window, min_periods=min_games).mean())
     long_df["recent"] = prior_mean.fillna(0.0)
@@ -68,8 +77,22 @@ def team_error_input(df: pd.DataFrame, pred_diff, window: int = 10, min_games: i
     return home - away
 
 
+def latest_team_errors(played: pd.DataFrame, pred_diff, window: int = ERROR_WINDOW, min_games: int = ERROR_MIN_GAMES) -> dict:
+    """What `team_error_input` would give each team's next game this season:
+    team id -> mean error over its last `window` played games (0 below
+    `min_games`). `played` holds one season's already-played games."""
+    if played.empty:
+        return {}
+    long_df = _team_side_errors(played, pred_diff)
+    out = {}
+    for team, errs in long_df.groupby("team")["err"]:
+        recent = errs.tail(window)
+        out[int(team)] = float(recent.mean()) if len(recent) >= min_games else 0.0
+    return out
+
+
 def build_inputs(
-    df: pd.DataFrame, pred_diff, use_team_error: bool, window: int = 10, min_games: int = 3
+    df: pd.DataFrame, pred_diff, use_team_error: bool, window: int = ERROR_WINDOW, min_games: int = ERROR_MIN_GAMES
 ) -> pd.DataFrame:
     X = rest_inputs(df)
     if use_team_error:
@@ -91,3 +114,10 @@ class ResidualCorrector:
 
     def adjustment(self, X: pd.DataFrame) -> np.ndarray:
         return X[list(self.columns)].to_numpy(dtype=float) @ np.asarray(self.coef)
+
+    def to_dict(self) -> dict:
+        return {"columns": list(self.columns), "coef": list(self.coef)}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ResidualCorrector":
+        return cls(tuple(d["columns"]), tuple(float(c) for c in d["coef"]))

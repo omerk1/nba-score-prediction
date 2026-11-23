@@ -1,0 +1,27 @@
+{
+  "columns": [
+    "b2b_diff",
+    "rest_diff",
+    "dense_diff",
+    "team_error_diff"
+  ],
+  "coef": [
+    -1.9499419153588993,
+    -0.02714532161484467,
+    -2.757118871132788,
+    0.08410595910745888
+  ],
+  "alpha": 10.0,
+  "error_window": 10,
+  "error_min_games": 3,
+  "fitted_on": [
+    "fold1",
+    "fold2",
+    "fold3",
+    "fold4",
+    "fold5"
+  ],
+  "fit_games": 5995,
+  "model_trained_at": "2026-09-25 07:08 UTC",
+  "created_at": "2026-11-23T17:57:43+00:00"
+}

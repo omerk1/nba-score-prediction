@@ -7,6 +7,7 @@ inline CSS, no external requests, light/dark aware.
 import html
 
 from src.serving.recommended_bets import SIDES, STRONG_EDGE, pick_label, recommended_bets
+from src.serving.residual_shadow import compare_strong_picks
 
 _CSS = """
 :root{--bg:#f6f7f9;--card:#fff;--ink:#14171c;--mute:#667085;--line:#e4e7ec;--good:#067647;--goodbg:#e7f6ee}
@@ -108,6 +109,46 @@ def _game_card(rec: dict, team_names: dict, min_edge: float, injuries) -> str:
     )
 
 
+def _corrected_section(recs: list[dict], team_names: dict, min_edge: float) -> str:
+    """What the corrected model (src/serving/residual_shadow.py) would bet,
+    under the live picks. Empty when it's off or unavailable today."""
+    cmp = compare_strong_picks(recs, min_edge, team_names)
+    if cmp is None:
+        return ""
+
+    def line(b: dict, tag: str) -> str:
+        odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
+        why = f'<div class="mute">{_e("; ".join(b["reasons"]))}</div>' if b["reasons"] and tag == "new" else ""
+        return (
+            f'<div class="card"><div class="bet"><b>{_e(b["pick"])}{_e(odds)}</b>'
+            f'<span class="edge">edge {b["edge"] * 100:+.1f}%</span></div>'
+            f'<div class="mute">{_e(b["game"])} · {tag}</div>{why}</div>'
+        )
+
+    body = "".join(line(b, "same") for b in cmp["same"]) + "".join(line(b, "new") for b in cmp["new"])
+    for b in cmp["dropped"]:
+        after = "no price" if b["edge_after"] is None else f"{b['edge_after'] * 100:+.1f}%"
+        why = f" — {'; '.join(b['reasons'])}" if b["reasons"] else ""
+        body += (
+            f'<div class="card weak"><div class="bet"><b>✗ drops {_e(b["pick"])}</b>'
+            f'<span class="edge">edge {b["edge"] * 100:+.1f}% → {after}</span></div>'
+            f'<div class="mute">{_e(b["game"])}{_e(why)}</div></div>'
+        )
+    if not cmp["new"] and not cmp["dropped"]:
+        body = '<div class="card mute">Same strong picks as above.</div>'
+    elif not body:
+        body = '<div class="card mute">No strong picks.</div>'
+    note = (
+        f'<p class="sub">Not available for {cmp["missing"]} game(s).</p>' if cmp["missing"] else ""
+    )
+    return (
+        f"<h2>Corrected model (test) would bet · edge ≥ {STRONG_EDGE:.0%}</h2>"
+        '<p class="sub">Adjusts the margin for back-to-backs, rest and each team\'s recent '
+        "prediction misses. Shown for comparison; the picks above are unchanged.</p>"
+        f"{body}{note}"
+    )
+
+
 def render_slate_html(
     recs: list[dict], team_names: dict, run_label: str, min_edge: float, injuries=None
 ) -> str:
@@ -135,6 +176,6 @@ def render_slate_html(
         f'<p class="sub">{len(recs)} games · {len(bets)} recommended bets ({len(strong)} strong). '
         "Edge = the model's chance of the bet winning minus the chance the odds imply "
         "(break-even). Positive means the model thinks the price is too generous.</p>"
-        f"{picks}<h2>All games — tap to drill down</h2>{games}"
+        f"{picks}{_corrected_section(recs, team_names, min_edge)}<h2>All games — tap to drill down</h2>{games}"
         "</main></body></html>"
     )

@@ -155,6 +155,17 @@ treatment under `--protocol cv`) plus a champion re-check before
 
 ---
 
+## Second-stage margin correction (shadow mode since 2026-11)
+
+Ridge on the model's out-of-sample residual: home−away back-to-back, rest,
+games in 4 nights, each team's recent error. Better on folds 2-5 (−0.0043/
+−0.0066 on folds 4-5) and on the market benchmark. Runs next to the live
+picks (`residual_correction.enabled`), shown on the slate; picks unchanged.
+Review at 300 graded games (`scripts/compare_residual_correction.py`).
+Write-up in `docs/EXPERIMENTS.md` (`residual_correction`).
+
+---
+
 ## Roster continuity (rejected 2026-11-05)
 
 Share of last season's top-8 rotation still playing, from `player_importance`

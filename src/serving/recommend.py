@@ -13,8 +13,10 @@ every CV fold either way). Recomputed fresh from data/features/val_features.csv
 future model refresh can't silently go stale against cached residuals.
 """
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 import pandas as pd
@@ -30,6 +32,11 @@ from src.serving.edge_calibration import shrink_toward_line
 from src.serving.live_features import build_live_game_features
 from src.utils.config_loader import load_config
 
+if TYPE_CHECKING:
+    from src.serving.residual_shadow import CorrectionResources
+
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class PredictionResources:
@@ -42,6 +49,9 @@ class PredictionResources:
     # src/serving/edge_calibration.py). A missing market prices the raw
     # prediction (weight 1).
     gap_weights: dict[str, float] = field(default_factory=dict)
+    # The corrected margin shown next to each pick (src/serving/residual_shadow.py);
+    # None = off, or unavailable today.
+    correction: Optional["CorrectionResources"] = None
 
 
 def load_resources(config=None) -> PredictionResources:
@@ -70,18 +80,81 @@ def load_resources(config=None) -> PredictionResources:
     diff_residuals = diff_true - (val_pred[:, 0] - val_pred[:, 1])
     total_residuals = total_true - (val_pred[:, 0] + val_pred[:, 1])
 
+    from src.serving.residual_shadow import load_correction
+
     return PredictionResources(
         predictor=predictor,
         diff_residuals=diff_residuals,
         diff_bandwidth=silverman_bandwidth(diff_residuals),
         total_residuals=total_residuals,
         total_bandwidth=silverman_bandwidth(total_residuals),
+        correction=load_correction(predictor, config, val_features, val_pred[:, 0] - val_pred[:, 1]),
     )
 
 
 def decimal_odds_to_probability(odds: float) -> float:
     """Implied probability from decimal (European) odds, e.g. 1.80 -> 0.556."""
     return 1.0 / odds
+
+
+def price_margin_markets(
+    diff_pred: float,
+    diff_residuals: np.ndarray,
+    diff_bandwidth: float,
+    spread_weight: float,
+    home_spread: float = None,
+    home_spread_odds: float = None,
+    away_spread_odds: float = None,
+    home_moneyline_odds: float = None,
+    away_moneyline_odds: float = None,
+) -> dict:
+    """Win probability plus the moneyline and spread fields priced off one
+    predicted home margin. One function so the live prediction and the
+    corrected one shown next to it (src/serving/residual_shadow.py) are
+    priced identically."""
+    result = {"home_win_probability": win_probability(diff_pred, diff_residuals, diff_bandwidth)}
+
+    if home_moneyline_odds is not None:
+        result["home_moneyline_odds"] = home_moneyline_odds
+        result["home_moneyline_market_probability"] = decimal_odds_to_probability(home_moneyline_odds)
+        result["home_moneyline_edge"] = (
+            result["home_win_probability"] - result["home_moneyline_market_probability"]
+        )
+    if away_moneyline_odds is not None:
+        away_win_prob = 1 - result["home_win_probability"]
+        result["away_win_probability"] = away_win_prob
+        result["away_moneyline_odds"] = away_moneyline_odds
+        result["away_moneyline_market_probability"] = decimal_odds_to_probability(away_moneyline_odds)
+        result["away_moneyline_edge"] = away_win_prob - result["away_moneyline_market_probability"]
+
+    if home_spread is not None:
+        home_cover_prob = cover_probability(
+            shrink_toward_line(diff_pred, -home_spread, spread_weight),
+            -home_spread,
+            diff_residuals,
+            diff_bandwidth,
+        )
+        # The unshrunk price, kept so the model's own picks stay gradable
+        # whatever the slate recommends.
+        raw_home_cover = cover_probability(diff_pred, -home_spread, diff_residuals, diff_bandwidth)
+        result["home_spread"] = home_spread
+        result["spread_gap_weight"] = spread_weight
+        result["home_cover_probability"] = home_cover_prob
+        result["away_cover_probability"] = 1 - home_cover_prob
+        result["home_cover_probability_raw"] = raw_home_cover
+        if home_spread_odds is not None:
+            result["home_spread_odds"] = home_spread_odds
+            result["home_spread_market_probability"] = decimal_odds_to_probability(home_spread_odds)
+            result["home_spread_edge"] = home_cover_prob - result["home_spread_market_probability"]
+            result["home_spread_edge_raw"] = raw_home_cover - result["home_spread_market_probability"]
+        if away_spread_odds is not None:
+            result["away_spread_odds"] = away_spread_odds
+            result["away_spread_market_probability"] = decimal_odds_to_probability(away_spread_odds)
+            result["away_spread_edge"] = (
+                result["away_cover_probability"] - result["away_spread_market_probability"]
+            )
+            result["away_spread_edge_raw"] = (1 - raw_home_cover) - result["away_spread_market_probability"]
+    return result
 
 
 def recommend_game(
@@ -133,54 +206,23 @@ def recommend_game(
         "predicted_away_score": round(float(pred[1]), 1),
         "predicted_diff": round(diff_pred, 1),
         "predicted_total": round(total_pred, 1),
-        "home_win_probability": win_probability(
-            diff_pred, resources.diff_residuals, resources.diff_bandwidth
-        ),
     }
-
-    if home_moneyline_odds is not None:
-        result["home_moneyline_odds"] = home_moneyline_odds
-        result["home_moneyline_market_probability"] = decimal_odds_to_probability(home_moneyline_odds)
-        result["home_moneyline_edge"] = (
-            result["home_win_probability"] - result["home_moneyline_market_probability"]
-        )
-    if away_moneyline_odds is not None:
-        away_win_prob = 1 - result["home_win_probability"]
-        result["away_win_probability"] = away_win_prob
-        result["away_moneyline_odds"] = away_moneyline_odds
-        result["away_moneyline_market_probability"] = decimal_odds_to_probability(away_moneyline_odds)
-        result["away_moneyline_edge"] = away_win_prob - result["away_moneyline_market_probability"]
-
-    if home_spread is not None:
-        weight = resources.gap_weights.get("spread", 1.0)
-        home_cover_prob = cover_probability(
-            shrink_toward_line(diff_pred, -home_spread, weight),
-            -home_spread,
+    margin_markets = dict(
+        home_spread=home_spread,
+        home_spread_odds=home_spread_odds,
+        away_spread_odds=away_spread_odds,
+        home_moneyline_odds=home_moneyline_odds,
+        away_moneyline_odds=away_moneyline_odds,
+    )
+    result.update(
+        price_margin_markets(
+            diff_pred,
             resources.diff_residuals,
             resources.diff_bandwidth,
+            resources.gap_weights.get("spread", 1.0),
+            **margin_markets,
         )
-        # The unshrunk price, kept so the model's own picks stay gradable
-        # whatever the slate recommends.
-        raw_home_cover = cover_probability(
-            diff_pred, -home_spread, resources.diff_residuals, resources.diff_bandwidth
-        )
-        result["home_spread"] = home_spread
-        result["spread_gap_weight"] = weight
-        result["home_cover_probability"] = home_cover_prob
-        result["away_cover_probability"] = 1 - home_cover_prob
-        result["home_cover_probability_raw"] = raw_home_cover
-        if home_spread_odds is not None:
-            result["home_spread_odds"] = home_spread_odds
-            result["home_spread_market_probability"] = decimal_odds_to_probability(home_spread_odds)
-            result["home_spread_edge"] = home_cover_prob - result["home_spread_market_probability"]
-            result["home_spread_edge_raw"] = raw_home_cover - result["home_spread_market_probability"]
-        if away_spread_odds is not None:
-            result["away_spread_odds"] = away_spread_odds
-            result["away_spread_market_probability"] = decimal_odds_to_probability(away_spread_odds)
-            result["away_spread_edge"] = (
-                result["away_cover_probability"] - result["away_spread_market_probability"]
-            )
-            result["away_spread_edge_raw"] = (1 - raw_home_cover) - result["away_spread_market_probability"]
+    )
 
     if total_line is not None:
         weight = resources.gap_weights.get("total", 1.0)
@@ -190,7 +232,9 @@ def recommend_game(
             resources.total_residuals,
             resources.total_bandwidth,
         )
-        raw_over = cover_probability(total_pred, total_line, resources.total_residuals, resources.total_bandwidth)
+        raw_over = cover_probability(
+            total_pred, total_line, resources.total_residuals, resources.total_bandwidth
+        )
         result["total_line"] = total_line
         result["total_gap_weight"] = weight
         result["over_probability"] = over_prob
@@ -211,6 +255,20 @@ def recommend_game(
         diff_pred, resources.diff_residuals, resources.diff_bandwidth, lo=-heatmap_range, hi=heatmap_range
     )
     result["margin_heatmap"] = {int(m): round(float(p), 5) for m, p in zip(margins, probs)}
+
+    if resources.correction is not None:
+        from src.serving.residual_shadow import corrected_entry
+
+        try:
+            result["residual_correction"] = corrected_entry(
+                game_features.iloc[[-1]],
+                diff_pred,
+                resources.correction,
+                resources.gap_weights,
+                margin_markets,
+            )
+        except Exception as e:  # shown for comparison only: never cost the pick
+            logger.error(f"residual correction failed for {home_team_id} vs {away_team_id}: {e}")
 
     return result
 

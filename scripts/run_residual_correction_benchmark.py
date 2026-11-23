@@ -15,7 +15,8 @@ import pandas as pd
 from scipy.stats import norm
 sys.path.insert(0, "."); sys.path.insert(0, "scripts")  # noqa: E702
 import market_benchmark as mb
-from src.models.residual_corrector import ResidualCorrector, build_inputs
+from src.evaluation.residual_correction import fit_on_seasons
+from src.models.residual_corrector import build_inputs
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--cache", required=True)
@@ -34,9 +35,7 @@ def corrected(use_err):
         pred_df, result = cached(cfg, fold)
         tf = result.test_features.reset_index(drop=True)
         assert (tf.GAME_ID.values == pred_df.GAME_ID.values).all()
-        Xh = pd.concat([build_inputs(h, h.pred_diff, use_err) for h in hist], ignore_index=True)
-        rh = np.concatenate([h.POINT_DIFF - h.pred_diff for h in hist])
-        c = ResidualCorrector.fit(Xh, rh, alpha=10.0)
+        c = fit_on_seasons(hist, use_err)
         print("coef", dict(zip(c.columns, np.round(c.coef, 3))))
         adj = c.adjustment(build_inputs(tf, pred_df.model_diff_pred.values, use_err))
         pred_df["model_diff_pred"] = pred_df.model_diff_pred.values + adj

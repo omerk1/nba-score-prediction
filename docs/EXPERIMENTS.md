@@ -653,3 +653,18 @@ injury counts to the wrong game entirely.
   - Points-share diff only, blanked after 20 games: fold4 → 1.3383 (+0.0011), fold5 → 1.3586 (+0.0060). Early val diff MAE 10.118 → 10.118, 10.018 → 10.008.
 - **Conclusion**: rejected (two variants, worse on all 4 fold runs). The team-season signal is real but doesn't carry into game-level accuracy: by the time snapshots exist, Elo and rolling form already price most of it, and the remainder is too small against per-game noise. Code not merged (branch `feature/roster-continuity`).
 - **Next**: no further continuity variants. The early-season Charlotte/Clippers gap to the market stays unexplained by features available here.
+
+## residual_correction (session 20261117_2217_residual-correction)
+
+- **Hypothesis**: the model's out-of-sample errors have general, not team-specific, biases. A bias scan of folds 1-3 validation (3,540 games) found two: back-to-back teams over-rated by 1.26 ± 0.77 pts (−0.59/−1.64/−1.64 by season), and team-season margin errors that persist (excess SD 1.34 pts, first-half vs second-half r 0.31). No bias by home/away, favorite/underdog (calibration slope 1.03) or season phase. Season carryover (stale venue windows) explained 0% of the team bias. Adding `b2b_diff`/`rest_diff` as features was already rejected (2026-08-24), so instead: a second-stage ridge (α=10, no intercept) on the residual, fit on earlier folds' validation predictions. Inputs fixed in advance: home−away back-to-back, rest days (±5), games in 4 nights; variant 2 adds each team's mean error over its last 10 games this season (0 below 3).
+- **Method**: `scripts/run_residual_correction_screen.py`. For fold k, fit on folds < k validation and apply to fold k validation; harness and metric unchanged. Pre-registered: folds 4-5 decide; pass = not worse beyond noise and the targeted bias shrinks on both; at most two variants.
+- **Result** (val_score Δ vs baseline):
+
+  | Variant | fold2 | fold3 | fold4 | fold5 |
+  |---|---|---|---|---|
+  | rest | −0.0022 | −0.0020 | −0.0035 | −0.0040 |
+  | rest + team error | −0.0015 | −0.0009 | −0.0043 | −0.0066 |
+
+  Back-to-back bias folds 4-5: −1.58/−1.69 → −0.36/−0.43. With team error, team excess SD 1.49 → 1.35 and 1.90 → 1.71. Coefficients (fold5 fit): back-to-back −1.7, games in 4 nights −3.1, rest ≈ 0, team error 0.06. Market benchmark (2025-26 test, 1,225 games), baseline → rest+team error: diff MAE 11.40 → 11.36, win accuracy 0.672 → 0.680, Brier 0.2071 → 0.2064.
+- **Conclusion**: passes. Rest + team error selected on validation. Charlotte/Clippers edges barely move (8.4 → 7.2, 6.9 → 6.9 pts); the layer fixes general biases, not those two. Not wired into `--protocol cv` (harness change, needs approval).
+- **Next**: shadow mode in serving (`residual_correction.enabled`, `docs/features/serving/residual_shadow.md`): shown and logged next to the live picks, review at 300 graded games.

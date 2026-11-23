@@ -23,56 +23,12 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from src.evaluation.cv_harness import compute_composite_score, run_split  # noqa: E402
-from src.models.residual_corrector import ResidualCorrector, build_inputs  # noqa: E402
+from src.evaluation.cv_harness import compute_composite_score  # noqa: E402
+from src.evaluation.residual_correction import fit_on_seasons, fold_validation_predictions  # noqa: E402
+from src.models.residual_corrector import build_inputs  # noqa: E402
 from src.utils.config_loader import load_config  # noqa: E402
 
-KEEP = [
-    "GAME_ID",
-    "GAME_DATE",
-    "SEASON_ID",
-    "HOME_TEAM_ID",
-    "AWAY_TEAM_ID",
-    "POINT_DIFF",
-    "home_team_back_to_back",
-    "away_team_back_to_back",
-    "home_team_rest_days",
-    "away_team_rest_days",
-    "home_team_games_in_4_nights",
-    "away_team_games_in_4_nights",
-]
 VARIANTS = {"rest": False, "rest_team_error": True}
-ALPHA = 10.0
-
-
-def fold_predictions(cfg, fold, cache: Path) -> tuple[pd.DataFrame, dict]:
-    p, meta_p = cache / f"{fold.name}_val.pkl", cache / f"{fold.name}_meta.json"
-    if p.exists() and meta_p.exists():
-        return pd.read_pickle(p), json.loads(meta_p.read_text())
-    r = run_split(
-        cfg,
-        fold.train_end_date,
-        fold.validation_start_date,
-        fold.validation_end_date,
-        fold.test_start_date,
-        fold.test_end_date,
-        keep_artifacts=True,
-    )
-    vf = r.val_features
-    pred = r.predictor.predict(vf[r.feature_cols])
-    df = vf[KEEP].copy().reset_index(drop=True)
-    df["pred_diff"] = pred[:, 0] - pred[:, 1]
-    df["pred_total"] = pred[:, 0] + pred[:, 1]
-    y = vf[cfg.features.targets].values
-    df["act_total"] = y[:, 0] + y[:, 1]
-    meta = {
-        "val_score": r.val_score,
-        "naive_diff_mae": r.naive_val_metrics["diff_mae"],
-        "naive_total_mae": r.naive_val_metrics["total_mae"],
-    }
-    df.to_pickle(p)
-    meta_p.write_text(json.dumps(meta))
-    return df, meta
 
 
 def team_side(df: pd.DataFrame, pred_diff) -> pd.DataFrame:
@@ -130,11 +86,10 @@ def main() -> None:
     ap.add_argument("--first-fold", type=int, default=4)
     args = ap.parse_args()
     cache = Path(args.cache)
-    cache.mkdir(parents=True, exist_ok=True)
 
     cfg = load_config()
     folds = cfg.cv.folds
-    preds = {f.name: fold_predictions(cfg, f, cache) for f in folds}
+    preds = {f.name: fold_validation_predictions(cfg, f, cache) for f in folds}
 
     rows = []
     for k in range(args.first_fold - 1, len(folds)):
@@ -159,9 +114,7 @@ def main() -> None:
             }
         )
         for name, use_err in VARIANTS.items():
-            Xh = pd.concat([build_inputs(h, h.pred_diff, use_err) for h in hist], ignore_index=True)
-            rh = np.concatenate([h.POINT_DIFF - h.pred_diff for h in hist])
-            corr = ResidualCorrector.fit(Xh, rh, alpha=ALPHA)
+            corr = fit_on_seasons(hist, use_err)
             new_diff = val.pred_diff + corr.adjustment(build_inputs(val, val.pred_diff, use_err))
             diff_mae = np.abs(val.POINT_DIFF - new_diff).mean()
             score = compute_composite_score(
