@@ -55,3 +55,34 @@ def recommended_bets(rec: dict, min_edge: float, team_names: dict) -> list[dict]
             }
         )
     return sorted(bets, key=lambda b: b["edge"], reverse=True)
+
+
+def polymarket_bets(rec: dict, min_ev: float, team_names: dict) -> list[dict]:
+    """Sides of one game whose expected value at Winner's odds, priced at
+    Polymarket's fair value (src/serving/polymarket_pricing.py), is >= min_ev.
+    Best first. Spread/total only: Winner lists no NBA moneyline."""
+    home = str(team_names.get(rec["home_team_id"], rec["home_team_id"]))
+    away = str(team_names.get(rec["away_team_id"], rec["away_team_id"]))
+    bets = []
+    for market, side, _p, odds_key, _m, edge_key in SIDES:
+        if market == "moneyline":
+            continue
+        prefix = edge_key.removesuffix("_edge")
+        ev = rec.get(f"{prefix}_pm_ev")
+        if ev is None or ev < min_ev:
+            continue
+        bets.append(
+            {
+                "game": f"{away} @ {home}",
+                "home": home,
+                "away": away,
+                "home_team_id": rec["home_team_id"],
+                "away_team_id": rec["away_team_id"],
+                "market": market,
+                "pick": pick_label(market, side, rec, home, away),
+                "odds": rec.get(odds_key),
+                "pm_prob": rec[f"{prefix}_pm_probability"],
+                "pm_ev": ev,
+            }
+        )
+    return sorted(bets, key=lambda b: b["pm_ev"], reverse=True)

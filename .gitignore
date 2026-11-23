@@ -31,6 +31,9 @@ data/processed/*
 # of every delivered recommendation. Can't be rebuilt after the fact, so it's
 # tracked rather than kept as a local-only cache.
 !outputs/predictions_log.csv
+# Winner vs. Polymarket line snapshots (src/serving/line_snapshots.py): same
+# reasoning -- a live record that can't be rebuilt.
+!outputs/line_snapshots.csv
 
 # Play-by-play possession-aggregate persistence screen: one small row per
 # candidate stat per block size, the durable evidence behind which aggregates

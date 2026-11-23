@@ -11,11 +11,13 @@
 
 ## Steps, in order
 
-### 1. Turn on edge calibration in the slate (independent hygiene)
+### 1. Slate bets priced on Polymarket — live
 
-- Flip `notifications.edge_calibration.enabled` to `true`. The raw spread/total edges hit 49.7% while claiming 67% (2026-11-04 entry).
-- **Threshold: no change.** An edge is already `p − Winner break-even`, so `recommend_min_edge: 0` still means "beats Winner's margin". With the learned weight near 0, spread/total recommendations mostly disappear. That is the intended result.
-- Winner lists no NBA moneyline, so every slate pick is a spread/total. With calibration on, the slate shows no bets until the model earns a positive weight.
+Replaces the model-edge picks (53-68, −22.1u by 2026-11-19) with the Winner sides that cost the least against Polymarket's fair value (`src/serving/polymarket_pricing.py`, `notifications.polymarket_pricing`).
+
+- **Bar:** expected value ≥ −7% at Winner's odds, ~1–2 bets a night. Every side is expected to lose (Winner's margin); this picks the cheapest. It is not an edge.
+- Model picks stay on the slate, labelled "for info, not a bet". Edge calibration stays off.
+- The morning report grades these bets against their expected value. If the actual return runs well below expected over ~100 bets, the pricing is off.
 
 ### 2. Winner's other markets vs. Polymarket — closed (see Done)
 
@@ -23,18 +25,18 @@
 
 The afternoon capture sees both markets after they've had all day to agree. Gaps, if they exist, open when news breaks and Winner reprices slower than Polymarket.
 
-1. Add a second Winner capture at ~22:30 Israel time (15:30 ET), after the NBA's afternoon injury report. Earlier than tip-off on purpose: most tips are 02:00–05:30 Israel time, which is no use for manual betting.
-2. Price Polymarket at the same moment, and log both captures to the same file.
-3. Collect ~200 games, then rerun the comparison per capture time.
+**Status: collecting.** `scripts/evening_snapshot.py`, a 22:30 LaunchAgent (runs only if the Mac is awake; no wake schedule). The daily job logs an "afternoon" row per game and the evening job an "evening" row, both priced on Polymarket at capture time, to `outputs/line_snapshots.csv`.
+
+- 22:30 Israel time (15:30 ET), after the NBA's afternoon injury report. Earlier than tip-off on purpose: most tips are 02:00–05:30 Israel time, which is no use for manual betting.
+- After ~200 games: compare the Winner-vs-Polymarket gap per capture time.
 
 **Go/no-go**: same +3% / 10% rule. Also check whether the evening gaps cluster on games with injury-status changes since the afternoon. Clustering there means the mechanism is real.
 
-### 4. If step 2 or 3 passes: paper-trade before real money
+### 4. If step 3 passes: a real edge on the slate
 
-- Add a Polymarket-priced edge to the slate, separate from the model edge, with its own threshold starting at +3% EV and tuned only on graded paper bets.
-- Live Polymarket prices come from the Gamma/CLOB endpoints, which still work.
-- Log and grade every flagged bet. Bet real money only after ≥ 100 graded bets show positive ROI at Winner's actual odds.
+- Raise step 1's bar from −7% to +3% EV, on evening prices.
+- Bet real money on these as an edge only after ≥ 100 graded bets show positive ROI at Winner's actual odds.
 
 ### 5. Deferred: move the Polymarket collector to Data API v2
 
-`src/polymarket_prices/data_api.py` hits the retired v1 `/trades` endpoint (HTTP 410). This blocks only historical backfill and `market_benchmark` for 2026-27, not steps 2–4. Do it only if a step above needs trade-level history.
+`src/polymarket_prices/data_api.py` hits the retired v1 `/trades` endpoint (HTTP 410). This blocks only historical backfill and `market_benchmark` for 2026-27, not steps 1–4 (live prices come from the Gamma/CLOB endpoints). Do it only if a step above needs trade-level history.

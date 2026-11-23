@@ -86,6 +86,10 @@ def grade(log: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
                     # The model's own unshrunk edge. Rows logged before edge
                     # calibration priced the raw prediction, so edge is raw there.
                     "raw_edge": rec.get(f"{edge_key}_raw", rec[edge_key]),
+                    # Polymarket fair-value pricing at slate time (absent on rows
+                    # logged before it existed): probability and expected value.
+                    "pm_prob": rec.get(f"{edge_key.removesuffix('_edge')}_pm_probability"),
+                    "pm_ev": rec.get(f"{edge_key.removesuffix('_edge')}_pm_ev"),
                     "outcome": outcome,
                     "profit": profit,
                     # What the result is measured against: the home margin the

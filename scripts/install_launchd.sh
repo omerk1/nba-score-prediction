@@ -22,6 +22,8 @@ LABEL="com.omerkoren.nba-daily-recommendations"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 MORNING_LABEL="com.omerkoren.nba-morning-report"
 MORNING_PLIST="$HOME/Library/LaunchAgents/$MORNING_LABEL.plist"
+EVENING_LABEL="com.omerkoren.nba-evening-snapshot"
+EVENING_PLIST="$HOME/Library/LaunchAgents/$EVENING_LABEL.plist"
 GUI_DOMAIN="gui/$(id -u)"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
@@ -29,7 +31,9 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     rm -f "$PLIST"
     launchctl bootout "$GUI_DOMAIN/$MORNING_LABEL" 2>/dev/null || true
     rm -f "$MORNING_PLIST"
-    echo "Uninstalled $LABEL and $MORNING_LABEL."
+    launchctl bootout "$GUI_DOMAIN/$EVENING_LABEL" 2>/dev/null || true
+    rm -f "$EVENING_PLIST"
+    echo "Uninstalled $LABEL, $MORNING_LABEL and $EVENING_LABEL."
     echo "To also clear the wake schedule: sudo pmset repeat cancel"
     exit 0
 fi
@@ -128,6 +132,46 @@ fi
 launchctl bootout "$GUI_DOMAIN/$MORNING_LABEL" 2>/dev/null || true
 launchctl bootstrap "$GUI_DOMAIN" "$MORNING_PLIST"
 echo "Installed $MORNING_LABEL (daily 10:00 local)."
+
+# Evening Winner-vs-Polymarket line snapshot (scripts/evening_snapshot.py) at
+# 22:30 local, after the NBA's afternoon injury report. No wake schedule
+# (pmset holds only one): it runs if the Mac is awake, and --scheduled skips
+# a late firing at the next wake.
+cat > "$EVENING_PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>$EVENING_LABEL</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/zsh</string>
+        <string>-c</string>
+        <string>exec /usr/bin/caffeinate -i "$REPO_ROOT/venv/bin/python3" "$REPO_ROOT/scripts/evening_snapshot.py" --scheduled >> "$REPO_ROOT/logs/evening_snapshot_\$(date +%Y-%m-%d).log" 2>&amp;1</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>$REPO_ROOT</string>
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>22</integer>
+        <key>Minute</key>
+        <integer>30</integer>
+    </dict>
+    <key>StandardErrorPath</key>
+    <string>$REPO_ROOT/logs/launchd_evening_snapshot.err.log</string>
+</dict>
+</plist>
+EOF
+if ! plutil -lint "$EVENING_PLIST" >/dev/null; then
+    plutil -lint "$EVENING_PLIST" >&2
+    echo "Generated evening plist is invalid; not reloading $EVENING_LABEL." >&2
+    exit 1
+fi
+launchctl bootout "$GUI_DOMAIN/$EVENING_LABEL" 2>/dev/null || true
+launchctl bootstrap "$GUI_DOMAIN" "$EVENING_PLIST"
+echo "Installed $EVENING_LABEL (daily 22:30 local)."
 
 echo
 echo "Current wake schedule (pmset holds ONE repeating schedule system-wide):"

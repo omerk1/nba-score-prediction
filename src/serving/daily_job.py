@@ -257,17 +257,52 @@ def gap_weights() -> dict[str, float]:
     return {m: w.weight for m, w in fitted.items()}
 
 
+def polymarket_fields(pick: dict) -> dict:
+    """Polymarket fair-value pricing for one pick, or {} when it's off or
+    fails: display/selection only, so it must never cost the slate."""
+    from src.serving.polymarket_pricing import price_pick
+
+    try:
+        return price_pick(pick, pick["game_date"])
+    except Exception as e:
+        logger.warning(f"Polymarket pricing failed for {pick.get('home_team_id')} vs {pick.get('away_team_id')}: {e}")
+        return {}
+
+
+def _polymarket_enabled() -> bool:
+    from src.utils.config_loader import load_config
+
+    return load_config().notifications.polymarket_pricing.enabled
+
+
+def snapshot(picks: list[dict], label: str) -> None:
+    """Best effort: the line-snapshot log is research data, never worth the slate."""
+    from src.serving.line_snapshots import append_snapshot
+
+    try:
+        append_snapshot(picks, label)
+    except Exception as e:
+        logger.error(f"line snapshot ({label}) failed: {e}")
+
+
 def recommend_all(picks: list[dict]) -> tuple[list[dict], list[str]]:
     """Per-pick isolation: early-season games without enough history (or
-    any one bad extraction) must not take down the rest of the slate."""
+    any one bad extraction) must not take down the rest of the slate. With
+    Polymarket pricing on, each pick (and its rec) also gets the fair-value
+    fields."""
     from src.serving.recommend import load_resources, recommend_pick
 
     resources = load_resources()
     resources.gap_weights = gap_weights()
+    price = _polymarket_enabled()
     recs, errors = [], []
     for pick in picks:
+        if price:
+            pick.update(polymarket_fields(pick))
         try:
-            recs.append(recommend_pick(pick, resources, game_date=pick.get("game_date")))
+            rec = recommend_pick(pick, resources, game_date=pick.get("game_date"))
+            rec.update({k: v for k, v in pick.items() if k.startswith("pm_") or "_pm_" in k})
+            recs.append(rec)
         except Exception as e:
             label = f"{pick.get('home_team_id', '?')} vs {pick.get('away_team_id', '?')}"
             logger.error(f"recommendation failed for {label}: {e}")
@@ -389,6 +424,7 @@ def _run(force: bool, scheduled: bool) -> int:
         logger.error(f"saving predictions failed: {e}")
         persist_error = e
 
+    snapshot(picks, "afternoon")
     status = notify(recs, run_date)
     if missing:
         notice(f"Daily job note: {_missing_note(picks, missing)}")
