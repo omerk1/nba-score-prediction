@@ -494,5 +494,5 @@ residual_correction:
   # each team's recent prediction error). Enabled = shown and logged next to
   # every recommendation as what the corrected model would bet; the delivered
   # picks are unchanged. Coefficients: scripts/fit_residual_corrector.py.
-  enabled: false
+  enabled: true
   coefficients_path: "data/models/residual_corrector.json"
