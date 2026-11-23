@@ -359,6 +359,32 @@ def send_recommendations(recs: list[dict], config=None) -> SendStatus:
     return SendStatus.SENT if ok else SendStatus.FAILED
 
 
+def format_polymarket_summary(recs: list[dict], run_label: str, min_ev: float, top: int = 5) -> str:
+    """Caption when Polymarket pricing is on: the cheapest Winner sides."""
+    from src.serving.recommended_bets import polymarket_bets
+
+    team_names = build_team_id_to_name()
+    bets = sorted(
+        (b for rec in recs for b in polymarket_bets(rec, min_ev, team_names)), key=lambda b: b["pm_ev"], reverse=True
+    )
+    lines = [
+        f"<b>NBA picks · {html.escape(run_label)}</b>",
+        f"{len(recs)} games · {len(bets)} bets (Polymarket-priced, expected ≥ {min_ev * 100:+.0f}%)",
+        "",
+    ]
+    for b in bets[:top]:
+        odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
+        lines.append(
+            f"▫️ <b>{html.escape(b['pick'])}{odds}</b> ({html.escape(b['game'])}) expected {b['pm_ev'] * 100:+.1f}%"
+        )
+    if len(bets) > top:
+        lines.append(f"…and {len(bets) - top} more in the page")
+    if not bets:
+        lines.append("No Winner side is close enough to Polymarket's price today.")
+    lines.append("Model picks are in the page, for info only.")
+    return "\n".join(lines)[:1000]
+
+
 def format_recommended_summary(recs: list[dict], run_label: str, min_edge: float, top: int = 5) -> str:
     """Caption for the HTML page (Telegram captions cap at 1024 chars): the
     headline and the best few bets; the page holds everything."""
@@ -435,14 +461,22 @@ def send_slate(
     if not recs:
         logger.info("No recommendations to send")
         return SendStatus.SKIPPED
-    min_edge = (config or load_config()).notifications.recommend_min_edge
+    notifications = (config or load_config()).notifications
+    min_edge = notifications.recommend_min_edge
+    pm = getattr(notifications, "polymarket_pricing", None)
+    pm_min_ev = pm.min_ev if pm is not None and pm.enabled else None
 
     try:
         slug = re.sub(r"\W+", "_", run_label)
         path = Path(reports_dir) / f"{slug}.html"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(render_slate_html(recs, build_team_id_to_name(), run_label, min_edge, injuries), encoding="utf-8")
-        caption = format_recommended_summary(recs, run_label, min_edge)
+        path.write_text(
+            render_slate_html(recs, build_team_id_to_name(), run_label, min_edge, injuries, pm_min_ev), encoding="utf-8"
+        )
+        if pm_min_ev is None:
+            caption = format_recommended_summary(recs, run_label, min_edge)
+        else:
+            caption = format_polymarket_summary(recs, run_label, pm_min_ev)
         if send_html_report(path, caption, config) is SendStatus.SENT:
             return SendStatus.SENT
         logger.error("HTML slate send failed — sending the full text slate instead")
