@@ -6,7 +6,7 @@ inline CSS, no external requests, light/dark aware.
 
 import html
 
-from src.serving.recommended_bets import SIDES, STRONG_EDGE, pick_label, recommended_bets
+from src.serving.recommended_bets import SIDES, STRONG_EDGE, pick_label, polymarket_bets, recommended_bets
 from src.serving.residual_shadow import corrected_rec
 
 _CSS = """
@@ -59,14 +59,27 @@ def _injury_line(injuries, ids_names: list[tuple[int, str]], out_only: bool) -> 
 def _bet_card(b: dict, injuries) -> str:
     weak = b["edge"] < STRONG_EDGE
     odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
-    market = (
-        f"break-even {_pct(b['market_prob'])}" if b["market_prob"] is not None else "no price"
-    )
+    market = f"break-even {_pct(b['market_prob'])}" if b["market_prob"] is not None else "no price"
     return (
         f'<div class="card{" weak" if weak else ""}"><div class="bet"><b>{_e(b["pick"])}{_e(odds)}</b>'
         f'<span class="edge">edge {b["edge"] * 100:+.1f}%</span></div>'
         f'<div class="mute">{_e(b["game"])} · {_e(b["market"])} · model {_pct(b["model_prob"])} · {market}</div>'
-        + _injury_line(injuries, [(b["away_team_id"], b["away"]), (b["home_team_id"], b["home"])], out_only=True)
+        + _injury_line(
+            injuries, [(b["away_team_id"], b["away"]), (b["home_team_id"], b["home"])], out_only=True
+        )
+        + "</div>"
+    )
+
+
+def _pm_card(b: dict, injuries) -> str:
+    odds = f" @{b['odds']:.2f}" if b["odds"] is not None else ""
+    return (
+        f'<div class="card"><div class="bet"><b>{_e(b["pick"])}{_e(odds)}</b>'
+        f'<span class="edge">expected {b["pm_ev"] * 100:+.1f}%</span></div>'
+        f'<div class="mute">{_e(b["game"])} · {_e(b["market"])} · Polymarket {_pct(b["pm_prob"])}</div>'
+        + _injury_line(
+            injuries, [(b["away_team_id"], b["away"]), (b["home_team_id"], b["home"])], out_only=True
+        )
         + "</div>"
     )
 
@@ -93,6 +106,16 @@ def _market_rows(rec: dict, home: str, away: str, min_edge: float) -> str:
     )
 
 
+def _pm_line(rec: dict, home: str, away: str) -> str:
+    parts = []
+    m = rec.get("pm_fair_margin")
+    if m is not None:
+        parts.append(f"{_e(home)} by {m:.1f}" if m >= 0 else f"{_e(away)} by {-m:.1f}")
+    if rec.get("pm_fair_total") is not None:
+        parts.append(f"total {rec['pm_fair_total']:.1f}")
+    return f"<br>Polymarket: {' · '.join(parts)}" if parts else ""
+
+
 def _game_card(rec: dict, team_names: dict, min_edge: float, injuries) -> str:
     home = str(team_names.get(rec["home_team_id"], rec["home_team_id"]))
     away = str(team_names.get(rec["away_team_id"], rec["away_team_id"]))
@@ -103,7 +126,7 @@ def _game_card(rec: dict, team_names: dict, min_edge: float, injuries) -> str:
         f'<details class="card"><summary>{_e(away)} @ {_e(home)}</summary>'
         f'<p class="sub">Model: {_e(home)} {rec["predicted_home_score"]} – {rec["predicted_away_score"]} {_e(away)}'
         f" · {_e(leader)} · total {rec['predicted_total']:.1f}<br>"
-        f"Win chance: {_e(home)} {_pct(win)} · {_e(away)} {_pct(1 - win)}</p>"
+        f"Win chance: {_e(home)} {_pct(win)} · {_e(away)} {_pct(1 - win)}{_pm_line(rec, home, away)}</p>"
         f"{_injury_line(injuries, [(rec['away_team_id'], away), (rec['home_team_id'], home)], out_only=False)}"
         f"{_market_rows(rec, home, away, min_edge)}</details>"
     )
@@ -135,9 +158,12 @@ def _picks_html(bets: list[dict], injuries, title: str = "") -> str:
 
 
 def render_slate_html(
-    recs: list[dict], team_names: dict, run_label: str, min_edge: float, injuries=None
+    recs: list[dict], team_names: dict, run_label: str, min_edge: float, injuries=None, pm_min_ev=None
 ) -> str:
-    """`injuries`: injury_lookup.injuries_for_date result; None = unavailable."""
+    """`injuries`: injury_lookup.injuries_for_date result; None = unavailable.
+    `pm_min_ev`: None = Polymarket pricing off; otherwise the slate's bets are
+    the Polymarket-priced sides at expected value >= it, and the model's
+    edges are shown as info only."""
     bets = _all_bets(recs, min_edge, team_names)
     strong = [b for b in bets if b["edge"] >= STRONG_EDGE]
     # Second, complete set of bets from the margin-corrected model
@@ -157,14 +183,39 @@ def render_slate_html(
     else:
         picks = _picks_html(bets, injuries)
     games = "".join(_game_card(r, team_names, min_edge, injuries) for r in recs)
+    if pm_min_ev is None:
+        sub = (
+            f"{len(recs)} games · {len(bets)} recommended bets ({len(strong)} strong). "
+            "Edge = the model's chance of the bet winning minus the chance the odds imply "
+            "(break-even). Positive means the model thinks the price is too generous."
+        )
+    else:
+        pm = sorted(
+            (b for rec in recs for b in polymarket_bets(rec, pm_min_ev, team_names)),
+            key=lambda b: b["pm_ev"],
+            reverse=True,
+        )
+        priced = sum(any(k.endswith("_pm_ev") for k in r) for r in recs)
+        sub = (
+            f"{len(recs)} games ({priced} priced on Polymarket) · {len(pm)} bets. "
+            "Expected = return per unit staked if Polymarket's price is the true chance. "
+            "Every Winner side is expected to lose a little (Winner's margin); these are the cheapest."
+        )
+        pm_html = f"<h2>Bets · Polymarket-priced, expected ≥ {pm_min_ev * 100:+.0f}%</h2>" + (
+            "".join(_pm_card(b, injuries) for b in pm)
+            or '<div class="card mute">No Winner side is close enough to Polymarket\'s price today.</div>'
+        )
+        picks = pm_html + (
+            "<h2>Model picks — for info, not a bet</h2>"
+            '<p class="mute">The model\'s edges have not held up against results (docs/MARKET_EDGE.md).</p>'
+            + picks
+        )
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>NBA picks {_e(run_label)}</title><style>{_CSS}</style></head><body><main>"
         f"<h1>NBA picks · {_e(run_label)}</h1>"
-        f'<p class="sub">{len(recs)} games · {len(bets)} recommended bets ({len(strong)} strong). '
-        "Edge = the model's chance of the bet winning minus the chance the odds imply "
-        "(break-even). Positive means the model thinks the price is too generous.</p>"
+        f'<p class="sub">{sub}</p>'
         f"{picks}<h2>All games — tap to drill down</h2>{games}"
         "</main></body></html>"
     )

@@ -353,9 +353,19 @@ class EdgeCalibrationConfig(BaseModel):
     z: float = 1.0  # standard errors below the slope estimate to price at
 
 
+class PolymarketPricingConfig(BaseModel):
+    """Prices Winner's sides at Polymarket's fair value
+    (src/serving/polymarket_pricing.py). The slate's bets become the sides
+    with the smallest expected loss; the model's own picks stay as info."""
+
+    enabled: bool = False
+    min_ev: float = -0.07  # a side is a Polymarket-priced pick at expected value >= this
+
+
 class NotificationsConfig(BaseModel):
     telegram: Optional[TelegramNotifyConfig] = None
     edge_calibration: EdgeCalibrationConfig = EdgeCalibrationConfig()
+    polymarket_pricing: PolymarketPricingConfig = PolymarketPricingConfig()
     # A side is a "recommended bet" when the model's edge over the price's
     # break-even probability is above this (src/serving/recommended_bets.py).
     recommend_min_edge: float = 0.0

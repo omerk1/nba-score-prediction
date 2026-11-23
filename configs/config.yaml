@@ -487,6 +487,14 @@ notifications:
     enabled: false
     min_games: 50
     z: 1.0
+  polymarket_pricing:
+    # Price Winner's sides at Polymarket's fair value; the slate's bets are
+    # the sides with expected value >= min_ev (all are expected to lose a
+    # little -- Winner's margin -- this picks the cheapest). The model's own
+    # picks stay on the slate as info. src/serving/polymarket_pricing.py,
+    # evidence in docs/MARKET_EDGE.md (2026-11-13 entries).
+    enabled: true
+    min_ev: -0.07
   recommend_min_edge: 0.0    # model edge over break-even that must be exceeded for a "recommended bet" (0 = any positive edge; >=5% is flagged strong)
 
 residual_correction:

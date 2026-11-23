@@ -72,9 +72,12 @@ def _setup(monkeypatch, tmp_path, transport):
 def test_send_slate_is_a_single_document_message(monkeypatch, tmp_path):
     t = _Transport()
     _setup(monkeypatch, tmp_path, t)
-    assert N.send_slate([REC], "Thu Oct 22", reports_dir=tmp_path) is SendStatus.SENT
+    # The live config prices sides on Polymarket, so the caption lists those bets.
+    rec = {**REC, "home_spread_pm_probability": 0.55, "home_spread_pm_ev": 0.55 * 1.9 - 1}
+    assert N.send_slate([rec], "Thu Oct 22", reports_dir=tmp_path) is SendStatus.SENT
     assert [c[0] for c in t.calls] == ["sendDocument"]
     assert "Lakers -4.5" in t.calls[0][1]["data"]["caption"]
+    assert "Polymarket-priced" in t.calls[0][1]["data"]["caption"]
     assert (tmp_path / "Thu_Oct_22.html").exists()
 
 

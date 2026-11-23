@@ -60,6 +60,7 @@ def build_report(
     min_games: int = 50,
     z: float = 1.0,
     calibration_on: bool = False,
+    pm_min_ev: float | None = None,
 ) -> tuple[str, str] | None:
     """(caption, html page), or None when nothing is graded yet."""
     bets = grade(log, results)
@@ -94,6 +95,32 @@ def build_report(
     all_rec, all_ret = _record(recommended)
     slate_rec, slate_ret = _record(on_slate)
 
+    pm_section, pm_row, pm_caption = "", "", ""
+    if pm_min_ev is not None:
+        pm_all = bets[bets["pm_ev"].notna() & (bets["pm_ev"] >= pm_min_ev)] if "pm_ev" in bets else bets.iloc[0:0]
+        pm_night = pm_all[pm_all["game_date"] == day]
+        rows = []
+        for b in pm_night.sort_values("pm_ev", ascending=False).itertuples():
+            side = {"home": team(b.home_team_id), "away": team(b.away_team_id)}.get(b.side, b.side.title())
+            rows.append(
+                f"<tr><td>{_ICON[b.outcome]} {side} <span class='mute'>({b.market}, "
+                f"{team(b.away_team_id)} @ {team(b.home_team_id)})</span></td>"
+                f'<td class="n">{b.odds:.2f}</td><td class="n">{b.pm_ev * 100:+.1f}%</td></tr>'
+            )
+        n_rec, n_ret = _record(pm_night)
+        a_rec, a_ret = _record(pm_all)
+        expected = f"{pm_all['pm_ev'].mean():+.1%}" if len(pm_all) else "—"
+        pm_section = (
+            f"<h2>Last night's bets (Polymarket-priced, expected ≥ {pm_min_ev * 100:+.0f}%) — {n_rec} ({n_ret})</h2>"
+            '<div class="card"><table><tr><th>Bet</th><th class="n">Odds</th><th class="n">Expected</th></tr>'
+            f'{"".join(rows) or "<tr><td>No bets</td><td></td><td></td></tr>"}</table></div>'
+        )
+        pm_row = (
+            f"<tr><td>Polymarket-priced bets (expected ≥ {pm_min_ev * 100:+.0f}%)</td>"
+            f'<td class="n">{a_rec} · {a_ret} (expected {expected})</td></tr>'
+        )
+        pm_caption = f"Polymarket-priced bets: last night {n_rec} ({n_ret}); all {a_rec} ({a_ret}, expected {expected})\n"
+
     mae_diff, mae_total = games["pred_diff_error"].abs().mean(), games["pred_total_error"].abs().mean()
     # The latest model in the log is the one pricing today's slate.
     trained = log["model_trained_at"].dropna() if "model_trained_at" in log else pd.Series(dtype=object)
@@ -103,6 +130,7 @@ def build_report(
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         f"<title>Morning report {day:%b %d}</title><style>{_CSS}</style></head><body><main>"
         f"<h1>Morning report · games of {day:%a %b %d}</h1>"
+        f"{pm_section}"
         f'<h2>Last night\'s model picks (raw edge ≥ 5%) — {last_rec} ({last_ret})</h2>'
         f'<div class="card"><table><tr><th>Bet</th><th class="n">Odds</th><th class="n">Edge</th></tr>'
         f'{"".join(night_bets) or "<tr><td>No model picks</td><td></td><td></td></tr>"}</table></div>'
@@ -113,6 +141,7 @@ def build_report(
         '<div class="card"><table>'
         f'<tr><td>Typical miss on the winning margin</td><td class="n">{mae_diff:.1f} pts</td></tr>'
         f'<tr><td>Typical miss on total points</td><td class="n">{mae_total:.1f} pts</td></tr>'
+        f"{pm_row}"
         f'<tr><td>Model picks (raw edge ≥ 5%)</td><td class="n">{all_rec} · {all_ret}</td></tr>'
         + (
             f'<tr><td>Recommended on the slate (calibrated edge ≥ 5%)</td><td class="n">{slate_rec} · {slate_ret}</td></tr>'
@@ -135,6 +164,7 @@ def build_report(
     )
     caption = (
         f"<b>Morning report · {day:%a %b %d}</b>\n"
+        f"{pm_caption}"
         f"Last night's model picks: {last_rec} ({last_ret})\n"
         f"All {len(games)} games so far: model picks {all_rec} ({all_ret}); margin miss {mae_diff:.1f} pts\n"
         "Disagreement with the line that came true: "
@@ -152,8 +182,11 @@ def run(out_dir="outputs/slates") -> tuple[str, str] | str:
         return "Morning report: no predictions log yet."
     from src.utils.config_loader import load_config
 
-    cfg = load_config().notifications.edge_calibration
-    built = build_report(pd.read_csv(LOG_PATH), load_results(), cfg.min_games, cfg.z, cfg.enabled)
+    notifications = load_config().notifications
+    cfg, pm = notifications.edge_calibration, notifications.polymarket_pricing
+    built = build_report(
+        pd.read_csv(LOG_PATH), load_results(), cfg.min_games, cfg.z, cfg.enabled, pm.min_ev if pm.enabled else None
+    )
     if built is None:
         return "Morning report: no logged predictions have final scores yet."
     caption, page = built

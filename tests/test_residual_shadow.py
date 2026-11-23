@@ -229,3 +229,10 @@ def test_caption_lists_both_models(monkeypatch):
     live, corrected = caption.split("Corrected model (test)")
     assert "Live model" in live and "Home -1.5" in live and "Away +1.5" in corrected
     assert "Corrected" not in T.format_recommended_summary([_rec(0.08, None)], "Mon", 0.0)
+
+
+def test_with_polymarket_pricing_both_models_sit_in_the_info_section():
+    page = render_slate_html([_rec(0.08, -0.06)], TEAMS, "Mon", 0.0, pm_min_ev=-0.07)
+    bets, info = page.split("Model picks — for info, not a bet")
+    assert "Polymarket-priced" in bets and "Corrected" not in bets
+    assert "Live model · Strong" in info and "Corrected model (test) · Strong" in info
