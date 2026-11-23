@@ -7,6 +7,7 @@ inline CSS, no external requests, light/dark aware.
 import html
 
 from src.serving.recommended_bets import SIDES, STRONG_EDGE, pick_label, polymarket_bets, recommended_bets
+from src.serving.residual_shadow import corrected_rec
 
 _CSS = """
 :root{--bg:#f6f7f9;--card:#fff;--ink:#14171c;--mute:#667085;--line:#e4e7ec;--good:#067647;--goodbg:#e7f6ee}
@@ -131,6 +132,31 @@ def _game_card(rec: dict, team_names: dict, min_edge: float, injuries) -> str:
     )
 
 
+def _all_bets(recs: list[dict], min_edge: float, team_names: dict) -> list[dict]:
+    return sorted(
+        (b for rec in recs for b in recommended_bets(rec, min_edge, team_names)),
+        key=lambda b: b["edge"],
+        reverse=True,
+    )
+
+
+def _picks_html(bets: list[dict], injuries, title: str = "") -> str:
+    """Strong then marginal bets; `title` prefixes each heading."""
+    strong = [b for b in bets if b["edge"] >= STRONG_EDGE]
+    marginal = [b for b in bets if b["edge"] < STRONG_EDGE]
+    prefix = f"{title} · " if title else ""
+    out = ""
+    if strong:
+        out += f"<h2>{_e(prefix)}Strong · edge ≥ {STRONG_EDGE:.0%}</h2>" + "".join(_bet_card(b, injuries) for b in strong)
+    if marginal:
+        out += f"<h2>{_e(prefix)}Marginal · edge 0–{STRONG_EDGE:.0%}</h2>" + "".join(
+            _bet_card(b, injuries) for b in marginal
+        )
+    if not bets:
+        out = (f"<h2>{_e(title)}</h2>" if title else "") + '<div class="card mute">No side has a positive edge today.</div>'
+    return out
+
+
 def render_slate_html(
     recs: list[dict], team_names: dict, run_label: str, min_edge: float, injuries=None, pm_min_ev=None
 ) -> str:
@@ -138,24 +164,24 @@ def render_slate_html(
     `pm_min_ev`: None = Polymarket pricing off; otherwise the slate's bets are
     the Polymarket-priced sides at expected value >= it, and the model's
     edges are shown as info only."""
-    bets = sorted(
-        (b for rec in recs for b in recommended_bets(rec, min_edge, team_names)),
-        key=lambda b: b["edge"],
-        reverse=True,
-    )
+    bets = _all_bets(recs, min_edge, team_names)
     strong = [b for b in bets if b["edge"] >= STRONG_EDGE]
-    marginal = [b for b in bets if b["edge"] < STRONG_EDGE]
-    picks = ""
-    if strong:
-        picks += f"<h2>Strong · edge ≥ {STRONG_EDGE:.0%}</h2>" + "".join(
-            _bet_card(b, injuries) for b in strong
+    # Second, complete set of bets from the margin-corrected model
+    # (src/serving/residual_shadow.py), when it ran today.
+    corrected = [c for c in (corrected_rec(r) for r in recs) if c is not None]
+    if corrected:
+        missing = len(recs) - len(corrected)
+        picks = _picks_html(bets, injuries, "Live model") + _picks_html(
+            _all_bets(corrected, min_edge, team_names), injuries, "Corrected model (test)"
         )
-    if marginal:
-        picks += f"<h2>Marginal · edge 0–{STRONG_EDGE:.0%}</h2>" + "".join(
-            _bet_card(b, injuries) for b in marginal
+        picks += (
+            '<p class="sub">Corrected model: the same model with its margin adjusted for back-to-backs, '
+            "rest and each team's recent prediction misses. Totals are the same in both."
+            + (f" Not available for {missing} game(s)." if missing else "")
+            + "</p>"
         )
-    if not bets:
-        picks = '<div class="card mute">No side has a positive edge today.</div>'
+    else:
+        picks = _picks_html(bets, injuries)
     games = "".join(_game_card(r, team_names, min_edge, injuries) for r in recs)
     if pm_min_ev is None:
         sub = (

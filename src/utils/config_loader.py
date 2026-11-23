@@ -371,6 +371,17 @@ class NotificationsConfig(BaseModel):
     recommend_min_edge: float = 0.0
 
 
+class ResidualCorrectionConfig(BaseModel):
+    """Second-stage margin correction for rest and each team's recent
+    prediction error (src/models/residual_corrector.py). Enabled = the daily
+    job computes it next to every recommendation and shows what it would bet
+    (src/serving/residual_shadow.py); the delivered picks are unchanged."""
+
+    enabled: bool = False
+    # Written by scripts/fit_residual_corrector.py, tagged with the model's train_date.
+    coefficients_path: str = "data/models/residual_corrector.json"
+
+
 class Config(BaseModel):
     """
     Main Configuration Object.
@@ -393,6 +404,7 @@ class Config(BaseModel):
     pbp: Optional[PBPConfig] = None
     cv: Optional[CVConfig] = None
     notifications: Optional[NotificationsConfig] = None
+    residual_correction: ResidualCorrectionConfig = ResidualCorrectionConfig()
 
 
 # --- Loader Functions ---
